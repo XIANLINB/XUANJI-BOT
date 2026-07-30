@@ -8,7 +8,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  *
  * <p>Spring Boot 应用入口，启动后自动扫描并装配所有组件。
  */
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = "dev.xuanji")
 public class XuanjiApplication {
 
     public static void main(String[] args) {
