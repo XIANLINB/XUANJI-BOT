@@ -19,3 +19,7 @@ logging:
   level:
     dev.xuanji: DEBUG
     root: INFO
+
+# 璇玑框架配置
+xuanji:
+  master: ""   # 机器人主人 QQ 号，设置后获得 L0 最高权限

@@ -4,6 +4,7 @@ import dev.xuanji.api.annotation.Command;
 import dev.xuanji.api.annotation.Arg;
 import dev.xuanji.api.annotation.XuanjiPlugin;
 import dev.xuanji.core.command.CommandRegistry;
+import dev.xuanji.core.permission.PermissionService;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,6 +20,7 @@ import org.springframework.stereotype.Component;
 public class DemoPlugin {
 
     private final CommandRegistry commandRegistry;
+    private final PermissionService permissionService;
 
     @PostConstruct
     void init() {
@@ -38,5 +40,12 @@ public class DemoPlugin {
     @Command("帮助")
     public String cmdHelp() {
         return "璇玑演示命令: ping | hello <名字> | 帮助";
+    }
+
+    @Command(value = "黑名单", description = "添加黑名单（仅主人）")
+    public String cmdBlacklist(@Arg("用户ID") String userId) {
+        if (!permissionService.isMaster("Yolo.H")) return "权限不足，仅机器人主人可用";
+        permissionService.addBlacklist("framework", "user", userId, "手动添加", "console");
+        return "已将 " + userId + " 加入黑名单";
     }
 }
