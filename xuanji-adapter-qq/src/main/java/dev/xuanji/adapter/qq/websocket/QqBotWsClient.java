@@ -492,7 +492,7 @@ public class QqBotWsClient {
         try {
             Bot bot = new Bot("qq:" + appId, "qq", appId, dev.xuanji.api.adapter.Bot.Status.ONLINE, java.util.Set.of());
             dev.xuanji.api.event.BotEvent be = dev.xuanji.adapter.qq.converter.QqEventConverter.convert(bot, eventType, data, eventId);
-            log.debug("[BotEvent] 已转换: type={}, user={}, group={}, text={}",
+            log.info("[BotEvent] 已转换: type={}, user={}, group={}, text={}",
                     be.type().fullName(), be.sender().nickname(),
                     be.group() != null ? be.group().groupId() : "私聊",
                     be.message() != null ? be.message().plainText() : "");
