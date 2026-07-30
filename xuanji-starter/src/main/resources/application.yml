@@ -16,6 +16,8 @@ spring:
 
 # 日志
 logging:
+  file:
+    name: logs/xuanji-bot.log
   level:
     dev.xuanji: DEBUG
     root: INFO

@@ -38,7 +38,18 @@ public class DatabaseInitializer {
     @PostConstruct
     void init() {
         createDirectories();
+        boolean firstTime = isFirstRun();
         createFrameworkTables();
+        log.info("[DB] {}", firstTime ? "框架初始化建表完成" : "建表已完成（已存在）");
+    }
+
+    private boolean isFirstRun() {
+        try {
+            jdbc.queryForObject("SELECT COUNT(*) FROM xuanji_user", Integer.class);
+            return false;
+        } catch (Exception e) {
+            return true;
+        }
     }
 
     private void createDirectories() {
