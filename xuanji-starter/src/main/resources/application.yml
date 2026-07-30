@@ -7,12 +7,15 @@ spring:
   application:
     name: xuanji-bot
 
-  # 内嵌 H2 数据库（零配置）
+  # 业务库（零配置，data/xuanji/data/xuanji.mv.db）
   datasource:
     url: jdbc:h2:file:./data/xuanji/data/xuanji;AUTO_SERVER=TRUE;DB_CLOSE_DELAY=-1
     driver-class-name: org.h2.Driver
     username: sa
     password:
+    hikari:
+      minimum-idle: 1
+      maximum-pool-size: 3
 
 # 日志
 logging:
@@ -25,7 +28,13 @@ logging:
 # 璇玑框架配置
 xuanji:
   # 机器人主人（按 botKey 配置 member_openid）
-  # 同一人在不同 bot 里 openid 不同，需分别填写
   master:
-    bot1: "F5C011165910EB4FF2D63A9A582445F7"   # Bot1 的主人 member_openid（从群聊日志 member= 字段获取）
+    bot1: "F5C011165910EB4FF2D63A9A582445F7"
     bot2: ""
+
+  # 日志库（独立 H2 文件，data/xuanji/xuanji.log.mv.db）
+  log-datasource:
+    url: jdbc:h2:file:./data/xuanji/xuanji.log;AUTO_SERVER=TRUE;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:

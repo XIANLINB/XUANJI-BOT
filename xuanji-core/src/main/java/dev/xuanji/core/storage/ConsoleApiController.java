@@ -105,4 +105,16 @@ public class ConsoleApiController {
             return Map.of("error", e.getMessage());
         }
     }
+
+    // ==================== 框架日志（xlog_framework 表） ====================
+
+    private final dev.xuanji.core.storage.log.FrameworkLogger frameworkLogger;
+
+    /** 查询框架运行日志 */
+    @GetMapping("/framework-logs")
+    public List<Map<String, Object>> frameworkLogs(@RequestParam(defaultValue = "50") int limit) {
+        return jdbc.queryForList(
+            "SELECT * FROM xlog_framework ORDER BY create_time DESC LIMIT ?",
+            Math.min(limit, 200));
+    }
 }
