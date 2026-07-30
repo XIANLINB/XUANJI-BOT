@@ -31,6 +31,13 @@
             <artifactId>spring-boot-starter-jdbc</artifactId>
         </dependency>
 
+        <!-- PF4J 插件框架（独立 ClassLoader 隔离） -->
+        <dependency>
+            <groupId>org.pf4j</groupId>
+            <artifactId>pf4j</artifactId>
+            <version>3.15.0</version>
+        </dependency>
+
         <!-- 全局异常处理器（@RestControllerAdvice），仅编译期，服务器由 starter 提供 -->
         <dependency>
             <groupId>org.springframework</groupId>

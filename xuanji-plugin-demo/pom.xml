@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>dev.xuanji</groupId>
+        <artifactId>xuanji-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>xuanji-plugin-demo</artifactId>
+    <name>XuanJi Plugin Demo</name>
+    <description>璇玑演示插件 — PF4J 独立 jar，演示 @Command 指令开发</description>
+
+    <dependencies>
+        <!-- 插件开发者只依赖 SDK -->
+        <dependency>
+            <groupId>dev.xuanji</groupId>
+            <artifactId>xuanji-sdk</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- PF4J（插件需要继承 Plugin 类） -->
+        <dependency>
+            <groupId>org.pf4j</groupId>
+            <artifactId>pf4j</artifactId>
+            <version>3.15.0</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <archive>
+                        <manifestEntries>
+                            <Plugin-Id>demo-plugin</Plugin-Id>
+                            <Plugin-Class>dev.xuanji.plugin.demo.DemoPlugin</Plugin-Class>
+                            <Plugin-Version>${project.version}</Plugin-Version>
+                            <Plugin-Provider>XuanJi Team</Plugin-Provider>
+                            <Plugin-Description>璇玑演示插件，展示 @Command 指令开发</Plugin-Description>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
