@@ -4,9 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.xuanji.adapter.qq.api.MessageSender;
-import dev.xuanji.sdk.bot.XjBot;
+import dev.xuanji.sdk.bot.Bot;
 
-public class QqXjBot extends XjBot {
+public class QqXjBot extends Bot {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private final MessageSender sender;

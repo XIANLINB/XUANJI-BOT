@@ -2,8 +2,8 @@ package dev.xuanji.core.command;
 
 import dev.xuanji.api.annotation.*;
 import dev.xuanji.api.dto.GroupMessageEvent;
-import dev.xuanji.sdk.bot.XjBot;
-import dev.xuanji.sdk.event.XjGroupMessageEvent;
+import dev.xuanji.sdk.bot.Bot;
+import dev.xuanji.sdk.event.GroupMessageEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -34,11 +34,13 @@ public class CommandRegistry {
             Command cmd = m.getAnnotation(Command.class);
             if (cmd != null) {
                 HandlerEntry entry = new HandlerEntry(null, m, pluginInstance, cmd, null);
-                map.computeIfAbsent(cmd.value(), k -> new ArrayList<>()).add(entry);
-                for (String alias : cmd.alias()) {
-                    map.computeIfAbsent(alias, k -> new ArrayList<>()).add(entry);
+                if (cmd.match() == Command.Match.EXACT) {
+                    map.computeIfAbsent(cmd.value(), k -> new ArrayList<>()).add(entry);
+                } else {
+                    groupHandlers.add(entry);
+                    groupHandlers.sort(Comparator.comparingInt(e -> e.gmhAnnotation != null ? e.gmhAnnotation.order() : 0));
                 }
-                log.info("[Command] 注册: {} → {}.{}", cmd.value(),
+                log.info("[Command] 注册: {} (match={}) → {}.{}", cmd.value(), cmd.match(),
                         pluginInstance.getClass().getSimpleName(), m.getName());
                 continue;
             }
@@ -62,10 +64,10 @@ public class CommandRegistry {
     private static final ThreadLocal<String> groupIdTL = new ThreadLocal<>();
     private static final ThreadLocal<String> msgIdTL = new ThreadLocal<>();
     private static final ThreadLocal<GroupMessageEvent> eventDtoTL = new ThreadLocal<>();
-    private static final ThreadLocal<XjBot> botTL = new ThreadLocal<>();
+    private static final ThreadLocal<Bot> botTL = new ThreadLocal<>();
 
     public static void setContext(String botKey, String groupId, String msgId, String userId,
-                                  GroupMessageEvent eventDto, XjBot bot) {
+                                  GroupMessageEvent eventDto, Bot bot) {
         botKeyTL.set(botKey); groupIdTL.set(groupId);
         msgIdTL.set(msgId); userIdTL.set(userId);
         eventDtoTL.set(eventDto); botTL.set(bot);
@@ -106,19 +108,36 @@ public class CommandRegistry {
                 log.warn("[Command] {} 执行失败: {}", cmdName, e.getMessage());
             }
         }
-        // 3. 尝试 @GroupMessageHandler（无前缀限制，过滤匹配）
+        // 2. 尝试非精确模式 @Command + @GroupMessageHandler
         for (HandlerEntry entry : groupHandlers) {
             try {
-                if (!matchFilter(entry.filterAnnotation)) continue;
+                // @Command 非精确匹配模式
+                if (entry.cmdAnnotation != null) {
+                    if (!matchCommand(entry.cmdAnnotation, trimmed)) continue;
+                }
+                // @GroupMessageHandler 过滤
+                if (entry.filterAnnotation != null) {
+                    if (!matchFilter(entry.filterAnnotation)) continue;
+                }
                 Object[] methodArgs = resolveArgs(entry.method, trimmed);
-                Object result = entry.method.invoke(entry.instance, methodArgs);
-                return result != null ? result.toString() : null;
+                entry.method.invoke(entry.instance, methodArgs);
+                return null; // void 方法已自行发送，不返回文本
             } catch (Exception e) {
                 log.debug("[Handler] 执行失败: {}", e.getMessage());
             }
         }
 
         return null;
+    }
+
+    private boolean matchCommand(Command cmd, String text) {
+        return switch (cmd.match()) {
+            case EXACT -> text.startsWith(cmd.value() + " ") || text.equals(cmd.value());
+            case PREFIX -> text.startsWith(cmd.value());
+            case SUFFIX -> text.endsWith(cmd.value());
+            case CONTAINS -> text.contains(cmd.value());
+            case REGEX -> text.matches(cmd.value());
+        };
     }
 
     /** 解析方法参数：@Arg String → 文本分段；BotEvent → 当前事件；MessageSender → 发送器 */
@@ -131,14 +150,14 @@ public class CommandRegistry {
             Class<?> type = params[i].getType();
 
             // 注入 XjGroupMessageEvent（SDK 事件封装）
-            if (XjGroupMessageEvent.class.isAssignableFrom(type)) {
+            if (GroupMessageEvent.class.isAssignableFrom(type)) {
                 values[i] = eventDtoTL.get() != null
-                        ? new XjGroupMessageEvent(eventDtoTL.get()) : null;
+                        ? new GroupMessageEvent(eventDtoTL.get()) : null;
                 continue;
             }
 
-            // 注入 XjBot（SDK 消息发送器）
-            if (XjBot.class.isAssignableFrom(type)) {
+            // 注入 Bot（SDK 消息发送器）
+            if (Bot.class.isAssignableFrom(type)) {
                 values[i] = botTL.get();
                 continue;
             }

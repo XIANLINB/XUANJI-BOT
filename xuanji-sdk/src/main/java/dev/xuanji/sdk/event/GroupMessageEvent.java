@@ -12,16 +12,16 @@ import java.util.stream.Collectors;
  *
  * <pre>
  * @Command("hi")
- * public String hi(XjGroupMessageEvent event, XjBot bot) {
+ * public String hi(GroupMessageEvent event, Bot bot) {
  *     bot.reply("你好 " + event.getSenderName());
  * }
  * </pre>
  */
-public class XjGroupMessageEvent {
+public class GroupMessageEvent {
 
     private final GroupMessageEvent raw;
 
-    public XjGroupMessageEvent(GroupMessageEvent raw) {
+    public GroupMessageEvent(GroupMessageEvent raw) {
         this.raw = raw;
     }
 

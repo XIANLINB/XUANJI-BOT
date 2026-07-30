@@ -7,7 +7,7 @@ import java.util.List;
  * 按钮键盘构建器 — 支持最多 5 行 × 5 列。
  *
  * <pre>
- * String kb = XjKeyboard.create()
+ * String kb = Keyboard.create()
  *     .row()
  *         .btn("sign_in", "签到", "签到")
  *         .btn("bank", "银行", "银行")
@@ -18,7 +18,7 @@ import java.util.List;
  *     .build();
  * </pre>
  */
-public class XjKeyboard {
+public class Keyboard {
 
     /** 全局最多 5 行 */
     private static final int MAX_ROWS = 5;
@@ -28,12 +28,12 @@ public class XjKeyboard {
     private final List<List<Button>> rows = new ArrayList<>();
     private List<Button> currentRow = new ArrayList<>();
 
-    private XjKeyboard() {}
+    private Keyboard() {}
 
-    public static XjKeyboard create() { return new XjKeyboard(); }
+    public static Keyboard create() { return new Keyboard(); }
 
     /** 开始新的一行 */
-    public XjKeyboard row() {
+    public Keyboard row() {
         if (!currentRow.isEmpty()) {
             rows.add(currentRow);
             currentRow = new ArrayList<>();
@@ -42,7 +42,7 @@ public class XjKeyboard {
     }
 
     /** 结束当前行 */
-    public XjKeyboard endRow() {
+    public Keyboard endRow() {
         if (!currentRow.isEmpty()) {
             rows.add(currentRow);
             currentRow = new ArrayList<>();
@@ -56,7 +56,7 @@ public class XjKeyboard {
      * @param label 按钮文字
      * @param data  携带数据
      */
-    public XjKeyboard btn(String id, String label, String data) {
+    public Keyboard btn(String id, String label, String data) {
         if (currentRow.size() >= MAX_COLS) {
             rows.add(currentRow);
             currentRow = new ArrayList<>();

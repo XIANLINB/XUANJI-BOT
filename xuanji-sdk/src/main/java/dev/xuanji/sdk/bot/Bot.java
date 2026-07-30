@@ -21,7 +21,7 @@ package dev.xuanji.sdk.bot;
  * <h3>媒体上传</h3>
  * <pre>String fileId = bot.uploadImage(filePath);  // 返回 file_info 用于后续发送</pre>
  */
-public abstract class XjBot {
+public abstract class Bot {
 
     // ===== 文本 =====
     public abstract void reply(String text);
@@ -36,7 +36,7 @@ public abstract class XjBot {
     public abstract void replyVideo(String url);
 
     // ===== Ark =====
-    /** 回复 Ark 模板消息（传入 XjArk.Ark24/Ark23/Ark37.build() 的结果） */
+    /** 回复 Ark 模板消息（传入 Ark.Ark24/Ark23/Ark37.build() 的结果） */
     public abstract void replyArk(int templateId, String arkJson);
 
     // ===== 图文卡片 =====

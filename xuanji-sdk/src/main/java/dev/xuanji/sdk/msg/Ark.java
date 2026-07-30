@@ -10,14 +10,14 @@ import java.util.Map;
  *
  * <pre>
  * // Ark24
- * String json = XjArk24.create()
+ * String json = Ark24.create()
  *     .title("标题").desc("描述").prompt("提示")
  *     .img("https://...").link("https://...").subtitle("子标题")
  *     .build();
  * bot.replyArk("24", json);
  * </pre>
  */
-public final class XjArk {
+public final class Ark {
 
     /** Ark24 大图卡片 */
     public static class Ark24 {
