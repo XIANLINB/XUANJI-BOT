@@ -88,7 +88,7 @@ public class GroupMessageHandler implements EventHandler {
             // @Command 指令匹配
             String botKey = robotProperties.findBotKeyByRobotId(robotId);
             if (botKey == null) botKey = "bot1";
-            CommandRegistry.setContext(botKey, groupOpenid, msgId, memberOpenid);
+            CommandRegistry.setContext(botKey, groupOpenid, msgId, memberOpenid, null, messageSender);
             try {
                 String cmdResult = commandRegistry.execute(content);
                 if (cmdResult != null) {

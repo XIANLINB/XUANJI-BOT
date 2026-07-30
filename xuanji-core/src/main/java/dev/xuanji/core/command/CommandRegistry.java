@@ -2,9 +2,9 @@ package dev.xuanji.core.command;
 
 import dev.xuanji.api.annotation.Arg;
 import dev.xuanji.api.annotation.Command;
-import dev.xuanji.api.context.BotContext;
 import dev.xuanji.api.event.BotEvent;
 import dev.xuanji.adapter.qq.api.MessageSender;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -15,23 +15,19 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
 
 /**
  * 指令注册表 — 扫描 @Command 方法，建立指令名→处理器的映射。
  *
- * <p>启动时通过 {@link #register(Object)} 注册所有 @XuanjiPlugin 插件 Bean。
+ * <p>参数注入支持：{@code @Arg String}, {@code int/long/double}, {@code BotEvent}, {@code MessageSender}。
  */
 @Slf4j
 @Component
 public class CommandRegistry {
 
-    /** 指令名 → 处理器条目列表（同名按 priority 排序） */
     private final Map<String, List<HandlerEntry>> map = new ConcurrentHashMap<>();
 
-    /**
-     * 注册一个插件对象中的所有 @Command 方法。
-     */
+    /** 注册一个插件对象中的所有 @Command 方法。 */
     public void register(Object pluginInstance) {
         for (Method m : pluginInstance.getClass().getDeclaredMethods()) {
             Command cmd = m.getAnnotation(Command.class);
@@ -45,41 +41,46 @@ public class CommandRegistry {
             log.info("[Command] 注册: {} → {}.{}", cmd.value(),
                     pluginInstance.getClass().getSimpleName(), m.getName());
         }
-        // 每指令按 priority 降序排列
         map.values().forEach(l -> l.sort(Comparator.comparingInt(e -> -e.annotation.priority())));
     }
+
+    // ==================== 上下文（ThreadLocal，GroupMessageHandler 设置） ====================
+
+    private static final ThreadLocal<String> userIdTL = new ThreadLocal<>();
+    private static final ThreadLocal<String> botKeyTL = new ThreadLocal<>();
+    private static final ThreadLocal<String> groupIdTL = new ThreadLocal<>();
+    private static final ThreadLocal<String> msgIdTL = new ThreadLocal<>();
+    private static final ThreadLocal<BotEvent> eventTL = new ThreadLocal<>();
+    private static final ThreadLocal<MessageSender> senderTL = new ThreadLocal<>();
+
+    public static void setContext(String botKey, String groupId, String msgId, String userId,
+                                  BotEvent event, MessageSender sender) {
+        botKeyTL.set(botKey); groupIdTL.set(groupId);
+        msgIdTL.set(msgId); userIdTL.set(userId);
+        eventTL.set(event); senderTL.set(sender);
+    }
+    public static void clearContext() {
+        botKeyTL.remove(); groupIdTL.remove(); msgIdTL.remove();
+        userIdTL.remove(); eventTL.remove(); senderTL.remove();
+    }
+
+    public static String getCurrentUser()   { return userIdTL.get(); }
+    public static String getCurrentBotKey() { return botKeyTL.get(); }
+    public static String getCurrentGroupId(){ return groupIdTL.get(); }
+    public static String getCurrentMsgId()  { return msgIdTL.get(); }
+    public static BotEvent getCurrentEvent(){ return eventTL.get(); }
+    public static MessageSender getCurrentSender() { return senderTL.get(); }
+
+    // ==================== 指令执行 ====================
 
     /**
      * 匹配并执行指令。
      *
-     * @param rawText 用户消息纯文本
-     * @return 执行结果文本，匹配失败返回 null
+     * <p>返回值由 GroupMessageHandler 处理：String → 发文本；null → 未匹配。
      */
-/** 当前请��上下文 */
-    private static final ThreadLocal<String> currentUserId = new ThreadLocal<>();
-    private static final ThreadLocal<String> currentBotKey = new ThreadLocal<>();
-    private static final ThreadLocal<String> currentGroupId = new ThreadLocal<>();
-    private static final ThreadLocal<String> currentMsgId = new ThreadLocal<>();
-
-    public static void setContext(String botKey, String groupId, String msgId, String userId) {
-        currentBotKey.set(botKey); currentGroupId.set(groupId);
-        currentMsgId.set(msgId); currentUserId.set(userId);
-    }
-    public static void clearContext() {
-        currentBotKey.remove(); currentGroupId.remove();
-        currentMsgId.remove(); currentUserId.remove();
-    }
-    public static String getCurrentUser()   { return currentUserId.get(); }
-    public static String getCurrentBotKey() { return currentBotKey.get(); }
-    public static String getCurrentGroupId(){ return currentGroupId.get(); }
-    public static String getCurrentMsgId()  { return currentMsgId.get(); }
-
     public String execute(String rawText) {
         if (rawText == null || rawText.isBlank()) return null;
         String trimmed = rawText.trim();
-
-        // P3 过渡：为旧 MessageSender 设置 ThreadLocal 上下文（由外层 GroupMessageHandler 保证）
-        // CommandRegistry 作为纯匹配引擎，不依赖 ScopedValue
         String[] parts = trimmed.split("\\s+", 2);
         String cmdName = parts[0];
         String args = parts.length > 1 ? parts[1] : "";
@@ -99,23 +100,38 @@ public class CommandRegistry {
         return null;
     }
 
+    /** 解析方法参数：@Arg String → 文本分段；BotEvent → 当前事件；MessageSender → 发送器 */
     private Object[] resolveArgs(Method method, String args) {
         Parameter[] params = method.getParameters();
         Object[] values = new Object[params.length];
         String[] argParts = splitArgs(args);
 
         for (int i = 0; i < params.length; i++) {
+            Class<?> type = params[i].getType();
+
+            // 注入 BotEvent
+            if (BotEvent.class.isAssignableFrom(type)) {
+                values[i] = eventTL.get();
+                continue;
+            }
+
+            // 注入 MessageSender（插件发消息用）
+            if (MessageSender.class.isAssignableFrom(type)) {
+                values[i] = senderTL.get();
+                continue;
+            }
+
+            // @Arg 参数绑定
             Arg arg = params[i].getAnnotation(Arg.class);
             if (arg != null) {
                 String raw = i < argParts.length ? argParts[i] : null;
                 if (raw == null || raw.isEmpty()) {
-                    if (arg.required()) {
-                        return new Object[]{ "缺少参数: " + arg.value() +
-                                (arg.missing().isEmpty() ? "" : " - " + arg.missing()) };
-                    }
+                    if (arg.required()) return new Object[]{
+                        "缺少参数: " + arg.value() + (arg.missing().isEmpty() ? "" : " - " + arg.missing())
+                    };
                     values[i] = null;
                 } else {
-                    values[i] = coerce(raw, params[i].getType());
+                    values[i] = coerce(raw, type);
                 }
             }
         }
@@ -124,7 +140,6 @@ public class CommandRegistry {
 
     private String[] splitArgs(String args) {
         if (args == null || args.isBlank()) return new String[0];
-        // 简单空格分割（后续支持引号包裹）
         return args.split("\\s+");
     }
 
@@ -133,8 +148,6 @@ public class CommandRegistry {
         if (type == int.class || type == Integer.class) { try { return Integer.parseInt(s); } catch (NumberFormatException e) { return null; } }
         if (type == long.class || type == Long.class) { try { return Long.parseLong(s); } catch (NumberFormatException e) { return null; } }
         if (type == double.class || type == Double.class) { try { return Double.parseDouble(s); } catch (NumberFormatException e) { return null; } }
-        if (type == LocalDate.class) { try { return LocalDate.parse(s); } catch (DateTimeParseException e) { return null; } }
-        if (type == LocalDateTime.class) { try { return LocalDateTime.parse(s); } catch (DateTimeParseException e) { return null; } }
         return s;
     }
 
