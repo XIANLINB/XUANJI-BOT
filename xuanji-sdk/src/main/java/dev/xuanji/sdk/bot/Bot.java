@@ -1,55 +1,66 @@
 package dev.xuanji.sdk.bot;
 
 /**
- * 璇玑 Bot 消息发送器。
+ * 璇玑 Bot 消息发送器 — 被动回复 + 主动发送。
  *
- * <h3>文本</h3>
- * <pre>bot.reply("文本");</pre>
+ * <h3>被动回复（带 msg_id，仅事件��理链内可用）</h3>
+ * <pre>bot.reply("文本");
+ * bot.replyMarkdown(md);
+ * bot.replyImage(url);</pre>
  *
- * <h3>Markdown</h3>
- * <pre>bot.replyMarkdown(md); bot.replyMarkdown(md, keyboardJson);</pre>
- *
- * <h3>富媒体</h3>
- * <pre>bot.replyImage(url); bot.replyAudio(url); bot.replyVideo(url);</pre>
- *
- * <h3>Ark 模板</h3>
- * <pre>bot.replyArk(templateId, arkJson);</pre>
- *
- * <h3>图文卡片 (msg_type=8)</h3>
- * <pre>bot.replyCard(cardJson);</pre>
+ * <h3>主动发送（不依赖当前事件，定时任务/推送等场景）</h3>
+ * <pre>bot.sendGroup("群ID", "文本");
+ * bot.sendGroupImage("群ID", url);
+ * bot.sendPrivate("用户ID", "文本");</pre>
  *
  * <h3>媒体上传</h3>
- * <pre>String fileId = bot.uploadImage(filePath);  // 返回 file_info 用于后续发送</pre>
+ * <pre>String fileId = bot.uploadImage("C:/pic.png");</pre>
  */
 public abstract class Bot {
 
-    // ===== 文本 =====
-    public abstract void reply(String text);
+    // ==================== 被动回复（reply* 系列） ====================
 
-    // ===== Markdown =====
+    public abstract void reply(String text);
     public abstract void replyMarkdown(String markdownContent);
     public abstract void replyMarkdown(String markdownContent, String keyboardJson);
-
-    // ===== 富媒体 =====
     public abstract void replyImage(String url);
     public abstract void replyAudio(String url);
     public abstract void replyVideo(String url);
-
-    // ===== Ark =====
-    /** 回复 Ark 模板消息（传入 Ark.Ark24/Ark23/Ark37.build() 的结果） */
     public abstract void replyArk(int templateId, String arkJson);
-
-    // ===== 图文卡片 =====
-    /** 回复图文卡片消息（msg_type=8） */
     public abstract void replyCard(String cardJson);
 
-    // ===== 媒体上传（返回 file_info 字符串，可用于后续发送） =====
-    /** 上传图片，返回 file_info */
+    // ==================== 主动发送（send* 系列，需指定目标） ====================
+
+    /** 主动发送群聊文本 */
+    public abstract void sendGroup(String groupId, String text);
+    /** 主动发送群聊 Markdown */
+    public abstract void sendGroupMarkdown(String groupId, String markdownContent);
+    /** 主动发送群聊 Markdown + 键盘 */
+    public abstract void sendGroupMarkdown(String groupId, String markdownContent, String keyboardJson);
+    /** 主动发送群聊图片 */
+    public abstract void sendGroupImage(String groupId, String url);
+    /** 主动发送群聊语音 */
+    public abstract void sendGroupAudio(String groupId, String url);
+    /** 主动发送群聊视频 */
+    public abstract void sendGroupVideo(String groupId, String url);
+    /** 主动发送群聊 Ark */
+    public abstract void sendGroupArk(String groupId, int templateId, String arkJson);
+    /** 主动发送群聊图文卡片 */
+    public abstract void sendGroupCard(String groupId, String cardJson);
+
+    /** 主动发送私聊文本 */
+    public abstract void sendPrivate(String userId, String text);
+    /** 主动发送私聊 Markdown */
+    public abstract void sendPrivateMarkdown(String userId, String markdownContent);
+    /** 主动发送私聊图片 */
+    public abstract void sendPrivateImage(String userId, String url);
+    /** 主动发送私聊语音 */
+    public abstract void sendPrivateAudio(String userId, String url);
+
+    // ==================== 媒体上传 ====================
+
     public abstract String uploadImage(String filePath);
-    /** 上传视频 */
     public abstract String uploadVideo(String filePath);
-    /** 上传语音 */
     public abstract String uploadAudio(String filePath);
-    /** 上传文件（最大 200MB） */
     public abstract String uploadFile(String filePath);
 }
