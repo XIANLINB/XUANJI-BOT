@@ -7,9 +7,9 @@ spring:
   application:
     name: xuanji-bot
 
-  # 内嵌 H2 数据库（零配置，data/xuanji.mv.db）
+  # 内嵌 H2 数据库（零配置）
   datasource:
-    url: jdbc:h2:file:./data/xuanji;AUTO_SERVER=TRUE;DB_CLOSE_DELAY=-1
+    url: jdbc:h2:file:./data/xuanji/data/xuanji;AUTO_SERVER=TRUE;DB_CLOSE_DELAY=-1
     driver-class-name: org.h2.Driver
     username: sa
     password:
