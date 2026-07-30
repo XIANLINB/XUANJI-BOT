@@ -103,15 +103,12 @@ public class XuanjiPluginManager extends DefaultPluginManager {
 
             pluginContexts.put(wrapper.getPluginId(), ctx);
 
-            // 将插件 Bean 注册到 CommandRegistry
+            // 扫描插件 classpath，找出所有 @XuanjiPlugin 类并注册 @Command
             try {
                 dev.xuanji.core.command.CommandRegistry registry =
                         parentContext.getBean(dev.xuanji.core.command.CommandRegistry.class);
-                Map<String, Object> beans = ctx.getBeansWithAnnotation(
-                        dev.xuanji.api.annotation.XuanjiPlugin.class);
-                for (Object bean : beans.values()) {
-                    registry.register(bean);
-                }
+                // 遍历插件 jar 中的类（通过 ClassLoader 扫描）
+                scanPluginClasses(wrapper, registry);
             } catch (Exception e) {
                 log.debug("[Plugin] CommandRegistry 不可用，跳过指令注册: {}", e.getMessage());
             }
@@ -121,14 +118,49 @@ public class XuanjiPluginManager extends DefaultPluginManager {
         }
     }
 
+    /**
+     * 从插件主类中找所有 @XuanjiPlugin 注解的类（含内部类），注册到 CommandRegistry。
+     */
+    private void scanPluginClasses(PluginWrapper wrapper, dev.xuanji.core.command.CommandRegistry registry) {
+        String pluginClassName = wrapper.getDescriptor().getPluginClass();
+        if (pluginClassName == null || pluginClassName.isBlank()) return;
+
+        ClassLoader cl = wrapper.getPluginClassLoader();
+        try {
+            Class<?> mainClass = cl.loadClass(pluginClassName);
+            // 检查主类本身
+            if (mainClass.isAnnotationPresent(dev.xuanji.api.annotation.XuanjiPlugin.class)) {
+                registerIfPossible(mainClass, registry, cl);
+            }
+            // 检查内部静态类（如 DemoPlugin.Commands）
+            for (Class<?> inner : mainClass.getDeclaredClasses()) {
+                if (inner.isAnnotationPresent(dev.xuanji.api.annotation.XuanjiPlugin.class)) {
+                    registerIfPossible(inner, registry, cl);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[Plugin] 扫描插件类失败: {}", pluginClassName, e.getMessage());
+        }
+    }
+
+    private void registerIfPossible(Class<?> cls, dev.xuanji.core.command.CommandRegistry registry, ClassLoader cl) {
+        try {
+            Object instance = cls.getDeclaredConstructor().newInstance();
+            registry.register(instance);
+            log.info("[Plugin] 注册指令类: {}", cls.getSimpleName());
+        } catch (Exception e) {
+            log.debug("[Plugin] 无法实例化 {}: {}", cls.getSimpleName(), e.getMessage());
+        }
+    }
+
     /** 卸载指定插件（关闭其 Spring 子容器） */
-    public void unloadPlugin(String pluginId) {
+    public boolean unloadPlugin(String pluginId) {
         AnnotationConfigApplicationContext ctx = pluginContexts.remove(pluginId);
         if (ctx != null) {
             ctx.close();
             log.info("[Plugin] 已卸载: {}", pluginId);
         }
-        stopPlugin(pluginId);
+        return stopPlugin(pluginId) == PluginState.STOPPED;
     }
 
     /** 停止所有插件并关闭容器 */
