@@ -27,6 +27,7 @@
     </licenses>
 
     <modules>
+        <module>xuanji-sdk</module>
         <module>xuanji-api</module>
         <module>xuanji-adapter-qq</module>
         <module>xuanji-core</module>
