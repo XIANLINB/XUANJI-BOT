@@ -55,6 +55,13 @@ public class CommandRegistry {
      * @param rawText 用户消息纯文本
      * @return 执行结果文本，匹配失败返回 null
      */
+/** 当前请求的用户 member_openid（GroupMessageHandler 注入） */
+    private static final ThreadLocal<String> currentUserId = new ThreadLocal<>();
+
+    public static void setCurrentUser(String userId) { currentUserId.set(userId); }
+    public static void clearCurrentUser() { currentUserId.remove(); }
+    public static String getCurrentUser() { return currentUserId.get(); }
+
     public String execute(String rawText) {
         if (rawText == null || rawText.isBlank()) return null;
         String trimmed = rawText.trim();
