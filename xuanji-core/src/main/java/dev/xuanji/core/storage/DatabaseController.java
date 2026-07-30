@@ -36,8 +36,8 @@ public class DatabaseController {
     @GetMapping("/schema")
     public List<Map<String, Object>> schema(@RequestParam String table) {
         return jdbc.queryForList(
-            "SELECT COLUMN_NAME, TYPE_NAME, IS_NULLABLE, ORDINAL_POSITION " +
-            "FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=? ORDER BY ORDINAL_POSITION", table);
+            "SELECT COLUMN_NAME, TYPE_NAME, IS_NULLABLE " +
+            "FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=?", table);
     }
 
     @GetMapping("/query")

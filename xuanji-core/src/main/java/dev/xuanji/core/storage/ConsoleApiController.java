@@ -26,12 +26,24 @@ public class ConsoleApiController {
     @GetMapping("/status")
     public Map<String, Object> status() {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("uptime", Duration.between(START_TIME, Instant.now()).toString());
+        Duration d = Duration.between(START_TIME, Instant.now());
+        m.put("uptime", formatDuration(d));
+        m.put("uptimeSeconds", d.getSeconds());
         m.put("startTime", START_TIME.toString());
         int tables = jdbc.queryForObject("SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='PUBLIC'", Integer.class);
         m.put("tables", tables);
         m.put("dbPath", "./data/xuanji/data/xuanji.mv.db");
+        m.put("memUsed", (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1024 / 1024 + "MB");
         return m;
+    }
+
+    private static String formatDuration(Duration d) {
+        long s = d.getSeconds();
+        if (s < 60) return s + "秒";
+        if (s < 3600) return (s / 60) + "分" + (s % 60) + "秒";
+        long h = s / 3600;
+        long m = (s % 3600) / 60;
+        return h + "小时" + m + "分";
     }
 
     // ==================== 超管管理 ====================
@@ -65,16 +77,32 @@ public class ConsoleApiController {
 
     // ==================== 日志 ====================
 
+    /** 最多展示 200 行，避免上千万行卡顿；通过 ?lines=N 可自定义 */
     @GetMapping("/logs")
-    public String tailLogs() {
+    public String tailLogs(@RequestParam(defaultValue = "200") int lines) {
         try {
             Path logFile = Paths.get("logs", "xuanji-bot.log");
             if (!Files.exists(logFile)) return "日志文件不存在: " + logFile.toAbsolutePath();
-            List<String> lines = Files.readAllLines(logFile);
-            int start = Math.max(0, lines.size() - 80);
-            return String.join("\n", lines.subList(start, lines.size()));
+            List<String> all = Files.readAllLines(logFile);
+            int max = Math.min(lines, 500); // 单次上限 500 行
+            int start = Math.max(0, all.size() - max);
+            return String.join("\n", all.subList(start, all.size()));
         } catch (IOException e) {
             return "日志读取失败: " + e.getMessage();
+        }
+    }
+
+    /** 获取日志文件大小（用于判断是否需要清理） */
+    @GetMapping("/log-size")
+    public Map<String, Object> logSize() {
+        try {
+            Path logFile = Paths.get("logs", "xuanji-bot.log");
+            if (!Files.exists(logFile)) return Map.of("exists", false);
+            long bytes = Files.size(logFile);
+            long mb = bytes / 1024 / 1024;
+            return Map.of("exists", true, "sizeMB", mb, "sizeBytes", bytes);
+        } catch (IOException e) {
+            return Map.of("error", e.getMessage());
         }
     }
 }
