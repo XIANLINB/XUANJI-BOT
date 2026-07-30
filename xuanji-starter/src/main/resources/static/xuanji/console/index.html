@@ -1,0 +1,84 @@
+<!DOCTYPE html><html lang="zh"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>璇玑控制台</title>
+<style>body{font-family:system-ui,sans-serif;margin:0;background:#f5f5f5;color:#333}.header{background:#1a1a2e;color:#fff;padding:16px 24px}.header h1{margin:0;font-size:20px}.header span{opacity:.7;font-size:13px}.nav{display:flex;background:#16213e;padding:0 24px}.nav a{color:#a0b4d0;text-decoration:none;padding:12px 18px;font-size:14px;border-bottom:2px solid transparent}.nav a.active,.nav a:hover{color:#fff;border-bottom-color:#4fc3f7}.main{padding:24px;max-width:1200px}.card{background:#fff;border-radius:8px;padding:20px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.1)}.card h3{margin:0 0 12px;font-size:15px;color:#1a1a2e}.row{display:flex;gap:16px;flex-wrap:wrap}.stat{flex:1;min-width:160px;background:#e8f0fe;border-radius:8px;padding:16px;text-align:center}.stat .num{font-size:28px;font-weight:700;color:#1a56db}.stat .label{font-size:12px;color:#666;margin-top:4px}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:8px 12px;text-align:left;border-bottom:1px solid #eee}th{background:#f8f9fa;font-weight:600}pre{background:#1a1a2e;color:#4fc3f7;padding:12px;border-radius:6px;font-size:12px;max-height:400px;overflow:auto;white-space:pre-wrap}button,input{padding:8px 14px;border:1px solid #ccc;border-radius:6px;font-size:13px;cursor:pointer}button.primary{background:#1a56db;color:#fff;border:none}button.danger{background:#dc3545;color:#fff;border:none}input{margin-right:8px}.hidden{display:none}.msg{margin-top:8px;font-size:13px;padding:8px;border-radius:6px}.msg.ok{background:#d4edda;color:#155724}.msg.err{background:#f8d7da;color:#721c24}</style></head><body>
+<div class="header"><h1>璇玑控制台</h1><span>Xuanji Bot Console</span></div>
+<div class="nav"><a href="#" class="active" data-tab="dash">仪表盘</a><a href="#" data-tab="db">数据库</a><a href="#" data-tab="perm">权限</a><a href="#" data-tab="log">日志</a><a href="#" data-tab="sys">系统</a></div>
+<div class="main" id="main"></div>
+
+<script>
+const API='/xuanji/api';
+async function get(u){let r=await fetch(u);return r.json()}
+function dash(){return`
+<div class="row">
+<div class="stat" id="s-bots"><div class="num">-</div><div class="label">Bot 实例</div></div>
+<div class="stat" id="s-tables"><div class="num">-</div><div class="label">数据表</div></div>
+<div class="stat" id="s-uptime"><div class="num">-</div><div class="label">运行时间</div></div>
+</div>
+<div class="card"><h3>消息速览</h3><table><thead><tr><th>指标</th><th>值</th></tr></thead><tbody id="stats-body"></tbody></table></div>`}
+function db(){return`
+<div class="card"><h3>数据表</h3><table><thead><tr><th>表名</th><th>类型</th><th>操作</th></tr></thead><tbody id="tables-body"><tr><td colspan=3>加载中...</td></tr></tbody></table></div>
+<div id="schema-view" class="hidden card"><h3 id="schema-title">表结构</h3><table><thead><tr><th>列名</th><th>类型</th><th>长度</th><th>可空</th></tr></thead><tbody id="schema-body"></tbody></table></div>`}
+function perm(){return`
+<div class="card"><h3 id="m-title">主人信息</h3><div id="m-info">加载中...</div></div>
+<div class="card"><h3>群超管设置</h3><input id="sa-bot" placeholder="botKey"><input id="sa-grp" placeholder="groupId"><input id="sa-uid" placeholder="memberOpenid"><button class="primary" onclick="addSA()">添加超管</button><div class="msg hidden" id="sa-msg"></div></div>
+<div class="card"><h3>黑名单管理</h3><input id="bl-bot" placeholder="botKey"><input id="bl-grp" placeholder="groupId"><input id="bl-uid" placeholder="memberOpenid"><button class="danger" onclick="addBL()">添加黑名单</button><button onclick="checkBL()">检查</button><div class="msg hidden" id="bl-msg"></div></div>`}
+function logs(){return`
+<div class="card"><h3>应用日志</h3><button class="primary" onclick="loadLogs()">刷新日志</button><pre id="log-content">点击刷新查看日志...</pre></div>`}
+function sys(){return`
+<div class="card"><h3>系统信息</h3><table><thead><tr><th>指标</th><th>值</th></tr></thead><tbody id="sys-body"></tbody></table></div>
+<div class="card"><h3>框架版本</h3><p>璇玑 Xuanji v1.0.0-SNAPSHOT | Spring Boot 4.0.6 | JDK 25</p></div>`}
+
+const tabs={dash,db,perm,logs,sys};
+let active='dash';
+document.querySelectorAll('.nav a').forEach(a=>{a.onclick=e=>{e.preventDefault();active=a.dataset.tab;document.querySelectorAll('.nav a').forEach(x=>x.classList.remove('active'));a.classList.add('active');render()}});
+
+async function render(){document.getElementById('main').innerHTML=tabs[active]();if(active==='dash')await loadDash();if(active==='db')await loadTables();if(active==='perm')await loadPerm();if(active==='sys')await loadSys()}
+
+async function loadDash(){
+try{let h=await get(API+'/db/health');document.getElementById('s-tables').querySelector('.num').textContent=h.tables}catch(e){}
+document.getElementById('stats-body').innerHTML='<tr><td>Bot 在线</td><td>正常运行</td></tr><tr><td>数据库</td><td>H2 内嵌</td></tr>';
+}
+
+async function loadTables(){
+let data=await get(API+'/db/tables');
+document.getElementById('tables-body').innerHTML=data.map(r=>`<tr><td>${r.TABLE_NAME}</td><td>${r.TABLE_TYPE}</td><td><button onclick="showSchema('${r.TABLE_NAME}')">查看</button></td></tr>`).join('');
+}
+
+async function showSchema(t){
+let data=await get(API+'/db/schema?table='+t);
+document.getElementById('schema-title').textContent='表结构: '+t;
+document.getElementById('schema-body').innerHTML=data.map(r=>`<tr><td>${r.COLUMN_NAME}</td><td>${r.TYPE_NAME}</td><td>${r.CHARACTER_MAXIMUM_LENGTH||''}</td><td>${r.IS_NULLABLE}</td></tr>`).join('');
+document.getElementById('schema-view').classList.remove('hidden');
+}
+
+async function loadPerm(){
+let h=await get(API+'/db/health');
+document.getElementById('m-info').innerHTML=`<p>主人配置在 application.yml 的 xuanji.master.* 中</p>`;
+}
+
+async function addSA(){
+let r=await fetch(API+'/permission/super-admin/add?botKey='+d('sa-bot')+'&groupId='+d('sa-grp')+'&memberOpenid='+d('sa-uid'),{method:'POST'});
+let m=document.getElementById('sa-msg');m.classList.remove('hidden');m.textContent=r.ok?'已添加':'失败';m.className='msg '+(r.ok?'ok':'err');
+}
+
+async function addBL(){
+let r=await fetch(API+'/permission/blacklist/add?scope=bot:'+d('bl-bot')+'&targetType=user&targetId='+d('bl-uid')+'&reason=手动',{method:'POST'});
+let m=document.getElementById('bl-msg');m.classList.remove('hidden');m.textContent=r.ok?'已添加':'失败';m.className='msg '+(r.ok?'ok':'err');
+}
+
+async function checkBL(){
+let data=await get(API+'/permission/blacklist/check?botKey='+d('bl-bot')+'&groupId='+d('bl-grp')+'&memberOpenid='+d('bl-uid'));
+let m=document.getElementById('bl-msg');m.classList.remove('hidden');m.textContent='黑名单状态: '+(data.blacklisted?'是':'否');m.className='msg '+(data.blacklisted?'err':'ok');
+}
+
+async function loadLogs(){document.getElementById('log-content').textContent='日志功能开发中...';}
+
+async function loadSys(){
+document.getElementById('sys-body').innerHTML=`
+<tr><td>Java</td><td>${navigator.userAgent.match(/Java[^;]*/)?.[0]||'JDK 25+'}</td></tr>
+<tr><td>数据库</td><td>H2 内嵌 (data/xuanji/data/xuanji.mv.db)</td></tr>
+<tr><td>控制台</td><td>http://localhost:8668/xuanji/console/</td></tr>`;
+}
+
+function d(id){return document.getElementById(id).value}
+render();
+</script></body></html>
