@@ -22,4 +22,7 @@ logging:
 
 # 璇玑框架配置
 xuanji:
-  master: ""   # 机器人主人 QQ 号，设置后获得 L0 最高权限
+  # 机器人主人（按 botKey 配置 member_openid）
+  # 同一人在不同 bot 里 openid 不同，需分别填写
+  master:
+    bot1: ""   # Bot1 的主人 member_openid（从群聊日志 member= 字段获取）

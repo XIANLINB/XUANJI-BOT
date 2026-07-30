@@ -85,8 +85,9 @@ public class GroupMessageHandler implements EventHandler {
             log.info("[收到群聊消息][群{}] sender={}, member={}, content={}",
                     groupOpenid, event.getAuthor().getUsername(), memberOpenid, content);
 
-            // @Command 指令匹配（包含全部 9 条测试命令）
-            CommandRegistry.setCurrentUser(memberOpenid);
+            // @Command 指令匹配
+            String botKey = "bot1"; // P5 TODO: 从上下文获取当前 bot 的 YAML key
+            CommandRegistry.setContext(botKey, groupOpenid, memberOpenid);
             try {
                 String cmdResult = commandRegistry.execute(content);
                 if (cmdResult != null) {
@@ -94,7 +95,7 @@ public class GroupMessageHandler implements EventHandler {
                     return;
                 }
             } finally {
-                CommandRegistry.clearCurrentUser();
+                CommandRegistry.clearContext();
             }
 
             // 未匹配 → 提示帮助

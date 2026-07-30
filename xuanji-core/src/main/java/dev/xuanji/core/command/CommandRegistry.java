@@ -55,12 +55,20 @@ public class CommandRegistry {
      * @param rawText 用户消息纯文本
      * @return 执行结果文本，匹配失败返回 null
      */
-/** 当前请求的用户 member_openid（GroupMessageHandler 注入） */
+/** 当前请��上下文 */
     private static final ThreadLocal<String> currentUserId = new ThreadLocal<>();
+    private static final ThreadLocal<String> currentBotKey = new ThreadLocal<>();
+    private static final ThreadLocal<String> currentGroupId = new ThreadLocal<>();
 
-    public static void setCurrentUser(String userId) { currentUserId.set(userId); }
-    public static void clearCurrentUser() { currentUserId.remove(); }
+    public static void setContext(String botKey, String groupId, String userId) {
+        currentBotKey.set(botKey); currentGroupId.set(groupId); currentUserId.set(userId);
+    }
+    public static void clearContext() {
+        currentBotKey.remove(); currentGroupId.remove(); currentUserId.remove();
+    }
     public static String getCurrentUser() { return currentUserId.get(); }
+    public static String getCurrentBotKey() { return currentBotKey.get(); }
+    public static String getCurrentGroupId() { return currentGroupId.get(); }
 
     public String execute(String rawText) {
         if (rawText == null || rawText.isBlank()) return null;

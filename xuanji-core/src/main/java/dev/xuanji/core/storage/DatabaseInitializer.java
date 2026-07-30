@@ -126,6 +126,16 @@ public class DatabaseInitializer {
             )
         """);
 
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS xuanji_super_admin (
+                bot_key      VARCHAR(64) NOT NULL,
+                group_id     VARCHAR(128) NOT NULL,
+                member_openid VARCHAR(128) NOT NULL,
+                created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (bot_key, group_id, member_openid)
+            )
+        """);
+
         log.info("[DB] 建表完成");
     }
 }
