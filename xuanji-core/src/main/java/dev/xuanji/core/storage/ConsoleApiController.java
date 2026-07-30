@@ -66,7 +66,7 @@ public class ConsoleApiController {
 
     @GetMapping("/blacklists")
     public List<Map<String, Object>> listBlacklists() {
-        return jdbc.queryForList("SELECT * FROM xuanji_blacklist ORDER BY created_at DESC");
+        return jdbc.queryForList("SELECT * FROM xuanji_blacklist ORDER BY create_time DESC");
     }
 
     @DeleteMapping("/blacklist")
