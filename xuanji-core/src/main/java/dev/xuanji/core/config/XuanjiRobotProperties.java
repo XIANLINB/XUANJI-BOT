@@ -44,6 +44,9 @@ public class XuanjiRobotProperties {
     /** 机器人配置列表，key = 机器人标识（如 bot1、bot2） */
     private Map<String, RobotProperties> robots = new HashMap<>();
 
+    /** 机器人主人 member_openid（按 botKey 配置） */
+    private Map<String, String> master = new HashMap<>();
+
     /**
      * 单个机器人的配置属性
      */
@@ -63,5 +66,15 @@ public class XuanjiRobotProperties {
 
         /** 连接方式：websocket 或 webhook */
         private String connectionMethod;
+    }
+
+    /** 根据 appId 反查 YAML 中的 botKey */
+    public String findBotKeyByRobotId(long robotId) {
+        if (robots == null) return null;
+        for (var e : robots.entrySet()) {
+            String a = e.getValue().getAppId();
+            if (a != null && ((long) a.hashCode()) == robotId) return e.getKey();
+        }
+        return null;
     }
 }

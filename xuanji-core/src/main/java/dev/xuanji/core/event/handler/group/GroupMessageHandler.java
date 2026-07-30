@@ -82,12 +82,13 @@ public class GroupMessageHandler implements EventHandler {
                 if (memberOpenid == null) memberOpenid = event.getAuthor().getId();
             }
 
-            log.info("[收到群聊消息][群{}] sender={}, member={}, content={}",
+            log.info("[收到群聊消息][群{}] sender={}, memberOpenId={}, content={}",
                     groupOpenid, event.getAuthor().getUsername(), memberOpenid, content);
 
             // @Command 指令匹配
-            String botKey = "bot1"; // P5 TODO: 从上下文获取当前 bot 的 YAML key
-            CommandRegistry.setContext(botKey, groupOpenid, memberOpenid);
+            String botKey = robotProperties.findBotKeyByRobotId(robotId);
+            if (botKey == null) botKey = "bot1";
+            CommandRegistry.setContext(botKey, groupOpenid, msgId, memberOpenid);
             try {
                 String cmdResult = commandRegistry.execute(content);
                 if (cmdResult != null) {

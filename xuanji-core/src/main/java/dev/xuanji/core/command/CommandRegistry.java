@@ -59,16 +59,20 @@ public class CommandRegistry {
     private static final ThreadLocal<String> currentUserId = new ThreadLocal<>();
     private static final ThreadLocal<String> currentBotKey = new ThreadLocal<>();
     private static final ThreadLocal<String> currentGroupId = new ThreadLocal<>();
+    private static final ThreadLocal<String> currentMsgId = new ThreadLocal<>();
 
-    public static void setContext(String botKey, String groupId, String userId) {
-        currentBotKey.set(botKey); currentGroupId.set(groupId); currentUserId.set(userId);
+    public static void setContext(String botKey, String groupId, String msgId, String userId) {
+        currentBotKey.set(botKey); currentGroupId.set(groupId);
+        currentMsgId.set(msgId); currentUserId.set(userId);
     }
     public static void clearContext() {
-        currentBotKey.remove(); currentGroupId.remove(); currentUserId.remove();
+        currentBotKey.remove(); currentGroupId.remove();
+        currentMsgId.remove(); currentUserId.remove();
     }
-    public static String getCurrentUser() { return currentUserId.get(); }
+    public static String getCurrentUser()   { return currentUserId.get(); }
     public static String getCurrentBotKey() { return currentBotKey.get(); }
-    public static String getCurrentGroupId() { return currentGroupId.get(); }
+    public static String getCurrentGroupId(){ return currentGroupId.get(); }
+    public static String getCurrentMsgId()  { return currentMsgId.get(); }
 
     public String execute(String rawText) {
         if (rawText == null || rawText.isBlank()) return null;

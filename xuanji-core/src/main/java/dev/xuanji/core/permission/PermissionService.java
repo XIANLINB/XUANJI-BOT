@@ -1,7 +1,7 @@
 package dev.xuanji.core.permission;
 
+import dev.xuanji.core.config.XuanjiRobotProperties;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -23,10 +23,9 @@ public class PermissionService {
     /** 每个 bot 的主人 member_openid（来自 xuanji.master.botKey） */
     private final Map<String, String> masterMap;
 
-    public PermissionService(JdbcTemplate jdbc,
-            @Value("#{${xuanji.master:{}}}") Map<String, String> masterMap) {
+    public PermissionService(JdbcTemplate jdbc, XuanjiRobotProperties props) {
         this.jdbc = jdbc;
-        this.masterMap = masterMap != null ? masterMap : Collections.emptyMap();
+        this.masterMap = props.getMaster() != null ? props.getMaster() : Collections.emptyMap();
         log.info("[权限] 主人配置: {}", this.masterMap);
     }
 
@@ -35,6 +34,8 @@ public class PermissionService {
     public boolean isMaster(String botKey, String memberOpenid) {
         if (memberOpenid == null || memberOpenid.isEmpty()) return false;
         String expected = masterMap.get(botKey);
+        log.info("[权限] isMaster: botKey={}, input={}, expected={}, match={}",
+                botKey, memberOpenid, expected, expected != null && expected.equals(memberOpenid));
         return expected != null && expected.equals(memberOpenid);
     }
 
