@@ -488,6 +488,14 @@ public class QqBotWsClient {
         String eventId = data.path("id").asText("");
         totalEvents++;
 
+        // P3: 注入元数据到原始 ObjectNode（供 DispatchStage 桥接旧分发器）
+        data.put("_eventType", eventType);
+        data.put("_robotId", robotId);
+        data.put("_envType", envType);
+        if (eventId != null && !eventId.isEmpty()) {
+            data.put("_eventId", eventId);
+        }
+
         // P2: 转换为统一 BotEvent 并记录（验证抽象可用）
         try {
             Bot bot = new Bot("qq:" + appId, "qq", appId, dev.xuanji.api.adapter.Bot.Status.ONLINE, java.util.Set.of());
@@ -496,15 +504,13 @@ public class QqBotWsClient {
                     be.type().fullName(), be.sender().nickname(),
                     be.group() != null ? be.group().groupId() : "私聊",
                     be.message() != null ? be.message().plainText() : "");
-        } catch (Exception e) {
-            log.warn("[BotEvent] 转换跳过: {}", e.getMessage());
-        }
 
-        try {
-            eventDispatcher.dispatch(eventType, robotId, envType, data, eventId);
-            log.debug("[BotWS] 事件已分发: type={}, eventId={}, totalEvents={}", eventType, eventId, totalEvents);
+            // P3: 通过 BotPipeline 分发（替代旧 EventDispatcher）
+            dev.xuanji.core.pipeline.BotPipeline.get().proceed(be);
         } catch (Exception e) {
-            log.error("[BotWS] 事件分发异常, type={}, robotId={}, error={}", eventType, robotId, e.getMessage(), e);
+            log.error("[BotEvent] 流水线处理异常: {}", e.getMessage(), e);
+            // 回退到旧分发器
+            eventDispatcher.dispatch(eventType, robotId, envType, data, eventId);
         }
     }
 
