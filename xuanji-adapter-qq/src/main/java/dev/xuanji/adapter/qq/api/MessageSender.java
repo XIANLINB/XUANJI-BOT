@@ -421,8 +421,8 @@ public class MessageSender {
         if (card instanceof ObjectNode) body.set("card", (ObjectNode) card);
         else body.put("card", card.toString());
         if (msgId != null && !msgId.isEmpty()) body.put("msg_id", msgId);
-        return qqApi.post("/v2/groups/" + groupOpenid + "/messages", body,
-                robotId, envType, "发送群聊图文卡片", groupOpenid);
+        return qqApiService.post(robotId, envType,
+                "/v2/groups/" + groupOpenid + "/messages", body);
     }
 
     // ==================== 媒体上传（返回 file_info） ====================
@@ -436,8 +436,8 @@ public class MessageSender {
         ObjectNode body = Json.obj();
         body.put("file_type", fileType);
         body.put("url", fileUrl);
-        ObjectNode result = qqApi.post("/v2/groups/" + groupOpenid + "/files", body,
-                robotId, envType, "上传媒体文件", groupOpenid);
+        ObjectNode result = qqApiService.post(robotId, envType,
+                "/v2/groups/" + groupOpenid + "/files", body);
         if (result != null && result.has("file_info")) {
             return result.get("file_info").toString();
         }

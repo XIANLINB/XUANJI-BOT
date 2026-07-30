@@ -24,7 +24,7 @@ import java.util.*;
  *
  * <p>插件退出时子容器关闭 → 所有 Bean 销毁 → ClassLoader 卸载 → 无内存泄漏。
  */
-@Slf4j
+@Slf4j(topic = "xuanji.plugin")
 @Component
 public class XuanjiPluginManager extends DefaultPluginManager {
 

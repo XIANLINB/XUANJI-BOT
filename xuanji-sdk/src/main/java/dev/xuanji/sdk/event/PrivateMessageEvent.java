@@ -1,15 +1,13 @@
 package dev.xuanji.sdk.event;
 
-import dev.xuanji.api.dto.C2cMessageEvent as ApiC2c;
-
 /**
- * 单聊消息事件封装 — 类似 {@link GroupMessageEvent}，用于私聊场景。
+ * 单聊消息事件封装 — 包装 QQ 的 C2cMessageEvent DTO，用于私聊场景。
  */
-public class C2cMessageEvent {
+public class PrivateMessageEvent {
 
-    private final ApiC2c raw;
+    private final dev.xuanji.api.dto.C2cMessageEvent raw;
 
-    public C2cMessageEvent(ApiC2c raw) { this.raw = raw; }
+    public PrivateMessageEvent(dev.xuanji.api.dto.C2cMessageEvent raw) { this.raw = raw; }
 
     public String getMessageId() { return raw.getId(); }
     public String getContent() { return raw.getContent(); }
@@ -18,5 +16,5 @@ public class C2cMessageEvent {
     public int getMessageType() { return raw.getMessageType() != null ? raw.getMessageType() : 0; }
     public String getTimestamp() { return raw.getTimestamp(); }
     public boolean hasAttachments() { return raw.getAttachments() != null && !raw.getAttachments().isEmpty(); }
-    public C2cMessageEvent raw() { return raw; }
+    public dev.xuanji.api.dto.C2cMessageEvent raw() { return raw; }
 }

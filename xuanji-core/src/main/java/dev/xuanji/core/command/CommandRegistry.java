@@ -3,7 +3,6 @@ package dev.xuanji.core.command;
 import dev.xuanji.api.annotation.*;
 import dev.xuanji.api.dto.GroupMessageEvent;
 import dev.xuanji.sdk.bot.Bot;
-import dev.xuanji.sdk.event.GroupMessageEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -14,6 +13,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * 指令注册表 — 扫描 @Command 方法，建立指令名→处理器的映射。
@@ -149,10 +149,10 @@ public class CommandRegistry {
         for (int i = 0; i < params.length; i++) {
             Class<?> type = params[i].getType();
 
-            // 注入 XjGroupMessageEvent（SDK 事件封装）
-            if (GroupMessageEvent.class.isAssignableFrom(type)) {
+            // 注入 SDK 事件封装
+            if (dev.xuanji.sdk.event.GroupMessageEvent.class.isAssignableFrom(type)) {
                 values[i] = eventDtoTL.get() != null
-                        ? new GroupMessageEvent(eventDtoTL.get()) : null;
+                        ? new dev.xuanji.sdk.event.GroupMessageEvent(eventDtoTL.get()) : null;
                 continue;
             }
 
@@ -228,11 +228,8 @@ public class CommandRegistry {
     }
 
     private record HandlerEntry(
-            Command cmdAnnotation,
-            Method method, Object instance,
             GroupMessageHandler gmhAnnotation,
+            Method method, Object instance,
+            Command cmdAnnotation,
             HandlerFilter filterAnnotation) {}
-
-    // 兼容旧的构造（只有 @Command）
-    private record CmdOnly(Command annotation, Method method, Object instance) {}
 }
