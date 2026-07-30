@@ -85,6 +85,11 @@ public class GroupMessageHandler implements EventHandler {
             log.info("[收到群聊消息][群{}] sender={}, memberOpenId={}, content={}",
                     groupOpenid, event.getAuthor().getUsername(), memberOpenid, content);
 
+            // 记录到控制台消息流水
+            dev.xuanji.core.storage.ConsoleApiController.recordEvent(
+                    "IN", "text", event.getAuthor().getUsername(),
+                    groupOpenid, content, "msgId=" + msgId);
+
             // @Command 指令匹配
             String botKey = robotProperties.findBotKeyByRobotId(robotId);
             if (botKey == null) botKey = "bot1";

@@ -106,7 +106,36 @@ public class ConsoleApiController {
         }
     }
 
-    // ==================== 框架日志（xlog_framework 表） ====================
+    // ==================== 消息流水 ====================
+
+    /** 最近 200 条消息事件（环形缓冲区） */
+    private static final List<Map<String, Object>> recentEvents =
+            Collections.synchronizedList(new ArrayList<>());
+    private static final int MAX_EVENTS = 200;
+
+    /** 记录一条消息事件（框架内部调用，不是 HTTP API） */
+    public static void recordEvent(String direction, String type, String user,
+                                    String groupId, String content, String detail) {
+        Map<String, Object> evt = new LinkedHashMap<>();
+        evt.put("time", java.time.LocalTime.now().toString().substring(0, 12));
+        evt.put("direction", direction);  // IN / OUT
+        evt.put("type", type);            // text / markdown / image / audio / video
+        evt.put("user", user);
+        evt.put("groupId", groupId);
+        evt.put("content", content);
+        evt.put("detail", detail);
+        synchronized (recentEvents) {
+            recentEvents.add(evt);
+            while (recentEvents.size() > MAX_EVENTS) recentEvents.removeFirst();
+        }
+    }
+
+    @GetMapping("/events")
+    public List<Map<String, Object>> events() {
+        synchronized (recentEvents) {
+            return new ArrayList<>(recentEvents);
+        }
+    }
 
     private final dev.xuanji.core.storage.log.FrameworkLogger frameworkLogger;
 
