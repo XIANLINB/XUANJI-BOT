@@ -1,8 +1,7 @@
 package dev.xuanji.core.storage.log;
 
 import com.zaxxer.hikari.HikariDataSource;
-import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
-import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -10,25 +9,29 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import javax.sql.DataSource;
 
 /**
- * 日志库独立 DataSource —— data/xuanji/xuanji.log.db
- *
- * <p>与业务库（xuanji.mv.db）物理隔离，日志膨胀不影响业务查询性能。
+ * 日志库独立 DataSource —— data/xuanji/xuanji.log.mv.db
  */
 @Configuration(proxyBeanMethods = false)
 public class LogDbConfig {
 
-    @Bean
-    @ConfigurationProperties("xuanji.log-datasource")
-    public DataSourceProperties logDataSourceProperties() {
-        return new DataSourceProperties();
-    }
+    @Value("${xuanji.log-datasource.url}")
+    private String url;
+
+    @Value("${xuanji.log-datasource.username:sa}")
+    private String username;
+
+    @Value("${xuanji.log-datasource.password:}")
+    private String password;
 
     @Bean
-    public DataSource logDataSource(DataSourceProperties logDataSourceProperties) {
-        return logDataSourceProperties
-                .initializeDataSourceBuilder()
-                .type(HikariDataSource.class)
-                .build();
+    public DataSource logDataSource() {
+        HikariDataSource ds = new HikariDataSource();
+        ds.setJdbcUrl(url);
+        ds.setUsername(username);
+        ds.setPassword(password);
+        ds.setMinimumIdle(1);
+        ds.setMaximumPoolSize(3);
+        return ds;
     }
 
     @Bean
