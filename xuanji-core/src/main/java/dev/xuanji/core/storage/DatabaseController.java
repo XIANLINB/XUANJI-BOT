@@ -7,16 +7,14 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
- * 数据库管理接口 — 替代 H2 Console，提供表结构查询和数据浏览。
+ * 数据库浏览接口 — 直接展示表数据（不再查 INFORMATION_SCHEMA 的列结构，H2 兼容性问题多）。
  *
  * <pre>
  * GET /xuanji/api/db/tables          — 所有表名
- * GET /xuanji/api/db/schema?table=   — 指定表的列信息
+ * GET /xuanji/api/db/rows?table=     — 指定表全部行（限制 1000）
  * GET /xuanji/api/db/query?sql=      — 只读 SQL 查询
  * </pre>
  */
@@ -33,11 +31,17 @@ public class DatabaseController {
             "SELECT TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='PUBLIC' ORDER BY TABLE_NAME");
     }
 
-    @GetMapping("/schema")
-    public List<Map<String, Object>> schema(@RequestParam String table) {
-        return jdbc.queryForList(
-            "SELECT COLUMN_NAME, TYPE_NAME, IS_NULLABLE " +
-            "FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=?", table);
+    /** 直接查表的全部数据行（最多 1000 行），返回列名 + 行数组，前端用列名动态渲染表头 */
+    @GetMapping("/rows")
+    public Map<String, Object> rows(@RequestParam String table) {
+        // 先取一行看有哪些列
+        List<Map<String, Object>> all = jdbc.queryForList(
+            "SELECT * FROM " + table + " LIMIT 1000");
+        List<String> columns = all.isEmpty()
+            ? jdbc.queryForList("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=? ORDER BY COLUMN_NAME",
+                table).stream().map(m -> (String) m.get("COLUMN_NAME")).toList()
+            : new ArrayList<>(all.get(0).keySet());
+        return Map.of("table", table, "columns", columns, "rows", all, "count", all.size());
     }
 
     @GetMapping("/query")
