@@ -9,6 +9,7 @@ import dev.xuanji.core.event.EventHandler;
 import dev.xuanji.core.event.EventMapping;
 import dev.xuanji.adapter.qq.util.KeyboardBuilder;
 import dev.xuanji.adapter.qq.util.MarkdownBuilder;
+import dev.xuanji.core.command.CommandRegistry;
 import lombok.extern.slf4j.Slf4j;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -41,10 +42,13 @@ public class GroupMessageHandler implements EventHandler {
 
     private final XuanjiRobotProperties robotProperties;
     private final MessageSender messageSender;
+    private final CommandRegistry commandRegistry;
 
-    public GroupMessageHandler(XuanjiRobotProperties robotProperties, MessageSender messageSender) {
+    public GroupMessageHandler(XuanjiRobotProperties robotProperties, MessageSender messageSender,
+                                CommandRegistry commandRegistry) {
         this.robotProperties = robotProperties;
         this.messageSender = messageSender;
+        this.commandRegistry = commandRegistry;
     }
 
     @Override
@@ -72,6 +76,13 @@ public class GroupMessageHandler implements EventHandler {
                     groupOpenid, event.getAuthor().getUsername(), content);
 
             // 根据命令回复不同类型的消息
+            // P3: 优先尝试 @Command 指令匹配
+            String cmdResult = commandRegistry.execute(content);
+            if (cmdResult != null) {
+                messageSender.sendGroupText(groupOpenid, cmdResult, msgId);
+                return;
+            }
+
             switch (content) {
                 case "文本" -> testText(groupOpenid, msgId);
                 case "markdown" -> testMarkdown(groupOpenid, msgId);
