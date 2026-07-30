@@ -56,9 +56,11 @@ public class DatabaseInitializer {
                     String adapter = entry.getValue().getAdapter();
                     if (adapter == null) adapter = "qqbot"; // 默认 QQ
 
-                    Path botDir = base.resolve("data").resolve(adapter).resolve(botKey);
-                    Files.createDirectories(botDir.resolve("groups"));
-                    log.info("[DB] 创建目录: {}", botDir);
+                Path botDataDir = base.resolve("data").resolve(adapter).resolve(botKey);
+                Files.createDirectories(botDataDir.resolve("groups"));
+                Path botLogDir = base.resolve("log").resolve(adapter).resolve(botKey);
+                Files.createDirectories(botLogDir);
+                log.info("[DB] 创建目录: data={}, log={}", botDataDir, botLogDir);
                 }
             }
             log.info("[DB] 目录层级已就绪: {}", base.toAbsolutePath());

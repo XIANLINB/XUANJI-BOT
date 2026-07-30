@@ -49,6 +49,9 @@ public class XuanjiRobotProperties {
      */
     @Data
     public static class RobotProperties {
+        /** 适配器类型（qqbot / onebot / feishu），默认 qqbot */
+        private String adapter;
+
         /** QQ 开放平台 AppID */
         private String appId;
 
