@@ -25,6 +25,12 @@
             <artifactId>spring-boot-starter</artifactId>
         </dependency>
 
+        <!-- JDBC + 内嵌 H2（编译期依赖，运行时由 starter 提供 H2 驱动） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+
         <!-- 全局异常处理器（@RestControllerAdvice），仅编译期，服务器由 starter 提供 -->
         <dependency>
             <groupId>org.springframework</groupId>
