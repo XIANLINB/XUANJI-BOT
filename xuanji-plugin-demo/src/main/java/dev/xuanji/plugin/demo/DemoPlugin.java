@@ -90,7 +90,7 @@ public class DemoPlugin extends Plugin {
 
         @Command("帮助")
         public void help(XjBot bot) {
-            bot.reply("@机器人说 签到/打卡 | 前缀 !xxx | 包含"你好"\n命令: ping | hello | 功能 | md | 图 | 事件信息");
+            bot.reply("@机器人说 签到/打卡 | 前缀 !xxx | 包含你好 \n命令: ping | hello | 功能 | md | 图 | 事件信息");
         }
     }
 }

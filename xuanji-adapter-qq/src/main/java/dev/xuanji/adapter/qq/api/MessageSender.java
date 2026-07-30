@@ -409,6 +409,41 @@ public class MessageSender {
         return uploadAndSendC2cMedia(getCurrentRobotId(), getCurrentEnvType(), openid, 2, videoUrl, msgId);
     }
 
+    // ==================== 图文卡片 (msg_type=8) ====================
+
+    public ObjectNode sendGroupCard(String groupOpenid, Object card, String msgId) {
+        return sendGroupCard(getCurrentRobotId(), getCurrentEnvType(), groupOpenid, card, msgId);
+    }
+
+    public ObjectNode sendGroupCard(Long robotId, String envType, String groupOpenid, Object card, String msgId) {
+        ObjectNode body = Json.obj();
+        body.put("msg_type", 8);
+        if (card instanceof ObjectNode) body.set("card", (ObjectNode) card);
+        else body.put("card", card.toString());
+        if (msgId != null && !msgId.isEmpty()) body.put("msg_id", msgId);
+        return qqApi.post("/v2/groups/" + groupOpenid + "/messages", body,
+                robotId, envType, "发送群聊图文卡片", groupOpenid);
+    }
+
+    // ==================== 媒体上传（返回 file_info） ====================
+
+    /** 上传媒体文件到 QQ 服务器，返回 file_info 字符串 */
+    public String uploadMedia(String groupOpenid, int fileType, String fileUrl) {
+        return uploadMedia(getCurrentRobotId(), getCurrentEnvType(), groupOpenid, fileType, fileUrl);
+    }
+
+    public String uploadMedia(Long robotId, String envType, String groupOpenid, int fileType, String fileUrl) {
+        ObjectNode body = Json.obj();
+        body.put("file_type", fileType);
+        body.put("url", fileUrl);
+        ObjectNode result = qqApi.post("/v2/groups/" + groupOpenid + "/files", body,
+                robotId, envType, "上传媒体文件", groupOpenid);
+        if (result != null && result.has("file_info")) {
+            return result.get("file_info").toString();
+        }
+        return null;
+    }
+
     // ==================== 内部方法 ====================
 
     private ObjectNode toJsonObject(Object obj) {

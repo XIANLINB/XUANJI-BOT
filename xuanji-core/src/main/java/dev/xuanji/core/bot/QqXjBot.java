@@ -21,66 +21,87 @@ public class QqXjBot extends XjBot {
 
     @Override
     public void reply(String text) {
-        if (groupId != null) {
-            sender.sendGroupText(groupId, text, msgId);
-            recordOut("text", text, text);
-        }
+        if (groupId != null) { sender.sendGroupText(groupId, text, msgId); record("text", text); }
     }
 
     @Override
-    public void replyMarkdown(String markdownContent) {
-        replyMarkdown(markdownContent, null);
-    }
+    public void replyMarkdown(String md) { replyMarkdown(md, null); }
 
     @Override
-    public void replyMarkdown(String markdownContent, String keyboardJson) {
+    public void replyMarkdown(String md, String kbJson) {
         if (groupId == null) return;
-        ObjectNode md = new ObjectNode(JsonNodeFactory.instance);
-        md.put("content", markdownContent);
+        ObjectNode m = new ObjectNode(JsonNodeFactory.instance);
+        m.put("content", md);
         Object kb = null;
-        if (keyboardJson != null && !keyboardJson.isBlank()) {
-            try { kb = MAPPER.readTree(keyboardJson); } catch (Exception ignored) {}
+        if (kbJson != null && !kbJson.isBlank()) {
+            try { kb = MAPPER.readTree(kbJson); } catch (Exception ignored) {}
         }
-        sender.sendGroupMarkdown(groupId, md, kb, msgId);
-        recordOut("markdown", truncate(markdownContent), "kb=" + (kb != null));
+        sender.sendGroupMarkdown(groupId, m, kb, msgId);
+        record("markdown", truncate(md));
     }
 
     @Override
     public void replyImage(String url) {
-        if (groupId != null) {
-            sender.sendGroupImage(groupId, url, msgId);
-            recordOut("image", truncate(url), url);
-        }
+        if (groupId != null) { sender.sendGroupImage(groupId, url, msgId); record("image", url); }
     }
 
     @Override
     public void replyAudio(String url) {
-        if (groupId != null) {
-            sender.sendGroupAudio(groupId, url, msgId);
-            recordOut("audio", truncate(url), url);
-        }
+        if (groupId != null) { sender.sendGroupAudio(groupId, url, msgId); record("audio", url); }
     }
 
     @Override
     public void replyVideo(String url) {
-        if (groupId != null) {
-            sender.sendGroupVideo(groupId, url, msgId);
-            recordOut("video", truncate(url), url);
+        if (groupId != null) { sender.sendGroupVideo(groupId, url, msgId); record("video", url); }
+    }
+
+    @Override
+    public void replyArk(int templateId, String arkJson) {
+        if (groupId == null) return;
+        try {
+            ObjectNode root = (ObjectNode) MAPPER.readTree(arkJson);
+            ObjectNode ark = (ObjectNode) root.get("ark");
+            sender.sendGroupArk(groupId, ark, msgId);
+            record("ark", "template=" + templateId);
+        } catch (Exception e) {
+            reply("Ark 消息解析失败: " + e.getMessage());
         }
     }
 
     @Override
-    public void replyArk(String templateId, String kvJson) {
+    public void replyCard(String cardJson) {
         if (groupId == null) return;
-        ObjectNode ark = new ObjectNode(JsonNodeFactory.instance);
-        ark.put("template_id", Integer.parseInt(templateId));
-        sender.sendGroupArk(groupId, ark, msgId);
-        recordOut("ark", "template=" + templateId, kvJson);
+        try {
+            ObjectNode card = (ObjectNode) MAPPER.readTree(cardJson);
+            sender.sendGroupCard(groupId, card, msgId);
+            record("card", "tuwen");
+        } catch (Exception e) {
+            reply("Card 消息解析失败: " + e.getMessage());
+        }
     }
 
-    private void recordOut(String type, String content, String detail) {
-        dev.xuanji.core.storage.ConsoleApiController.recordEvent(
-                "OUT", type, "插件", groupId, content, detail);
+    @Override
+    public String uploadImage(String filePath) {
+        return sender.uploadMedia(groupId, 1, filePath);  // file_type=1 图片
+    }
+
+    @Override
+    public String uploadVideo(String filePath) {
+        return sender.uploadMedia(groupId, 2, filePath);  // file_type=2 视频
+    }
+
+    @Override
+    public String uploadAudio(String filePath) {
+        return sender.uploadMedia(groupId, 3, filePath);  // file_type=3 语音
+    }
+
+    @Override
+    public String uploadFile(String filePath) {
+        return sender.uploadMedia(groupId, 4, filePath);  // file_type=4 文件
+    }
+
+    private void record(String type, String content) {
+        dev.xuanji.core.storage.ConsoleApiController.recordEvent("OUT", type, "插件", groupId, content, "");
     }
 
     private static String truncate(String s) {
