@@ -1,7 +1,6 @@
 package dev.xuanji.core.command;
 
-import dev.xuanji.api.annotation.Arg;
-import dev.xuanji.api.annotation.Command;
+import dev.xuanji.api.annotation.*;
 import dev.xuanji.api.dto.GroupMessageEvent;
 import dev.xuanji.sdk.bot.XjBot;
 import dev.xuanji.sdk.event.XjGroupMessageEvent;
@@ -26,22 +25,34 @@ import java.util.concurrent.ConcurrentHashMap;
 public class CommandRegistry {
 
     private final Map<String, List<HandlerEntry>> map = new ConcurrentHashMap<>();
+    /** @GroupMessageHandler 注解方法列表（无前缀限制，每条消息都尝试匹配） */
+    private final List<HandlerEntry> groupHandlers = new CopyOnWriteArrayList<>();
 
-    /** 注册一个插件对象中的所有 @Command 方法。 */
+    /** 注册一个插件对象中的所有 @Command 和 @GroupMessageHandler 方法。 */
     public void register(Object pluginInstance) {
         for (Method m : pluginInstance.getClass().getDeclaredMethods()) {
             Command cmd = m.getAnnotation(Command.class);
-            if (cmd == null) continue;
-
-            HandlerEntry entry = new HandlerEntry(cmd, m, pluginInstance);
-            map.computeIfAbsent(cmd.value(), k -> new ArrayList<>()).add(entry);
-            for (String alias : cmd.alias()) {
-                map.computeIfAbsent(alias, k -> new ArrayList<>()).add(entry);
+            if (cmd != null) {
+                HandlerEntry entry = new HandlerEntry(null, m, pluginInstance, cmd, null);
+                map.computeIfAbsent(cmd.value(), k -> new ArrayList<>()).add(entry);
+                for (String alias : cmd.alias()) {
+                    map.computeIfAbsent(alias, k -> new ArrayList<>()).add(entry);
+                }
+                log.info("[Command] 注册: {} → {}.{}", cmd.value(),
+                        pluginInstance.getClass().getSimpleName(), m.getName());
+                continue;
             }
-            log.info("[Command] 注册: {} → {}.{}", cmd.value(),
-                    pluginInstance.getClass().getSimpleName(), m.getName());
+
+            GroupMessageHandler gmh = m.getAnnotation(GroupMessageHandler.class);
+            if (gmh != null) {
+                HandlerFilter filter = m.getAnnotation(HandlerFilter.class);
+                HandlerEntry entry = new HandlerEntry(gmh, m, pluginInstance, null, filter);
+                groupHandlers.add(entry);
+                groupHandlers.sort(Comparator.comparingInt(e -> e.gmhAnnotation != null ? e.gmhAnnotation.order() : 0));
+                log.info("[Handler] 注册群聊处理器: {}.{}", pluginInstance.getClass().getSimpleName(), m.getName());
+            }
         }
-        map.values().forEach(l -> l.sort(Comparator.comparingInt(e -> -e.annotation.priority())));
+        map.values().forEach(l -> l.sort(Comparator.comparingInt(e -> -e.cmdAnnotation.priority())));
     }
 
     // ==================== 上下文（ThreadLocal，GroupMessageHandler 设置） ====================
@@ -95,6 +106,18 @@ public class CommandRegistry {
                 log.warn("[Command] {} 执行失败: {}", cmdName, e.getMessage());
             }
         }
+        // 3. 尝试 @GroupMessageHandler（无前缀限制，过滤匹配）
+        for (HandlerEntry entry : groupHandlers) {
+            try {
+                if (!matchFilter(entry.filterAnnotation)) continue;
+                Object[] methodArgs = resolveArgs(entry.method, trimmed);
+                Object result = entry.method.invoke(entry.instance, methodArgs);
+                return result != null ? result.toString() : null;
+            } catch (Exception e) {
+                log.debug("[Handler] 执行失败: {}", e.getMessage());
+            }
+        }
+
         return null;
     }
 
@@ -150,5 +173,47 @@ public class CommandRegistry {
         return s;
     }
 
-    private record HandlerEntry(Command annotation, Method method, Object instance) {}
+    /** 检查 @HandlerFilter 条件是否满足 */
+    private boolean matchFilter(HandlerFilter f) {
+        if (f == null) return true;
+        GroupMessageEvent evt = eventDtoTL.get();
+        String text = evt != null ? evt.getPlainTextContent().trim() : "";
+
+        // cmd 正则匹配
+        if (!f.cmd().isEmpty()) {
+            if (!text.matches(".*(" + f.cmd() + ").*")) return false;
+        }
+
+        // @模式
+        if (f.at() == AtMode.NEED && (evt == null || !evt.isAtBot())) return false;
+        if (f.at() == AtMode.NOT && evt != null && evt.isAtBot()) return false;
+
+        // 限定群
+        if (f.groups().length > 0 && evt != null) {
+            if (!Arrays.asList(f.groups()).contains(evt.getGroupOpenid())) return false;
+        }
+
+        // 限定发送者
+        if (f.senders().length > 0) {
+            String uid = userIdTL.get();
+            if (uid == null || !Arrays.asList(f.senders()).contains(uid)) return false;
+        }
+
+        // 前缀
+        if (!f.startWith().isEmpty() && !text.startsWith(f.startWith())) return false;
+
+        // 后缀
+        if (!f.endWith().isEmpty() && !text.endsWith(f.endWith())) return false;
+
+        return true;
+    }
+
+    private record HandlerEntry(
+            Command cmdAnnotation,
+            Method method, Object instance,
+            GroupMessageHandler gmhAnnotation,
+            HandlerFilter filterAnnotation) {}
+
+    // 兼容旧的构造（只有 @Command）
+    private record CmdOnly(Command annotation, Method method, Object instance) {}
 }
