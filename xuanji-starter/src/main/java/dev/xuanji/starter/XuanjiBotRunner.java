@@ -1,8 +1,13 @@
 package dev.xuanji.starter;
 
+import dev.xuanji.adapter.qq.adapter.QqAdapter;
+import dev.xuanji.adapter.qq.adapter.QqBotManager;
 import dev.xuanji.adapter.qq.websocket.QqBotWsManager;
+import dev.xuanji.adapter.qq.adapter.QqBotManager;
 import dev.xuanji.adapter.qq.registry.RobotRegistry;
 import dev.xuanji.adapter.qq.model.Robot;
+import dev.xuanji.api.adapter.Bot;
+import dev.xuanji.api.adapter.BotConfig;
 import dev.xuanji.core.config.XuanjiRobotProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +33,8 @@ public class XuanjiBotRunner implements CommandLineRunner {
     private final XuanjiRobotProperties robotProperties;
     private final QqBotWsManager wsManager;
     private final RobotRegistry robotRegistry;
+    private final QqBotManager botManager;
+    private final QqAdapter qqAdapter;
 
     @Override
     public void run(String... args) {
@@ -127,5 +134,11 @@ public class XuanjiBotRunner implements CommandLineRunner {
         } else {
             throw new IllegalArgumentException("不支持的连接方式: " + connectionMethod);
         }
+        // 注册 Bot 实例到统一管理器（P2：旧 WS 与新 BotManager 并行）
+        BotConfig botConfig = new BotConfig(botKey, "qq", appId, clientSecret,
+                connectionMethod, isSandbox, java.util.Map.of());
+        Bot bot = qqAdapter.connect(botConfig);
+        botManager.register(bot);
+        log.info("[BotManager] 已注册: {}", bot.id());
     }
 }

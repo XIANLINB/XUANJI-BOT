@@ -1,5 +1,6 @@
 package dev.xuanji.adapter.qq.websocket;
 
+import dev.xuanji.api.adapter.Bot;
 import dev.xuanji.api.event.EventSink;
 import lombok.extern.slf4j.Slf4j;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -486,6 +487,18 @@ public class QqBotWsClient {
         // 提取事件 ID 并分发给 EventSink
         String eventId = data.path("id").asText("");
         totalEvents++;
+
+        // P2: 转换为统一 BotEvent 并记录（验证抽象可用）
+        try {
+            Bot bot = new Bot("qq:" + appId, "qq", appId, dev.xuanji.api.adapter.Bot.Status.ONLINE, java.util.Set.of());
+            dev.xuanji.api.event.BotEvent be = dev.xuanji.adapter.qq.converter.QqEventConverter.convert(bot, eventType, data, eventId);
+            log.debug("[BotEvent] 已转换: type={}, user={}, group={}, text={}",
+                    be.type().fullName(), be.sender().nickname(),
+                    be.group() != null ? be.group().groupId() : "私聊",
+                    be.message() != null ? be.message().plainText() : "");
+        } catch (Exception e) {
+            log.warn("[BotEvent] 转换跳过: {}", e.getMessage());
+        }
 
         try {
             eventDispatcher.dispatch(eventType, robotId, envType, data, eventId);
