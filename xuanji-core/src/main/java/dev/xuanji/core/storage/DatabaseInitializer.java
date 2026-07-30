@@ -48,19 +48,20 @@ public class DatabaseInitializer {
             Files.createDirectories(base.resolve("log"));
             Files.createDirectories(base.resolve("backup"));
 
-            // 按配置文件中的 bot 创建平台级目录
+            // 按配置文件中的 bot 创建平台级目录（以 appId 命名）
             var bots = robotProperties.getRobots();
             if (bots != null) {
                 for (var entry : bots.entrySet()) {
-                    String botKey = entry.getKey();
                     String adapter = entry.getValue().getAdapter();
-                    if (adapter == null) adapter = "qqbot"; // 默认 QQ
+                    if (adapter == null || adapter.isEmpty()) adapter = "qqbot";
+                    String appId = entry.getValue().getAppId();
+                    if (appId == null || appId.isEmpty()) appId = entry.getKey();
 
-                Path botDataDir = base.resolve("data").resolve(adapter).resolve(botKey);
-                Files.createDirectories(botDataDir.resolve("groups"));
-                Path botLogDir = base.resolve("log").resolve(adapter).resolve(botKey);
-                Files.createDirectories(botLogDir);
-                log.info("[DB] 创建目录: data={}, log={}", botDataDir, botLogDir);
+                    Path botDataDir = base.resolve("data").resolve(adapter).resolve(appId);
+                    Files.createDirectories(botDataDir.resolve("groups"));
+                    Path botLogDir = base.resolve("log").resolve(adapter).resolve(appId);
+                    Files.createDirectories(botLogDir);
+                    log.info("[DB] 创建目录: data={}, log={}", botDataDir, botLogDir);
                 }
             }
             log.info("[DB] 目录层级已就绪: {}", base.toAbsolutePath());
