@@ -3,7 +3,6 @@ package dev.xuanji.core.command;
 import dev.xuanji.api.annotation.Arg;
 import dev.xuanji.api.annotation.Command;
 import dev.xuanji.api.dto.GroupMessageEvent;
-import dev.xuanji.core.bot.QqXjBot;
 import dev.xuanji.sdk.bot.XjBot;
 import dev.xuanji.sdk.event.XjGroupMessageEvent;
 import lombok.extern.slf4j.Slf4j;
@@ -69,8 +68,6 @@ public class CommandRegistry {
     public static String getCurrentBotKey() { return botKeyTL.get(); }
     public static String getCurrentGroupId(){ return groupIdTL.get(); }
     public static String getCurrentMsgId()  { return msgIdTL.get(); }
-    public static BotEvent getCurrentEvent(){ return eventTL.get(); }
-    public static MessageSender getCurrentSender() { return senderTL.get(); }
 
     // ==================== 指令执行 ====================
 

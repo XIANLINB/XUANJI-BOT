@@ -45,6 +45,11 @@
         <dependencies>
             <dependency>
                 <groupId>dev.xuanji</groupId>
+                <artifactId>xuanji-sdk</artifactId>
+                <version>1.0.0-SNAPSHOT</version>
+            </dependency>
+            <dependency>
+                <groupId>dev.xuanji</groupId>
                 <artifactId>xuanji-api</artifactId>
                 <version>1.0.0-SNAPSHOT</version>
             </dependency>
