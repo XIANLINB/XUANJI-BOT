@@ -17,6 +17,11 @@
         <!-- 过渡形态：P3 引入 MessageSender 接口后反转为依赖 api -->
         <dependency>
             <groupId>dev.xuanji</groupId>
+            <artifactId>xuanji-sdk</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>dev.xuanji</groupId>
             <artifactId>xuanji-adapter-qq</artifactId>
         </dependency>
 

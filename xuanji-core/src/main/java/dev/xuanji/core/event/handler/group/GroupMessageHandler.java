@@ -88,7 +88,10 @@ public class GroupMessageHandler implements EventHandler {
             // @Command 指令匹配
             String botKey = robotProperties.findBotKeyByRobotId(robotId);
             if (botKey == null) botKey = "bot1";
-            CommandRegistry.setContext(botKey, groupOpenid, msgId, memberOpenid, null, messageSender);
+
+            // 创建 XjBot 实例（SDK 消息发送器）
+            var xjBot = new dev.xuanji.core.bot.QqXjBot(messageSender, groupOpenid, msgId);
+            CommandRegistry.setContext(botKey, groupOpenid, msgId, memberOpenid, event, xjBot);
             try {
                 String cmdResult = commandRegistry.execute(content);
                 if (cmdResult != null) {

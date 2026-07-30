@@ -2,9 +2,10 @@ package dev.xuanji.core.command;
 
 import dev.xuanji.api.annotation.Arg;
 import dev.xuanji.api.annotation.Command;
-import dev.xuanji.api.event.BotEvent;
-import dev.xuanji.adapter.qq.api.MessageSender;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import dev.xuanji.api.dto.GroupMessageEvent;
+import dev.xuanji.core.bot.QqXjBot;
+import dev.xuanji.sdk.bot.XjBot;
+import dev.xuanji.sdk.event.XjGroupMessageEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -50,18 +51,18 @@ public class CommandRegistry {
     private static final ThreadLocal<String> botKeyTL = new ThreadLocal<>();
     private static final ThreadLocal<String> groupIdTL = new ThreadLocal<>();
     private static final ThreadLocal<String> msgIdTL = new ThreadLocal<>();
-    private static final ThreadLocal<BotEvent> eventTL = new ThreadLocal<>();
-    private static final ThreadLocal<MessageSender> senderTL = new ThreadLocal<>();
+    private static final ThreadLocal<GroupMessageEvent> eventDtoTL = new ThreadLocal<>();
+    private static final ThreadLocal<XjBot> botTL = new ThreadLocal<>();
 
     public static void setContext(String botKey, String groupId, String msgId, String userId,
-                                  BotEvent event, MessageSender sender) {
+                                  GroupMessageEvent eventDto, XjBot bot) {
         botKeyTL.set(botKey); groupIdTL.set(groupId);
         msgIdTL.set(msgId); userIdTL.set(userId);
-        eventTL.set(event); senderTL.set(sender);
+        eventDtoTL.set(eventDto); botTL.set(bot);
     }
     public static void clearContext() {
         botKeyTL.remove(); groupIdTL.remove(); msgIdTL.remove();
-        userIdTL.remove(); eventTL.remove(); senderTL.remove();
+        userIdTL.remove(); eventDtoTL.remove(); botTL.remove();
     }
 
     public static String getCurrentUser()   { return userIdTL.get(); }
@@ -109,15 +110,16 @@ public class CommandRegistry {
         for (int i = 0; i < params.length; i++) {
             Class<?> type = params[i].getType();
 
-            // 注入 BotEvent
-            if (BotEvent.class.isAssignableFrom(type)) {
-                values[i] = eventTL.get();
+            // 注入 XjGroupMessageEvent（SDK 事件封装）
+            if (XjGroupMessageEvent.class.isAssignableFrom(type)) {
+                values[i] = eventDtoTL.get() != null
+                        ? new XjGroupMessageEvent(eventDtoTL.get()) : null;
                 continue;
             }
 
-            // 注入 MessageSender（插件发消息用）
-            if (MessageSender.class.isAssignableFrom(type)) {
-                values[i] = senderTL.get();
+            // 注入 XjBot（SDK 消息发送器）
+            if (XjBot.class.isAssignableFrom(type)) {
+                values[i] = botTL.get();
                 continue;
             }
 
