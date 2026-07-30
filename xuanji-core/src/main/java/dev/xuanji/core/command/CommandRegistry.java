@@ -59,46 +59,33 @@ public class CommandRegistry {
         if (rawText == null || rawText.isBlank()) return null;
         String trimmed = rawText.trim();
 
-        BotEvent event = BotContext.current();
-        if (event == null) return null;
+        // P3 过渡：为旧 MessageSender 设置 ThreadLocal 上下文（由外层 GroupMessageHandler 保证）
+        // CommandRegistry 作为纯匹配引擎，不依赖 ScopedValue
+        String[] parts = trimmed.split("\\s+", 2);
+        String cmdName = parts[0];
+        String args = parts.length > 1 ? parts[1] : "";
 
-        // P3 过渡：为旧 MessageSender 设置 ThreadLocal 上下文
-        long robotId = (long) event.bot().selfId().hashCode();
-        MessageSender.setCurrentContext(robotId, "PRODUCTION");
-        try {
-            String[] parts = trimmed.split("\\s+", 2);
-            String cmdName = parts[0];
-            String args = parts.length > 1 ? parts[1] : "";
+        List<HandlerEntry> entries = map.get(cmdName);
+        if (entries == null) return null;
 
-            List<HandlerEntry> entries = map.get(cmdName);
-            if (entries == null) return null;
-
-            for (HandlerEntry entry : entries) {
-                try {
-                    // 参数解析
-                    Object[] methodArgs = resolveArgs(entry.method, args, event);
-                    Object result = entry.method.invoke(entry.instance, methodArgs);
-                    return result != null ? result.toString() : null;
-                } catch (Exception e) {
-                    log.warn("[Command] {} 执行失败: {}", cmdName, e.getMessage());
-                }
+        for (HandlerEntry entry : entries) {
+            try {
+                Object[] methodArgs = resolveArgs(entry.method, args);
+                Object result = entry.method.invoke(entry.instance, methodArgs);
+                return result != null ? result.toString() : null;
+            } catch (Exception e) {
+                log.warn("[Command] {} 执行失败: {}", cmdName, e.getMessage());
             }
-            return null;
-        } finally {
-            MessageSender.clearCurrentContext();
         }
+        return null;
     }
 
-    private Object[] resolveArgs(Method method, String args, BotEvent event) {
+    private Object[] resolveArgs(Method method, String args) {
         Parameter[] params = method.getParameters();
         Object[] values = new Object[params.length];
         String[] argParts = splitArgs(args);
 
         for (int i = 0; i < params.length; i++) {
-            if (BotEvent.class.isAssignableFrom(params[i].getType())) {
-                values[i] = event;
-                continue;
-            }
             Arg arg = params[i].getAnnotation(Arg.class);
             if (arg != null) {
                 String raw = i < argParts.length ? argParts[i] : null;
