@@ -1,0 +1,14 @@
+# 璇玑 QQ 机器人开发框架
+
+server:
+  port: 8668
+
+spring:
+  application:
+    name: xuanji-bot
+
+# ===== 日志 =====
+logging:
+  level:
+    com.qunxing: DEBUG
+    root: INFO
