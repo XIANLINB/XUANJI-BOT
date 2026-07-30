@@ -1,71 +1,50 @@
 package dev.xuanji.plugin.demo;
 
 import dev.xuanji.api.annotation.*;
+import dev.xuanji.api.annotation.XuanjiPlugin.Perm;
 import dev.xuanji.sdk.bot.XjBot;
 import dev.xuanji.sdk.event.XjGroupMessageEvent;
-import dev.xuanji.sdk.msg.XjKeyboard;
-import dev.xuanji.sdk.msg.XjMarkdown;
+import dev.xuanji.sdk.msg.*;
 import org.pf4j.Plugin;
 import org.pf4j.PluginWrapper;
 
 public class DemoPlugin extends Plugin {
     public DemoPlugin(PluginWrapper wrapper) { super(wrapper); }
 
-    @XuanjiPlugin(id = "demo-plugin", name = "演示插件", version = "1.0.0")
+    @XuanjiPlugin(
+        id = "demo-plugin", name = "演示插件", version = "1.0.0",
+        author = "XuanJi Team", description = "展示璇玑 SDK 全部消息能力",
+        permissions = {Perm.NETWORK, Perm.PROACTIVE_MESSAGE}
+    )
     public static class Commands {
 
-        // ==================== @Command 前缀匹配 ====================
-
+        // ==================== 基础 ====================
         @Command("ping")
         public String ping() { return "pong! 璇玑框架运行正常"; }
 
         @Command(value = "hello", alias = "你好")
-        public String hello(@Arg("名字") String name) {
-            return "你好, " + (name != null ? name : "世界") + "!";
-        }
+        public String hello(@Arg("名字") String name) { return "你好, " + (name != null ? name : "世界") + "!"; }
 
-        // ==================== @GroupMessageHandler 自由监听（Shiro 风格） ====================
-
-        /** 监听"签到"或"打卡"——必须 @机器人 */
+        // ==================== @GroupMessageHandler 自由监听 ====================
         @GroupMessageHandler
         @HandlerFilter(cmd = "签到|打卡", at = AtMode.NEED)
         public void onSign(XjGroupMessageEvent e, XjBot bot) {
-            bot.reply(e.getSenderName() + " 签到成功！\n角色: " + e.getSenderRole());
+            bot.reply(e.getSenderName() + " 签到成功！角色: " + e.getSenderRole());
         }
 
-        /** 监听以 "!" 开头的命令 */
         @GroupMessageHandler
         @HandlerFilter(startWith = "!")
         public void onBang(XjGroupMessageEvent e, XjBot bot) {
-            String cmd = e.getPlainText().substring(1);
-            bot.reply("收到感叹号命令: " + cmd);
-        }
-
-        /** 任何包含"你好"的消息都回复（不需 @） */
-        @GroupMessageHandler
-        @HandlerFilter(cmd = "你好")
-        public void onHello(XjGroupMessageEvent e, XjBot bot) {
-            bot.reply("你好呀 " + e.getSenderName() + "！");
+            bot.reply("收到感叹号命令: " + e.getPlainText().substring(1));
         }
 
         // ==================== Markdown + 多行按钮 ====================
-
         @Command("功能")
         public void menu(XjBot bot) {
-            String md = XjMarkdown.create()
-                    .h2("璇玑功能菜单")
-                    .text("请选择功能：")
-                    .build();
+            String md = XjMarkdown.create().h2("璇玑功能菜单").text("请选择：").build();
             String kb = XjKeyboard.create()
-                    .row()
-                        .btn("sign", "签到", "签到")
-                        .btn("bank", "银行", "银行")
-                        .btn("md", "Markdown", "md")
-                    .endRow()
-                    .row()
-                        .btn("info", "事件信息", "event")
-                        .btn("help", "帮助", "help")
-                    .endRow()
+                    .row().btn("sign", "签到", "签到").btn("bank", "银行", "银行").btn("md", "Markdown", "md").endRow()
+                    .row().btn("info", "事件信息", "event").btn("help", "帮助", "help").endRow()
                     .build();
             bot.replyMarkdown(md, kb);
         }
@@ -88,9 +67,53 @@ public class DemoPlugin extends Plugin {
             bot.replyImage("https://c-ssl.duitang.com/uploads/blog/202605/05/3BS4exw0czd3Vlg.jpg");
         }
 
+        @Command("语音")
+        public void audio(XjBot bot) {
+            bot.replyAudio("http://music.163.com/song/media/outer/url?id=862101001.mp3");
+        }
+
+        // ==================== Ark 消息 ====================
+        @Command("ark24")
+        public void ark24(XjBot bot) {
+            String json = XjArk.Ark24.create()
+                    .title("璇玑机器人框架").desc("Java Spring Boot 跨平台机器人框架")
+                    .prompt("查看详情").img("https://c-ssl.duitang.com/uploads/blog/202605/05/3BS4exw0czd3Vlg.jpg")
+                    .link("https://bot.q.qq.com").subtitle("XuanJi Framework")
+                    .build();
+            bot.replyArk(24, json);
+        }
+
+        @Command("ark37")
+        public void ark37(XjBot bot) {
+            String json = XjArk.Ark37.create()
+                    .prompt("通知提醒").metaTitle("璇玑框架更新")
+                    .metaSubtitle("v1.0.0 已发布").metaCover("https://c-ssl.duitang.com/uploads/blog/202605/05/3BS4exw0czd3Vlg.jpg")
+                    .metaUrl("https://bot.q.qq.com")
+                    .build();
+            bot.replyArk(37, json);
+        }
+
+        // ==================== 图文卡片 ====================
+        @Command("卡片")
+        public void card(XjBot bot) {
+            String json = XjCard.create()
+                    .title("QQ开放平台").desc("2分钟完成注册并创建QQBot")
+                    .picUrl("https://qqminiapp.cdn-go.cn/qq-open-platform/9b9327f1/assets/33-2-GiI9drV8.png")
+                    .url("https://q.qq.com/#/")
+                    .build();
+            bot.replyCard(json);
+        }
+
+        // ==================== 帮助 ====================
         @Command("帮助")
         public void help(XjBot bot) {
-            bot.reply("@机器人说 签到/打卡 | 前缀 !xxx | 包含你好 \n命令: ping | hello | 功能 | md | 图 | 事件信息");
+            bot.reply("""
+                    @机器人说 签到/打卡 | 前缀 !xxx
+                    命令: ping | hello <名字> | 功能 | 事件信息
+                    富媒体: md | 图 | 语音
+                    Ark: ark24 | ark37
+                    卡片: 卡片
+                    """);
         }
     }
 }
