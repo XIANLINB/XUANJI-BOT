@@ -58,7 +58,7 @@
 | 参考框架概念 | 璇玑对应方案 |
 |---|---|
 | Koishi Context / 副作用回收 | 插件子 ApplicationContext，关闭即整体回收 |
-| 装饰器自动注册 | `@XuanjiPlugin`/`@Command`/`@OnMessage` + BeanPostProcessor 扫描 |
+| 装饰器自动注册 | `@XuanjiPlugin` + `@GroupMessage`/`@PrivateMessage`/`@MessageFilter` + BeanPostProcessor 扫描 |
 | AstrBot 洋葱流水线 | `BotPipeline` 责任链，Ordered `PipelineStage`（pre/post/abort） |
 | 统一 Session / AstrMessageEvent | `BotEvent` 统一事件模型（record） |
 | 消息元素 Element | `MessageChain`：sealed `MessageElement` + record 元素 |
@@ -84,7 +84,7 @@
 │ 能力层 Capability（ServiceRegistry：LlmService/EconomyService   │
 │              等 SPI + Function Calling + MCP 客户端）          │
 ├──────────────────────────────────────────────────────────────┤
-│ 调度层 Dispatch（EventBus → BotPipeline → @Command 指令映射     │
+│ 调度层 Dispatch（EventBus → BotPipeline → 指令/事件分发        │
 │              幂等去重 · 限流 · @RequireRole 声明式横切）         │
 ├──────────────────────────────────────────────────────────────┤
 │ 接入层 Adapter（QQ 官方 · OneBot · 飞书… ↔ BotEvent/MessageChain│
@@ -100,7 +100,7 @@
 xuanji/
 ├── xuanji-api/               # 纯接口与模型（零实现零 LLM 依赖）
 │     #   BotEvent / MessageChain / BotAdapter / Bot / MessageSender
-│     #   PipelineStage / @XuanjiPlugin / @Command / @OnMessage
+│     #   PipelineStage / @XuanjiPlugin / @GroupMessage / @PrivateMessage / @MessageFilter / @Arg
 │     #   @RateLimit / @RequireRole / 能力 SPI（LlmService/EconomyService…）
 ├── xuanji-core/              # 运行时：EventBus、Pipeline、指令映射、ServiceRegistry、
 │     #   BotManager、PF4J 插件加载、XPBP Runtime Manager、权限/限流/幂等
@@ -244,25 +244,33 @@ Adapter → BotEvent → 幂等去重 → EventBus → Pipeline → 响应
 - 插件可注册自定义阶段插入任意位置（AstrBot 洋葱模型同款能力）；
 - 横切逻辑（如 ignore-bot-messages）只存在于 Pipeline，**禁止写进业务 handler**。
 
-## 5.2 @Command 指令系统（消灭 switch(content)）
+## 5.2 指令与消息注解系统（消灭 switch(content)）
+
+指令与事件用「场景注解 + 过滤注解」组合表达，比单一 `@Command` 更易覆盖群聊/私聊/系统事件多场景：
 
 ```java
-@XuanjiPlugin(id = "sign", name = "签到", version = "1.0.0")
+@XuanjiPlugin(id = "sign", name = "签到", version = "1.0.0", rateLimit = 5)
 public class SignPlugin {
 
-    @Command("签到", cooldown = 5, role = MEMBER)
+    @GroupMessage
+    @MessageFilter(cmd = "签到|打卡", roles = {"owner","admin"})
     public String sign(BotEvent event, @Arg(value = "补签日期", required = false) LocalDate date) {
         // 返回值自动转为 Text 元素回复；抛异常走统一错误提示
     }
 
-    @OnMessage(type = "message/group", priority = 100, block = false)
+    @GroupMessage(priority = 100, block = false)
     public void onAnyGroupMessage(BotEvent event) { ... }
 }
 ```
 
+- 场景注解：`@GroupMessage` / `@PrivateMessage` 标记群聊/私聊消息处理方法；`@GroupEvent` / `@PrivateEvent` 标记系统事件（加群/退群等）；
+- 触发与过滤：`@MessageFilter(cmd="签到|打卡")` 支持正则触发词、`roles` 限制角色、`startWith`/`endWith` 前缀后缀、`groups`/`senders` 限定范围、`invert` 反转；
+- 冷却（限流）：当前为**插件级** `@XuanjiPlugin(rateLimit = 5)`（同一用户 5 秒内仅触发一次），per-command 冷却为后续演进；
 - `@Arg` 结构化参数绑定（类型转换/必填/默认值/错误提示），**不学伊蕾娜正则捕获组**；
-- 声明式横切：`cooldown`（冷却）、`role`（权限）、`@RateLimit`、`@GroupOnly` AOP 统一实现；
-- 指令冲突仲裁：priority + block，与拦截器链分离的两级模型（借鉴伊蕾娜，补其无 ACL 短板）。
+- 声明式横切：`@RateLimit`、`@GroupOnly`、`@RequireRole` 由 AOP/Stage 统一实现；
+- 指令冲突仲裁：`priority` + `block`，与拦截器链分离的两级模型（借鉴伊蕾娜，补其无 ACL 短板）。
+
+> 注：早期设计草案用单一 `@Command` 注解，实现时拆为「场景注解（@GroupMessage/@PrivateMessage/@GroupEvent/@PrivateEvent）+ 过滤注解 @MessageFilter」，更贴合多场景且更易扩展，故以当前实现为准。
 
 ## 5.3 可靠投递三件套
 
@@ -405,7 +413,7 @@ L0 框架特权角色（凌驾所有平台角色之上）
 
 L1 统一角色枚举（平台角色映射，80% 插件只用这层）
    BotRole { OWNER, ADMIN, MEMBER } ← 适配器负责平台角色映射
-   用法：@Command(..., role = ADMIN)
+   用法：@MessageFilter(cmd = "...", roles = {"owner","admin"})（角色过滤在 @MessageFilter.roles）
 
 L2 平台原生透传（精细场景）
    身份组/权限位不抽象（平台语义差异过大），保留在
@@ -600,11 +608,11 @@ xuanji.message.e2e_ms       = t4-t0   端到端总耗时
 | `QqApiService` + `AccessTokenService` | xuanji-adapter-qq | 原样保留（鉴权/401重试/限流/trace-ID 已是生产级）；可选重构 @HttpExchange |
 | `MessageSender` | 拆两半 | 发送实现 → adapter-qq 实现统一接口；ThreadLocal → ScopedValue `BotContext` |
 | `EventDispatcher` | xuanji-core Dispatch | 字符串路由 → BotEvent 类型路由；接入 Pipeline |
-| `@EventMapping`/`EventHandler` | xuanji-api | 升级 `@OnMessage`/`@Command`；`handle(JSONObject)` → `handle(BotEvent)` |
-| 9 个测试命令 handler | 示例插件 | `switch(content)` → 每命令一个 `@Command` 方法 |
+| `@EventMapping`/`EventHandler` | xuanji-api | 升级 `@GroupMessage`/`@PrivateMessage`/`@MessageFilter`；`handle(JSONObject)` → `handle(BotEvent)` |
+| 9 个测试命令 handler | 示例插件 | `switch(content)` → 每命令一个 `@GroupMessage`+`@MessageFilter` 方法 |
 | `RobotRegistry` | xuanji-core BotManager | key 从 robotId → `{platform}:{appId}`；加生命周期管理 |
 | `XuanjiRobotProperties` | xuanji-api BotsProperties | 迁标准 `application.yml` 的 `xuanji.bots` 列表绑定 |
 | `MarkdownBuilder` 等 | adapter-qq 构建器 | 保留，长期包装为 MessageChain 的 QQ 扩展元素 |
 | `GroupMessageEvent` 等 DTO | adapter-qq 解析器 | handler 手动解析 → 适配器统一解析为 BotEvent |
 
-**落地顺序**：P0 基线（JDK 25 + 多模块拆分 + 包名迁 `dev.xuanji.*`）→ P1 抽象先行（四抽象接口）→ P2 搬家（core/registry/utils 入 adapter-qq）→ P3 调度升级（Pipeline+@Command 接管）→ P4 持久化。
+**落地顺序**：P0 基线（JDK 25 + 多模块拆分 + 包名迁 `dev.xuanji.*`）→ P1 抽象先行（四抽象接口）→ P2 搬家（core/registry/utils 入 adapter-qq）→ P3 调度升级（Pipeline+@GroupMessage/@MessageFilter 接管）→ P4 持久化。

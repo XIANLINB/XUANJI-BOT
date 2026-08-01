@@ -171,12 +171,13 @@ public class DatabaseInitializer {
         jdbc.execute("""
             CREATE TABLE IF NOT EXISTS xuanji_qqbot_user (
                 id               BIGINT AUTO_INCREMENT PRIMARY KEY,
-                bot_id           BIGINT       NOT NULL,
+                bot_id           VARCHAR(64)  NOT NULL,
                 platform_user_id VARCHAR(64)  NOT NULL,
                 internal_id      VARCHAR(64),
                 nickname         VARCHAR(128),
                 framework_role   VARCHAR(32),
                 authority        INT          DEFAULT 0,
+                is_deleted       TINYINT      DEFAULT 0,
                 create_time      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
             )
         """);
@@ -185,12 +186,13 @@ public class DatabaseInitializer {
         jdbc.execute("""
             CREATE TABLE IF NOT EXISTS xuanji_onebot_user (
                 id               BIGINT AUTO_INCREMENT PRIMARY KEY,
-                bot_id           BIGINT       NOT NULL,
+                bot_id           VARCHAR(64)  NOT NULL,
                 platform_user_id VARCHAR(64)  NOT NULL,
                 internal_id      VARCHAR(64),
                 nickname         VARCHAR(128),
                 framework_role   VARCHAR(32),
                 authority        INT          DEFAULT 0,
+                is_deleted       TINYINT      DEFAULT 0,
                 create_time      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
             )
         """);
@@ -199,9 +201,11 @@ public class DatabaseInitializer {
         jdbc.execute("""
             CREATE TABLE IF NOT EXISTS xuanji_qqbot_group (
                 id          BIGINT AUTO_INCREMENT PRIMARY KEY,
-                bot_id      BIGINT       NOT NULL,
+                bot_id      VARCHAR(64)  NOT NULL,
                 group_id    VARCHAR(128) NOT NULL,
                 group_name  VARCHAR(256),
+                status      VARCHAR(16)  DEFAULT 'active',
+                is_deleted  TINYINT      DEFAULT 0,
                 create_time TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
             )
         """);
@@ -210,7 +214,7 @@ public class DatabaseInitializer {
         jdbc.execute("""
             CREATE TABLE IF NOT EXISTS xuanji_qqbot_group_member (
                 id          BIGINT AUTO_INCREMENT PRIMARY KEY,
-                bot_id      BIGINT       NOT NULL,
+                bot_id      VARCHAR(64)  NOT NULL,
                 group_id    VARCHAR(128) NOT NULL,
                 member_id   VARCHAR(128) NOT NULL,
                 role        VARCHAR(32),
@@ -218,7 +222,26 @@ public class DatabaseInitializer {
             )
         """);
 
-        log.info("[DB] {}", firstRun ? "框架初始化建表完成（10 张）" : "建表已完成（已存在）");
+        // 11. QQ Bot 信息表（启动时从 /users/@me 接口同步）
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS xuanji_qqbot_info (
+                id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
+                bot_id             VARCHAR(64)  NOT NULL,
+                bot_key            VARCHAR(64)  NOT NULL,
+                username           VARCHAR(128),
+                avatar             VARCHAR(512),
+                bot                BOOLEAN,
+                union_openid       VARCHAR(128),
+                union_user_account VARCHAR(128),
+                share_url          VARCHAR(512),
+                welcome_msg        VARCHAR(1024),
+                raw_json           TEXT,
+                updated_at         TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (bot_id)
+            )
+        """);
+
+        log.info("[DB] {}", firstRun ? "框架初始化建表完成（11 张）" : "建表已完成（已存在）");
     }
 
     /** 从 YAML 配置中注册 Bot 实例到 xuanji_bot 表 */

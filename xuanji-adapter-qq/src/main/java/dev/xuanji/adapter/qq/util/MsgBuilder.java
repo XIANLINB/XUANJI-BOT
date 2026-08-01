@@ -1,6 +1,6 @@
 package dev.xuanji.adapter.qq.util;
 
-import dev.xuanji.api.dto.SendMessageRequest;
+import dev.xuanji.adapter.qq.dto.SendMessageRequest;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.NullNode;

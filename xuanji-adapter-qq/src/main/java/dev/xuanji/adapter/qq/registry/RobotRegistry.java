@@ -43,7 +43,7 @@ public class RobotRegistry {
      * 机器人信息映射表
      * <p>key = robotId，value = Robot 实体
      */
-    private final ConcurrentHashMap<Long, Robot> robots = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Robot> robots = new ConcurrentHashMap<>();
 
     /**
      * 环境配置映射表
@@ -80,8 +80,16 @@ public class RobotRegistry {
      * @param robotId 机器人 ID
      * @return Robot 实体，不存在返回 null
      */
-    public Robot getRobot(Long robotId) {
+    public Robot getRobot(String robotId) {
         return robots.get(robotId);
+    }
+
+    /** 按 appId 查找 Robot */
+    public Robot findByAppId(String appId) {
+        for (Robot r : robots.values()) {
+            if (appId.equals(r.getAppId())) return r;
+        }
+        return null;
     }
 
     /**
@@ -91,7 +99,7 @@ public class RobotRegistry {
      * @param envType 环境类型（SANDBOX / PRODUCTION）
      * @return RobotEnvironment 实体，不存在返回 null
      */
-    public RobotEnvironment getEnvironment(Long robotId, String envType) {
+    public RobotEnvironment getEnvironment(String robotId, String envType) {
         return environments.get(robotId + ":" + envType);
     }
 
@@ -104,7 +112,7 @@ public class RobotRegistry {
      * @param robotId 机器人 ID
      * @return 激活环境的 RobotEnvironment 实体，不存在返回 null
      */
-    public RobotEnvironment getActiveEnvironment(Long robotId) {
+    public RobotEnvironment getActiveEnvironment(String robotId) {
         Robot robot = robots.get(robotId);
         if (robot == null) return null;
         String envType = robot.getActiveEnv();
@@ -117,7 +125,7 @@ public class RobotRegistry {
      *
      * @return 不可修改的 robotId -> Robot 映射视图
      */
-    public Map<Long, Robot> getAllRobots() {
+    public Map<String, Robot> getAllRobots() {
         return Map.copyOf(robots);
     }
 
@@ -127,7 +135,7 @@ public class RobotRegistry {
      * @param robotId 机器人 ID
      * @return true=已注册，false=不存在
      */
-    public boolean hasRobot(Long robotId) {
+    public boolean hasRobot(String robotId) {
         return robots.containsKey(robotId);
     }
 }

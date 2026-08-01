@@ -63,7 +63,7 @@ public class WebSocketController {
      * @return 包含 running、state、totalEvents、totalReconnects 的状态信息
      */
     @GetMapping("/status/{robotId}")
-    public R<Map<String, Object>> getStatus(@PathVariable Long robotId,
+    public R<Map<String, Object>> getStatus(@PathVariable String robotId,
                                              @RequestParam(defaultValue = "SANDBOX") String envType) {
         return R.ok(wsManager.getStatus(robotId, envType));
     }
@@ -78,7 +78,7 @@ public class WebSocketController {
      * @return 操作结果
      */
     @PostMapping("/restart/{robotId}")
-    public R<Void> restart(@PathVariable Long robotId,
+    public R<Void> restart(@PathVariable String robotId,
                            @RequestParam(defaultValue = "SANDBOX") String envType) {
         wsManager.restart(robotId, envType);
         return R.ok();
@@ -91,7 +91,7 @@ public class WebSocketController {
      * @return 操作结果
      */
     @PostMapping("/stop/{robotId}")
-    public R<Void> stop(@PathVariable Long robotId) {
+    public R<Void> stop(@PathVariable String robotId) {
         wsManager.stop(robotId);
         return R.ok();
     }
@@ -106,7 +106,7 @@ public class WebSocketController {
      * @return 操作结果
      */
     @PostMapping("/start/{robotId}")
-    public R<Void> start(@PathVariable Long robotId,
+    public R<Void> start(@PathVariable String robotId,
                          @RequestParam(defaultValue = "SANDBOX") String envType) {
         wsManager.start(robotId, envType);
         return R.ok();

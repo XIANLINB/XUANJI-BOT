@@ -29,11 +29,11 @@ public final class QqEventConverter {
      * @param data      事件数据（d 字段，已注入 _eventType/_eventId 元数据）
      * @param eventId   事件 ID（平台推送或框架生成）
      */
-    public static BotEvent convert(Bot bot, String eventType, ObjectNode data, String eventId) {
-        EventType type = mapEventType(eventType);
-        XuanjiUser sender = extractUser(data, eventType);
-        XuanjiGroup group = extractGroup(data, eventType);
-        MessageChain message = extractMessage(data, eventType);
+    public static BotEvent convert(Bot bot, String rawEventType, String envType, ObjectNode data, String eventId) {
+        EventType type = mapEventType(rawEventType);
+        XuanjiUser sender = extractUser(data, rawEventType);
+        XuanjiGroup group = extractGroup(data, rawEventType);
+        MessageChain message = extractMessage(data, rawEventType);
         String replyMsgId = data.path("id").asText(null);
 
         return new BotEvent(
@@ -44,7 +44,9 @@ public final class QqEventConverter {
                 group,
                 message != null && !message.elements().isEmpty() ? message : null,
                 replyMsgId,
-                data  // 保留平台原生数据
+                data,  // 保留平台原生数据
+                rawEventType,
+                envType
         );
     }
 

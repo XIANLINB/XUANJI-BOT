@@ -29,7 +29,7 @@ import java.util.Map;
 @Data
 @Configuration
 @ConfigurationProperties(prefix = "xuanji")
-@PropertySource(value = "classpath:xuanji-robots.yml", factory = YamlPropertySourceFactory.class)
+@PropertySource(value = "file:data/xuanji-robots.yml", ignoreResourceNotFound = true, factory = YamlPropertySourceFactory.class)
 public class XuanjiRobotProperties {
 
     /** 全局 Webhook 回调域名（使用 webhook 连接方式时必填） */
@@ -69,11 +69,11 @@ public class XuanjiRobotProperties {
     }
 
     /** 根据 appId 反查 YAML 中的 botKey */
-    public String findBotKeyByRobotId(long robotId) {
+    public String findBotKeyByRobotId(String robotId) {
         if (robots == null) return null;
         for (var e : robots.entrySet()) {
             String a = e.getValue().getAppId();
-            if (a != null && ((long) a.hashCode()) == robotId) return e.getKey();
+            if (a != null && a.equals(robotId)) return e.getKey();
         }
         return null;
     }

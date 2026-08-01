@@ -30,7 +30,7 @@ import java.time.Duration;
  *       Token 由 {@link AccessTokenService} 管理，缓存和刷新对调用方透明</li>
  *   <li><b>重试</b> — 401 响应时自动刷新 Token 并重试一次（不递归，避免死循环）</li>
  *   <li><b>限流</b> — 429 响应时抛出 {@link BusinessException}，由上层决定处理策略</li>
- *   <li><b>错误解析</b> — 使用 {@link dev.xuanji.api.enums.QqApiErrorCode}
+ *   <li><b>错误解析</b> — 使用 {@link dev.xuanji.adapter.qq.enums.QqApiErrorCode}
  *       解析平台错误码，提供结构化的错误信息和排查建议</li>
  *   <li><b>链路追踪</b> — 记录响应头中的 X-Tps-trace-ID，便于问题排查</li>
  * </ul>
@@ -69,7 +69,7 @@ import java.time.Duration;
  *
  * @see AccessTokenService  AccessToken 生命周期管理
  * @see RobotRegistry       机器人凭证查找
- * @see dev.xuanji.api.enums.QqApiErrorCode QQ 平台错误码枚举
+ * @see dev.xuanji.adapter.qq.enums.QqApiErrorCode QQ 平台错误码枚举
  */
 @Slf4j
 @Service
@@ -123,7 +123,7 @@ public class QqApiService {
      * @param body    请求体 JSON
      * @return 响应 JSON
      */
-    public ObjectNode post(Long robotId, String envType, String path, ObjectNode body) {
+    public ObjectNode post(String robotId, String envType, String path, ObjectNode body) {
         String[] creds = getCredentialOrThrow(robotId, envType);
         return sendRequest("POST", creds[0], creds[1], envType, path, body, isNewOpenBot);
     }
@@ -140,7 +140,7 @@ public class QqApiService {
      * @param timeoutSeconds 超时时间（秒）
      * @return 响应 JSON
      */
-    public ObjectNode postWithTimeout(Long robotId, String envType, String path, ObjectNode body, int timeoutSeconds) {
+    public ObjectNode postWithTimeout(String robotId, String envType, String path, ObjectNode body, int timeoutSeconds) {
         String[] creds = getCredentialOrThrow(robotId, envType);
         return sendRequestWithTimeout("POST", creds[0], creds[1], envType, path, body, isNewOpenBot, timeoutSeconds);
     }
@@ -154,7 +154,7 @@ public class QqApiService {
      * @param body    请求体 JSON
      * @return 响应 JSON
      */
-    public ObjectNode put(Long robotId, String envType, String path, ObjectNode body) {
+    public ObjectNode put(String robotId, String envType, String path, ObjectNode body) {
         String[] creds = getCredentialOrThrow(robotId, envType);
         // 使用全局配置的 isNewOpenBot
         return sendRequest("PUT", creds[0], creds[1], envType, path, body, isNewOpenBot);
@@ -168,7 +168,7 @@ public class QqApiService {
      * @param path    API 路径
      * @return 响应 JSON
      */
-    public ObjectNode get(Long robotId, String envType, String path) {
+    public ObjectNode get(String robotId, String envType, String path) {
         String[] creds = getCredentialOrThrow(robotId, envType);
         // 使用全局配置的 isNewOpenBot
         return sendRequest("GET", creds[0], creds[1], envType, path, null, isNewOpenBot);
@@ -182,7 +182,7 @@ public class QqApiService {
      * @param path    API 路径
      * @return 响应 JSON
      */
-    public ObjectNode delete(Long robotId, String envType, String path) {
+    public ObjectNode delete(String robotId, String envType, String path) {
         String[] creds = getCredentialOrThrow(robotId, envType);
         // 使用全局配置的 isNewOpenBot
         return sendRequest("DELETE", creds[0], creds[1], envType, path, null, isNewOpenBot);
@@ -199,7 +199,7 @@ public class QqApiService {
      * @return String[]{appId, appSecret}
      * @throws RuntimeException 机器人不存在时抛出
      */
-    private String[] getCredentialOrThrow(Long robotId, String envType) {
+    private String[] getCredentialOrThrow(String robotId, String envType) {
         var robot = robotRegistry.getRobot(robotId);
         if (robot == null) throw new RuntimeException("机器人不存在: " + robotId);
         return new String[]{robot.getAppId(), robot.getAppSecretEncrypted()};
@@ -546,7 +546,7 @@ public class QqApiService {
      * 解析平台错误信息
      *
      * <p>从 QQ 平台的错误响应体中提取错误码和消息，
-     * 并使用 {@link dev.xuanji.api.enums.QqApiErrorCode} 枚举
+     * 并使用 {@link dev.xuanji.adapter.qq.enums.QqApiErrorCode} 枚举
      * 提供结构化的错误信息和排查建议。
      *
      * @param responseBody QQ 平台响应体（JSON 格式）
@@ -564,7 +564,7 @@ public class QqApiService {
             String traceId = errorJson.path("trace_id").asText("");
 
             // 查找错误码枚举，获取排查建议
-            var errorCode = dev.xuanji.api.enums.QqApiErrorCode.of(code);
+            var errorCode = dev.xuanji.adapter.qq.enums.QqApiErrorCode.of(code);
             if (errorCode != null) {
                 return String.format("QQ平台错误 [%d] %s: %s | 排查: %s (traceId=%s)",
                         code, errorCode.getName(), message, errorCode.getSuggestion(), traceId);
@@ -584,12 +584,12 @@ public class QqApiService {
      * @param responseBody QQ 平台响应体
      * @return 错误码信息，解析失败返回 null
      */
-    public static dev.xuanji.api.enums.QqApiErrorCode parseErrorCode(String responseBody) {
+    public static dev.xuanji.adapter.qq.enums.QqApiErrorCode parseErrorCode(String responseBody) {
         if (responseBody == null || responseBody.isEmpty()) return null;
         try {
             ObjectNode errorJson = Json.parseObj(responseBody);
             int code = errorJson.path("code").asInt(0);
-            return dev.xuanji.api.enums.QqApiErrorCode.of(code);
+            return dev.xuanji.adapter.qq.enums.QqApiErrorCode.of(code);
         } catch (Exception e) {
             return null;
         }

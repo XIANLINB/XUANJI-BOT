@@ -3,10 +3,13 @@ package dev.xuanji.adapter.qq.webhook;
 import dev.xuanji.adapter.qq.model.Robot;
 import dev.xuanji.adapter.qq.model.RobotEnvironment;
 import dev.xuanji.adapter.qq.registry.RobotRegistry;
-import dev.xuanji.api.event.EventSink;
 import dev.xuanji.adapter.qq.webhook.WebhookPayload;
 import dev.xuanji.adapter.qq.webhook.WebhookService;
 import dev.xuanji.adapter.qq.webhook.SignatureVerifier;
+import dev.xuanji.core.pipeline.BotPipeline;
+import dev.xuanji.api.adapter.Bot;
+import dev.xuanji.api.event.BotEvent;
+import dev.xuanji.adapter.qq.converter.QqEventConverter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -63,8 +66,8 @@ public class WebhookServiceImpl implements WebhookService {
     /** 签名验证器，用于回调验证和事件签名校验 */
     private final SignatureVerifier signatureVerifier;
 
-    /** 事件分发器，将事件路由到对应的 Handler（与 WebSocket 模式共享） */
-    private final EventSink eventDispatcher;
+    /** 流水线，事件统一入口（Whitelist/RateLimit/权限等阶段在此生效） */
+    private final BotPipeline botPipeline;
 
     /**
      * 事件去重集合（内存版）
@@ -76,7 +79,7 @@ public class WebhookServiceImpl implements WebhookService {
     private final Set<String> dedupSet = ConcurrentHashMap.newKeySet();
 
     @Override
-    public String handleWebhook(Long robotId, String envType, String body,
+    public String handleWebhook(String robotId, String envType, String body,
                                 String signHeader, String tsHeader) {
         // 1. 查找机器人配置
         Robot robot = robotRegistry.getRobot(robotId);
@@ -94,7 +97,7 @@ public class WebhookServiceImpl implements WebhookService {
         // 2. 查找环境配置（密钥、Webhook URL 等）
         RobotEnvironment env = robotRegistry.getEnvironment(robotId, envType.toUpperCase());
         if (env == null) {
-            log.warn("[Webhook] 环境配置不存在: robotId={}, env={}", robotId, envType);
+            log.warn("[Webhook] 环境配置不存在: robotId={}, appId={}, env={}", robotId, robot.getAppId(), envType);
             return null;
         }
 
@@ -116,7 +119,7 @@ public class WebhookServiceImpl implements WebhookService {
             String eventTs = d.path("event_ts").asText("");
             String verifyResponse = signatureVerifier.handleVerifyRequest(
                     robotId, envType.toUpperCase(), plainToken, eventTs);
-            log.info("[Webhook] 回调验证完成: robotId={}, env={}", robotId, envType);
+            log.info("[Webhook] 回调验证完成: robotId={}, appId={}, env={}", robotId, robot.getAppId(), envType);
             return verifyResponse;
 
         } else if (payload.getOp() == 0) {
@@ -144,12 +147,14 @@ public class WebhookServiceImpl implements WebhookService {
                 cleanDedupLater(eventId);
             }
 
-            // 同步分发事件到对应的 Handler
+            // 同步分发事件到对应的 Handler（经 Pipeline 阶段）
             String eventType = payload.getT();
             ObjectNode data = payload.getD();
             if (eventType != null && data != null) {
                 try {
-                    eventDispatcher.dispatch(eventType, robotId, envType.toUpperCase(), data, eventId);
+                    Bot bot = new Bot("qq:" + robotId, "qq", robotId, Bot.Status.ONLINE, Set.of());
+                    BotEvent be = QqEventConverter.convert(bot, eventType, envType.toUpperCase(), data, eventId);
+                    botPipeline.proceed(be);
                 } catch (Exception e) {
                     log.error("[Webhook] 事件分发异常: type={}, robotId={}, error={}",
                             eventType, robotId, e.getMessage(), e);

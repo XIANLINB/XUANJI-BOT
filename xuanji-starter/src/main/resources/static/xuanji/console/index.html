@@ -1,64 +1,367 @@
-<!DOCTYPE html><html lang="zh"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>璇玑控制台</title>
-<style>body{font-family:system-ui,sans-serif;margin:0;background:#f5f5f5;color:#333}.header{background:#1a1a2e;color:#fff;padding:14px 24px;display:flex;align-items:center;justify-content:space-between}.header-left{display:flex;align-items:center;gap:16px}.header h1{margin:0;font-size:20px}.header span{opacity:.7;font-size:13px}.nav{display:flex;background:#16213e;padding:0 24px}.nav a{color:#a0b4d0;text-decoration:none;padding:12px 18px;font-size:14px;border-bottom:2px solid transparent}.nav a.active,.nav a:hover{color:#fff;border-bottom-color:#4fc3f7}.main{padding:20px;max-width:1200px;margin:0 auto}.card{background:#fff;border-radius:8px;padding:16px 20px;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.08)}.card h3{margin:0 0 10px;font-size:15px;color:#1a1a2e}.row{display:flex;gap:14px;flex-wrap:wrap}.stat{flex:1;min-width:140px;background:linear-gradient(135deg,#e8f0fe,#d4e4fc);border-radius:8px;padding:14px;text-align:center}.stat .num{font-size:24px;font-weight:700;color:#1a56db}.stat .label{font-size:12px;color:#666;margin-top:3px}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:7px 10px;text-align:left;border-bottom:1px solid #eee}th{background:#f8f9fa;font-weight:600;position:sticky;top:0}.data-wrap{max-height:420px;overflow:auto;border:1px solid #eee;border-radius:6px}.data-wrap table{font-size:12px}.log-box{background:#1a1a2e;color:#4fc3f7;padding:12px;border-radius:6px;font-size:12px;max-height:400px;overflow-y:auto;overflow-x:hidden;white-space:pre-wrap;margin:0;font-family:monospace}.log-line{padding:1px 0}.log-line.error{color:#ff6b6b}.log-line.warn{color:#ffd93d}.evt-in{border-left:3px solid #4fc3f7}.evt-out{border-left:3px solid #f0ad4e}.tag{display:inline-block;padding:2px 7px;border-radius:3px;font-size:10px;font-weight:600;margin-right:4px}.tag-in{background:#e8f0fe;color:#1a56db}.tag-out{background:#fef3e0;color:#cc7a00}button,input,select{padding:7px 12px;border:1px solid #ccc;border-radius:5px;font-size:13px;margin:2px 4px 2px 0;cursor:pointer}.btn-primary{background:#1a56db;color:#fff;border:none}.btn-danger{background:#dc3545;color:#fff;border:none}.btn-warn{background:#f0ad4e;color:#fff;border:none}.btn-sm{padding:3px 8px;font-size:12px}.hidden{display:none}.flex{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}.toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.log-info{font-size:11px;color:#999}.empty-state{text-align:center;padding:30px;color:#999}.toast{position:fixed;top:16px;right:16px;padding:10px 16px;border-radius:6px;font-size:13px;z-index:999;animation:fadein .3s}.toast-ok{background:#d4edda;color:#155724}@keyframes fadein{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}</style></head>
+<!DOCTYPE html>
+<html lang="zh">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>璇玑控制台</title>
+<style>
+:root{--font-sans:system-ui,-apple-system,sans-serif;--font-mono:'SF Mono','Cascadia Code',monospace;--bg:#f5f5f5;--card:#fff;--primary:#1a56db;--danger:#dc3545;--ok:#28a745;--warn:#cc7a00;--text:#222;--muted:#777;--border:rgba(0,0,0,.08);--side-w:160px;--side-bg:#151522}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font-sans);background:var(--bg);color:var(--text);display:flex;min-height:100vh;font-size:13px;line-height:1.55}
+aside{width:var(--side-w);background:var(--side-bg);display:flex;flex-direction:column;flex-shrink:0;position:sticky;top:0;height:100vh}
+aside .brand{padding:18px 14px 12px;color:#fff;font-size:15px;font-weight:600;border-bottom:0.5px solid rgba(255,255,255,.06)}
+aside .brand span{display:block;font-size:10px;opacity:.4;font-weight:400;margin-top:1px}
+aside nav{flex:1;padding:8px 0;overflow-y:auto}
+aside nav a{display:flex;align-items:center;gap:8px;padding:8px 14px;color:rgba(255,255,255,.55);text-decoration:none;font-size:12.5px;border-left:2px solid transparent;transition:all .12s}
+aside nav a:hover{color:#fff;background:rgba(255,255,255,.03)}
+aside nav a.active{color:#fff;border-left-color:#4da3f5;background:rgba(77,163,245,.08)}
+aside nav a .icon{width:16px;height:16px;opacity:.5;display:flex;align-items:center;justify-content:center}
+aside nav a.active .icon{opacity:1}
+aside .stamp{padding:10px 14px;color:rgba(255,255,255,.25);font-size:10px;border-top:0.5px solid rgba(255,255,255,.06)}
+main{flex:1;overflow-y:auto;min-height:100vh}
+.content{padding:20px;max-width:1320px}
+.card{background:var(--card);border-radius:12px;padding:18px 22px;margin-bottom:14px;border:0.5px solid var(--border)}
+.card h3{font-size:13.5px;font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:8px;color:var(--text)}
+.metrics{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px}
+.metric{background:#f6f8fa;border-radius:8px;padding:14px;text-align:center}
+.metric .num{font-size:22px;font-weight:600;color:var(--primary);letter-spacing:-.5px}
+.metric .label{font-size:11px;color:var(--muted);margin-top:2px}
+.metric .num.w{color:var(--ok)}.metric .num.d{color:var(--danger)}.metric .num.a{color:var(--warn)}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{padding:8px 12px;text-align:left;border-bottom:0.5px solid var(--border)}
+th{background:#fafafa;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.3px;color:var(--muted);position:sticky;top:0}
+tr:hover td{background:#f8f9fb}
+.data-wrap{max-height:440px;overflow:auto;border:0.5px solid var(--border);border-radius:8px}
+.flex{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+input,select,button{padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;font-size:12.5px;font-family:inherit;background:#fff;color:var(--text)}
+input:focus,select:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 1px rgba(26,86,219,.15)}
+button{cursor:pointer;transition:all .1s}button:hover{background:#f0f2f5}
+.btn-primary{background:var(--primary);color:#fff;border-color:var(--primary);font-weight:500}.btn-primary:hover{background:#1547b5}
+.btn-danger{color:var(--danger);border-color:var(--danger)}.btn-danger:hover{background:#fef0f0}
+.btn-sm{padding:3px 8px;font-size:11px;border-radius:5px}.btn-xs{padding:2px 6px;font-size:10px}
+.badge{display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:500}
+.badge-on{background:#e6f7e6;color:var(--ok)}.badge-off{background:#eee;color:var(--muted)}.badge-danger{background:#fef0f0;color:var(--danger)}.badge-warn{background:#fef8e8;color:var(--warn)}
+.badge-IN{background:#e8f0fe;color:var(--primary)}.badge-OUT{background:#fef3e0;color:var(--warn)}
+.bot-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:0.5px solid var(--border)}.bot-row:last-child{border-bottom:none}
+.bot-row img{width:36px;height:36px;border-radius:50%}.bot-row .name{font-weight:600}.bot-row .meta{font-size:11px;color:var(--muted)}
+.modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:100;align-items:center;justify-content:center}
+.modal.on{display:flex}.modal .box{background:#fff;border-radius:12px;padding:24px;min-width:380px;max-width:520px;max-height:80vh;overflow:auto}.modal .box h3{margin-bottom:14px}
+.modal label{font-size:11px;color:var(--muted);display:block;margin:8px 0 2px}.modal input{width:100%;margin-bottom:6px}.modal .btns{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+.sub-tabs{display:flex;gap:0;margin-bottom:14px;border-bottom:1.5px solid var(--border)}
+.sub-tabs a{padding:8px 16px;font-size:12.5px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-2px;text-decoration:none;transition:all .12s}
+.sub-tabs a.active{color:var(--primary);border-bottom-color:var(--primary);font-weight:600}
+.log-box{background:#151522;color:#7ecbff;padding:14px;border-radius:8px;font-size:11.5px;max-height:400px;overflow:auto;font-family:var(--font-mono);white-space:pre-wrap;line-height:1.65}
+.log-box .e{color:#ff7373}.log-box .w{color:#ffe383}
+.empty{text-align:center;padding:36px;color:var(--muted);font-size:12.5px}
+.chat-shell{display:flex;height:64vh;border:0.5px solid var(--border);border-radius:10px;overflow:hidden}
+.chat-l{width:200px;background:#fafafa;border-right:0.5px solid var(--border);overflow-y:auto;flex-shrink:0}
+.chat-l .sec{padding:7px 12px;font-size:10.5px;font-weight:600;color:var(--muted);background:#f0f2f5;letter-spacing:.4px;position:sticky;top:0}
+.chat-l .row{padding:10px 12px;cursor:pointer;font-size:12.5px;border-bottom:0.5px solid rgba(0,0,0,.04);display:flex;align-items:center;gap:8px;transition:all .1s}
+.chat-l .row:hover{background:#e8f0fe}.chat-l .row.on{background:#d4e4fc}
+.chat-l .row .av{width:30px;height:30px;border-radius:5px;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0;font-weight:500}
+.chat-c{flex:1;display:flex;flex-direction:column;background:#f8f9fb}
+.chat-c .top{padding:12px 16px;background:#fff;border-bottom:0.5px solid var(--border);font-weight:600;font-size:13px}
+.chat-c .msgs{flex:1;overflow-y:auto;padding:14px}
+.chat-bub{display:flex;gap:6px;margin-bottom:10px;max-width:82%}
+.chat-bub.me{flex-direction:row-reverse;margin-left:auto}
+.chat-bub .bbl{background:#fff;padding:9px 12px;border-radius:8px;font-size:12.5px;border:0.5px solid var(--border);word-break:break-all}
+.chat-bub.me .bbl{background:#d4e4fc;border-color:#b5d4f4}
+.chat-bub .bbl .dir{font-size:10px;color:var(--muted);margin-bottom:2px}
+.chat-bub .bbl .t{font-size:10px;color:var(--muted);margin-top:3px;text-align:right}
+.chat-r{width:180px;border-left:0.5px solid var(--border);background:#fff;overflow-y:auto;flex-shrink:0;padding:14px;font-size:12px}
+.chat-r h4{font-size:12.5px;font-weight:600;margin-bottom:10px}
+.chat-r .kv{padding:5px 0;border-bottom:0.5px solid #f0f0f0}.chat-r .kl{font-size:10px;color:var(--muted)}
+.wizard-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;align-items:center;justify-content:center}
+.wizard-overlay.on{display:flex}
+.wizard-box{background:#fff;border-radius:14px;width:460px;padding:32px;text-align:center}
+.wizard-box h2{font-size:18px;font-weight:600;margin-bottom:6px}
+.wizard-box .sub{font-size:12px;color:var(--muted);margin-bottom:24px}
+.wizard-box .steps{display:flex;justify-content:center;gap:24px;margin-bottom:20px}
+.wizard-box .step{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px;color:var(--muted)}
+.wizard-box .step .dot{width:28px;height:28px;border-radius:50%;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;background:#f5f5f5}
+.wizard-box .step.now .dot{background:var(--primary);border-color:var(--primary);color:#fff}
+.wizard-box .step.done .dot{background:var(--ok);border-color:var(--ok);color:#fff}
+.wizard-box label{display:block;text-align:left;font-size:12px;color:var(--muted);margin-top:12px;margin-bottom:2px}
+.wizard-box input{width:100%;padding:10px 12px;border:0.5px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit}
+.wizard-box input:focus{outline:none;border-color:var(--primary)}
+.wizard-box .err{color:var(--danger);font-size:11px;margin-top:8px}
+.wizard-box .btn-row{display:flex;gap:8px;justify-content:center;margin-top:20px}
+.wizard-box button{padding:10px 28px;border-radius:8px;font-size:13px;font-weight:500}
+.wizard-box .btn-primary{background:var(--primary);color:#fff;border:none}.wizard-box .btn-primary:hover{background:#1547b5}
+.wizard-box .btn-ghost{border:0.5px solid var(--border);background:#fff}
+</style>
 <body>
-<div class="header"><div class="header-left"><h1>璇玑控制台</h1><span>v0.1</span></div><button class="btn-warn btn-sm" onclick="clearCache()">🗑 清空缓存</button></div>
-<div class="nav"><a href="#" class="active" data-tab="dash">仪表盘</a><a href="#" data-tab="msg">消息</a><a href="#" data-tab="db">数据库</a><a href="#" data-tab="perm">权限</a><a href="#" data-tab="monitor">监控</a><a href="#" data-tab="sys">系统</a></div>
-<div class="main" id="main"></div><div id="toast"></div>
+<aside>
+  <div class="brand">璇玑<span>控制台 v0.1</span></div>
+  <nav id="nav"></nav>
+  <div class="stamp" id="stamp"></div>
+</aside>
+<main><div class="content" id="main"></div></main>
 
 <script>
 const A='/xuanji/api';
-function toast(m,ok){let e=document.getElementById('toast');e.className='toast toast-'+(ok?'ok':'err');e.textContent=m;setTimeout(()=>e.textContent='',2500)}
-function clearCache(){try{localStorage.clear();sessionStorage.clear();if('caches'in window)caches.keys().then(ks=>ks.forEach(k=>caches.delete(k)));toast('缓存已清空',true);setTimeout(()=>location.reload(),500)}catch(e){toast('清空失败',false)}}
+const icons={dash:'&#9632;',bot:'&#9881;',plugin:'&#9883;',group:'&#9776;',friend:'&#9993;',monitor:'&#9673;',perm:'&#9819;',event:'&#9776;',log:'&#9776;',db:'&#9856;',sys:'&#9681;'};
+const navs=[
+  {id:'dash',label:'仪表盘'},{id:'bot',label:'Bot 管理'},{id:'plugin',label:'插件管理'},
+  {id:'group',label:'群聊管理'},{id:'friend',label:'好友列表'},{id:'monitor',label:'消息监控'},
+  {id:'perm',label:'权限管理'},{id:'event',label:'事件日志'},{id:'log',label:'框架日志'},
+  {id:'db',label:'数据库'},{id:'sys',label:'系统'}
+];
+let active='dash',timer,subTab='group-msg';
+
+(function init(){
+  document.getElementById('nav').innerHTML=navs.map(n=>`<a href="#" data-tab="${n.id}" class="${n.id===active?'active':''}"><span class="icon">${icons[n.id]||''}</span>${n.label}</a>`).join('');
+  document.getElementById('stamp').textContent=new Date().toLocaleTimeString();
+  document.querySelectorAll('#nav a').forEach(a=>a.onclick=e=>{e.preventDefault();switchTab(a.dataset.tab)});
+  render();
+})();
+
+function switchTab(t){active=t;clearInterval(timer);document.querySelectorAll('#nav a').forEach(a=>a.classList.toggle('active',a.dataset.tab===t));render()}
+
 async function get(u){let r=await fetch(u);if(!r.ok)throw new Error(r.status);return r.json()}
-function v(id){return document.getElementById(id).value}
-
-function dash(){return`<div class="row" id="stat-row"></div><div class="card"><h3>数据表</h3><table id="dash-tables"><tr><td>加载中...</td></tr></table></div>`}
-function msg(){return`<div class="card"><div class="toolbar"><h3>消息流水</h3><div><label><input type="checkbox" id="msg-auto" checked>自动刷新</label><button class="btn-sm btn-primary" onclick="loadEvents()">刷新</button><button class="btn-sm" onclick="document.getElementById('events-body').innerHTML=''">清空</button><span class="log-info" id="evt-info"></span></div></div><div class="data-wrap" style="max-height:500px"><table><thead><tr><th style="width:60px">时间</th><th style="width:40px">方向</th><th style="width:50px">类型</th><th>用户/来源</th><th>内容</th></tr></thead><tbody id="events-body"></tbody></table></div></div>`}
-function db(){return`<div class="card"><h3>数据表</h3><div class="flex"><select id="table-pick"><option value="">-- 选择表 --</option></select><button class="btn-primary btn-sm" onclick="loadRows()">查看数据</button><span id="row-count" style="font-size:12px;color:#666;margin-left:8px"></span></div><div id="data-area" class="empty-state">请选择一张表</div></div>`}
-function perm(){return`<div class="card"><h3>群超管</h3><div class="flex"><input id="sa-bot" placeholder="botKey"><input id="sa-grp" placeholder="groupId"><input id="sa-uid" placeholder="memberOpenid"><button class="btn-primary" onclick="addSA()">添加</button></div><table><thead><tr><th>Bot</th><th>群</th><th>成员</th><th>操作</th></tr></thead><tbody id="sa-body"></tbody></table></div><div class="card"><h3>黑名单</h3><div class="flex"><input id="bl-scope" placeholder="scope"><input id="bl-tid" placeholder="memberOpenid"><button class="btn-danger" onclick="addBL()">添加</button></div><table><thead><tr><th>ID</th><th>范围</th><th>目标</th><th>原因</th><th>时间</th><th>操作</th></tr></thead><tbody id="bl-body"></tbody></table></div>`}
-function monitor(){return`<div class="card"><div class="toolbar"><h3>运行日志</h3><div><label><input type="checkbox" id="auto-scroll" checked>自动滚动</label> <label>行数:<input id="log-lines" value="200" style="width:60px;padding:4px 6px"></label> <button class="btn-primary btn-sm" onclick="loadLogs()">刷新</button><button class="btn-sm" onclick="clearLogView()">清空</button></div></div><div class="log-box" id="log-box"><div class="log-line">点击刷新...</div></div><span class="log-info" id="log-info"></span></div>`}
-function sys(){return`<div class="card"><div id="sys-info">加载中...</div></div>`}
-
-const tabs={dash,msg,db,perm,monitor,sys};let active='dash',timer;
-document.querySelectorAll('.nav a').forEach(a=>a.onclick=e=>{e.preventDefault();switchTab(a.dataset.tab)});
-function switchTab(t){active=t;document.querySelectorAll('.nav a').forEach(x=>x.classList.remove('active'));document.querySelector(`[data-tab="${t}"]`).classList.add('active');clearInterval(timer);render()}
+async function post(u,b){let r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):''});return r.json()}
 
 async function render(){
-document.getElementById('main').innerHTML=tabs[active]();
-if(active==='dash'){await loadDash();timer=setInterval(loadDash,5000)}
-if(active==='msg'){await loadEvents();timer=setInterval(loadEvents,3000)}
-if(active==='db')await loadDbPage();
-if(active==='perm'){await loadSA();await loadBL()}
-if(active==='monitor'){await loadLogs();timer=setInterval(loadLogs,3000)}
-if(active==='sys')await loadSys()
+  let m=document.getElementById('main');
+  if(active==='dash'){m.innerHTML=dashHTML();await loadDash();timer=setInterval(loadDash,5000)}
+  if(active==='bot'){m.innerHTML=botHTML();await loadBots()}
+  if(active==='plugin'){m.innerHTML=pluginHTML();await loadPlugins()}
+  if(active==='group'){m.innerHTML=groupHTML();await loadGroups()}
+  if(active==='friend'){m.innerHTML=friendHTML();await loadFriends()}
+  if(active==='monitor'){m.innerHTML=monitorHTML();monitorRender()}
+  if(active==='perm'){m.innerHTML=permHTML();await loadSA();await loadBL()}
+  if(active==='event'){m.innerHTML=eventHTML();await loadEventLogs()}
+  if(active==='log'){m.innerHTML=logHTML();await loadLogs();timer=setInterval(loadLogs,5000)}
+  if(active==='db'){m.innerHTML=dbHTML();await loadDbPage()}
+  if(active==='sys'){m.innerHTML=sysHTML();await loadSys()}
+  document.getElementById('stamp').textContent=new Date().toLocaleTimeString()
 }
 
+// ─�� 仪表盘 ──
+function dashHTML(){return`<div class="metrics" id="stats"></div><div class="card" style="margin-top:14px"><h3>Bot 状态</h3><div id="bot-list"></div></div>`}
 async function loadDash(){
-try{let d=await get(A+'/console/status');document.getElementById('stat-row').innerHTML=`<div class="stat"><div class="num">1</div><div class="label">Bot 在线</div></div><div class="stat"><div class="num">${d.tables}</div><div class="label">数据表</div></div><div class="stat"><div class="num">${d.uptime}</div><div class="label">运行时间</div></div><div class="stat"><div class="num">${d.memUsed}</div><div class="label">已用内存</div></div>`;let tl=await get(A+'/db/tables');document.getElementById('dash-tables').innerHTML=tl.map(r=>`<tr><td>${r.TABLE_NAME}</td></tr>`).join('')}catch(e){}
+  try{
+    let d=await get(A+'/console/dashboard');
+    document.getElementById('stats').innerHTML=`
+      <div class="metric"><div class="num">${d.botsOnline}/${d.botsTotal}</div><div class="label">Bot 在线</div></div>
+      <div class="metric"><div class="num">${d.groupsTotal}</div><div class="label">总群</div></div>
+      <div class="metric"><div class="num">${d.friendsTotal}</div><div class="label">总好友</div></div>
+      <div class="metric"><div class="num">${d.pluginsLoaded}</div><div class="label">插件</div></div>
+      <div class="metric"><div class="num">${d.todayGroupMessages||0}</div><div class="label">今日群聊</div></div>
+      <div class="metric"><div class="num">${d.todayC2cMessages||0}</div><div class="label">今日单聊</div></div>
+      <div class="metric"><div class="num">${d.todayGroupAdd||0}</div><div class="label">今日加群</div></div>
+      <div class="metric"><div class="num d">${d.todayGroupDel||0}</div><div class="label">今日退群</div></div>
+      <div class="metric"><div class="num w">${d.todayFriendAdd||0}</div><div class="label">今日新增好友</div></div>
+      <div class="metric"><div class="num d">${d.todayFriendDel||0}</div><div class="label">今日删除好友</div></div>`;
+    let bots=await get(A+'/console/bots');
+    document.getElementById('bot-list').innerHTML=bots.length?bots.map(b=>`<div class="bot-row">${b.avatar?`<img src="${b.avatar}">`:''}<div style="flex:1"><div class="name">${b.nickname||b.appId} <span class="badge badge-${b.status==='ONLINE'?'on':'off'}">${b.status||'?'}</span></div><div class="meta">${b.botKey} | ${b.groupsTotal} 群 | ${b.friendsTotal} 好友</div></div></div>`).join(''):'<div class="empty">暂无</div>';
+  }catch(e){}
 }
 
-async function loadEvents(){
-try{let data=await get(A+'/console/events');
-let rows=data.map(e=>`<tr class="evt-${e.direction==='IN'?'in':'out'}"><td>${e.time}</td><td><span class="tag tag-${e.direction==='IN'?'in':'out'}">${e.direction}</span></td><td>${e.type}</td><td>${e.user||''}</td><td title="${esc(e.detail||'')}">${esc(e.content||'')}</td></tr>`).join('');
-document.getElementById('events-body').innerHTML=rows||'<tr><td colspan="5" class="empty-state">暂无消息</td></tr>';
-document.getElementById('evt-info').textContent='共 '+data.length+' 条'
-}catch(e){}
+// ── Bot ──
+function botHTML(){return`<div class="card"><h3>Bot 列表</h3><div id="bot-list"></div><button class="btn-primary btn-sm" style="margin-top:12px" onclick="showBotForm()">添加 Bot</button></div><div class="modal" id="bot-modal" onclick="if(event.target===this)closeModal()"><div class="box" id="bot-modal-c"></div></div>`}
+async function loadBots(){
+  let bots=await get(A+'/bot-config');
+  document.getElementById('bot-list').innerHTML=bots.length?bots.map(b=>`<div class="bot-row"><div style="flex:1"><div class="name">${b.appId||b.key} <span class="badge badge-${b.sandbox==='true'?'off':'on'}">${b.sandbox==='true'?'沙箱':'生产'}</span> <span class="badge badge-IN">${b.connectionMethod||'websocket'}</span></div><div class="meta">AppID: ${b.appId||'-'} | Secret: ***${b.clientSecret?b.clientSecret.slice(-4):''}</div></div><button class="btn-sm" onclick="showBotForm('${b.key||b.appId}')">编辑</button><button class="btn-sm btn-danger" onclick="deleteBot('${b.key||b.appId}')" style="margin-left:6px">删除</button></div>`).join(''):'<div class="empty">暂无 Bot</div>';
+}
+async function showBotForm(key){
+  let all = key ? await get(A+'/bot-config') : [];
+  let b = key ? (all.find(x=>x.key===key||x.appId===key)||{}) : {};
+  document.getElementById('bot-modal-c').innerHTML=`
+    <h3>${key?'编辑 Bot':'添加 Bot'}</h3>
+    <label>AppID</label><input id="f-appId" value="${b.appId||''}" ${key?'readonly':''}><label>ClientSecret</label><input id="f-secret" value="${b.clientSecret||''}">
+    <label>连接方式</label><select id="f-method" onchange="toggleWebhook()"><option value="websocket" ${(b.connectionMethod||'websocket')==='websocket'?'selected':''}>WebSocket</option><option value="webhook" ${b.connectionMethod==='webhook'?'selected':''}>Webhook</option></select>
+    <div id="f-domain-row" style="display:${b.connectionMethod==='webhook'?'block':'none'}"><label>域名</label><input id="f-domain" value="${b.domain||''}" placeholder="例如 xuanji.icu"><p style="font-size:10px;color:var(--muted);margin:2px 0 8px">回调地址: <span id="f-domain-preview">${b.domain?'https://'+b.domain+'/webhook/'+(b.key||b.appId||''):'（输入域名后自动生成）'}</span></p></div>
+    <label>环境</label><select id="f-sandbox"><option value="false" ${b.sandbox!=='true'?'selected':''}>生产</option><option value="true" ${b.sandbox==='true'?'selected':''}>沙箱</option></select>
+    <div class="btns"><button onclick="closeModal()">取消</button><button class="btn-primary" onclick="saveBot('${key||''}')">保存并重载</button></div>`;
+  document.getElementById('bot-modal').classList.add('on')
+  // 如果选中了 webhook，触发预览
+  if(document.getElementById('f-method')?.value==='webhook') toggleWebhook();
+}
+function toggleWebhook(){
+  let isW = document.getElementById('f-method').value === 'webhook';
+  document.getElementById('f-domain-row').style.display = isW ? 'block' : 'none';
+  if(isW){
+    var update = function(){
+      let d = document.getElementById('f-domain').value||'';
+      let a = document.getElementById('f-appId').value||'';
+      let prev = d ? 'https://'+d+'/webhook/'+(a||'appid') : '（输入域名后自动生成）';
+      document.getElementById('f-domain-preview').textContent = prev;
+    };
+    document.getElementById('f-domain').oninput = update;
+    document.getElementById('f-appId').oninput = update;
+    update();
+  }
+}
+async function saveBot(key){
+  let b={appId:key||document.getElementById('f-appId').value,clientSecret:document.getElementById('f-secret').value,connectionMethod:document.getElementById('f-method').value,sandbox:document.getElementById('f-sandbox').value,domain:document.getElementById('f-domain')?.value||''};
+  if(!b.appId){return}
+  await post(A+'/bot-config',b);closeModal();loadBots();
+  let r=await post(A+'/bot-config/reload',{});alert(r.msg||'已保存并重载')
+}
+async function deleteBot(key){
+  if(!confirm('确定删除 '+key+' ？'))return;
+  await fetch(A+'/bot-config/'+key,{method:'DELETE'});loadBots();
+  await post(A+'/bot-config/reload',{});
+}
+function closeModal(){document.querySelectorAll('.modal').forEach(m=>m.classList.remove('on'))}
+
+// ── 插件 ──
+function pluginHTML(){return`<div class="card"><h3>插件</h3><div id="plugin-list"></div></div>`}
+async function loadPlugins(){
+  let ps=await get(A+'/console/plugins');
+  document.getElementById('plugin-list').innerHTML=ps.length?ps.map(p=>`<div class="bot-row"><div style="flex:1"><div class="name">${p.name||p.id} <span class="badge badge-${p.running?'on':'off'}">${p.state}</span></div><div class="meta">v${p.version||'1.0'} | ${p.provider||'未知'} | ${p.description||'无描述'}</div></div>${p.running?`<button class="btn-sm btn-danger" onclick="stopPlugin('${p.id}')">停止</button>`:`<button class="btn-sm btn-primary" onclick="startPlugin('${p.id}')">启动</button>`}</div>`).join(''):'<div class="empty">暂无</div>';
+}
+async function stopPlugin(id){await post(A+'/console/plugins/'+id+'/stop');loadPlugins()}
+async function startPlugin(id){await post(A+'/console/plugins/'+id+'/start');loadPlugins()}
+
+// ── 群聊/好友 ──
+function groupHTML(){return`<div class="card"><h3>群列表</h3><div class="flex"><select id="grp-bot"><option value="">全部</option></select><button class="btn-primary btn-sm" onclick="loadGroups()">刷新</button></div><div class="data-wrap" id="group-tbl"></div></div>`}
+async function loadGroups(){
+  let bots=await get(A+'/console/bots');document.getElementById('grp-bot').innerHTML='<option value="">全部</option>'+bots.map(b=>`<option value="${b.appId}">${b.botKey}</option>`).join('');
+  let r=await get(A+'/db/rows?table=xuanji_qqbot_group');
+  document.getElementById('group-tbl').innerHTML=r.rows.length?`<table><thead><tr><th>Bot</th><th>群 ID</th><th>群名</th><th>状态</th><th>删除</th><th>时间</th></tr></thead><tbody>${r.rows.map(r=>`<tr><td>${r.BOT_ID}</td><td>${r.GROUP_ID}</td><td>${r.GROUP_NAME||'-'}</td><td><span class="badge ${r.IS_DELETED==1?'badge-danger':'badge-on'}">${r.IS_DELETED==1?'已删除':'active'}</span></td><td>${r.IS_DELETED==1?'🗑':''}</td><td>${r.CREATE_TIME||''}</td></tr>`).join('')}</tbody></table>`:'<div class="empty">暂无</div>'
+}
+function friendHTML(){return`<div class="card"><h3>好友列表</h3><div class="flex"><select id="fr-bot"><option value="">全部</option></select><button class="btn-primary btn-sm" onclick="loadFriends()">刷新</button></div><div class="data-wrap" id="friend-tbl"></div></div>`}
+async function loadFriends(){
+  let bots=await get(A+'/console/bots');document.getElementById('fr-bot').innerHTML='<option value="">全部</option>'+bots.map(b=>`<option value="${b.appId}">${b.botKey}</option>`).join('');
+  let r=await get(A+'/db/rows?table=xuanji_qqbot_user');
+  document.getElementById('friend-tbl').innerHTML=r.rows.length?`<table><thead><tr><th>Bot</th><th>用户 ID</th><th>昵称</th><th>权限</th><th>删除</th></tr></thead><tbody>${r.rows.map(r=>`<tr><td>${r.BOT_ID}</td><td>${r.PLATFORM_USER_ID}</td><td>${r.NICKNAME||'-'}</td><td>${r.FRAMEWORK_ROLE||'-'}</td><td>${r.IS_DELETED==1?'🗑':''}</td></tr>`).join('')}</tbody></table>`:'<div class="empty">暂无</div>'
 }
 
-async function loadDbPage(){let ts=await get(A+'/db/tables');document.getElementById('table-pick').innerHTML='<option value="">-- 选择表 --</option>'+ts.map(t=>`<option value="${t.TABLE_NAME}">${t.TABLE_NAME}</option>`).join('')}
-async function loadRows(){let table=document.getElementById('table-pick').value;if(!table){document.getElementById('data-area').innerHTML='<div class="empty-state">请选择一张表</div>';return}try{document.getElementById('data-area').innerHTML='<div class="empty-state">加载中...</div>';let d=await get(A+'/db/rows?table='+table);if(d.rows.length===0){document.getElementById('data-area').innerHTML='<div class="empty-state">暂无数据</div>';document.getElementById('row-count').textContent='0 行';return}let cols=d.columns,rows=d.rows;document.getElementById('row-count').textContent='共 '+d.count+' 行';let html='<div class="data-wrap"><table><thead><tr>';for(let c of cols)html+=`<th>${c}</th>`;html+='</tr></thead><tbody>';for(let r of rows){html+='<tr>';for(let c of cols)html+=`<td>${r[c]!=null?r[c]:'<span style="color:#ccc">NULL</span>'}</td>`;html+='</tr>'}html+='</tbody></table></div>';document.getElementById('data-area').innerHTML=html}catch(e){document.getElementById('data-area').innerHTML='<div class="empty-state" style="color:#dc3545">加载失败: '+e.message+'</div>'}}
+// ── 消息监控 ──
+function monitorHTML(){return`<div class="card"><div class="sub-tabs" id="msub"></div><div id="mcnt"></div></div>`}
+function monitorRender(){
+  document.getElementById('msub').innerHTML=`
+    <a href="#" data-sub="group-msg" class="${subTab==='group-msg'?'active':''}">群聊消息</a>
+    <a href="#" data-sub="c2c-msg" class="${subTab==='c2c-msg'?'active':''}">单聊消息</a>
+    <a href="#" data-sub="realtime" class="${subTab==='realtime'?'active':''}">实时监控</a>`;
+  document.querySelectorAll('#msub a').forEach(a=>a.onclick=e=>{e.preventDefault();subTab=a.dataset.sub;monitorRender()});
+  if(subTab==='group-msg'){document.getElementById('mcnt').innerHTML=gmHTML();loadGMsgs()}
+  if(subTab==='c2c-msg'){document.getElementById('mcnt').innerHTML=cmHTML();loadCMsgs()}
+  if(subTab==='realtime'){document.getElementById('mcnt').innerHTML=rtHTML();initRT()}
+}
+function gmHTML(){return`<div class="data-wrap"><table><thead><tr><th>时间</th><th>方向</th><th>Bot</th><th>群</th><th>成员</th><th>类型</th><th>内容</th></tr></thead><tbody id="gmb"></tbody></table></div>`}
+async function loadGMsgs(){let d=await get(A+'/console/group-messages?size=80');document.getElementById('gmb').innerHTML=d.rows.map(r=>`<tr><td>${fmt(r.CREATE_TIME)}</td><td><span class="badge badge-${r.DIRECTION}">${r.DIRECTION}</span></td><td>${r.BOT_ID}</td><td>${r.GROUP_ID||''}</td><td>${r.MEMBER_ID||''}</td><td>${r.MSG_TYPE||''}</td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${e(r.CONTENT)}">${e(r.CONTENT||'').substring(0,80)}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">暂无</td></tr>'}
+function cmHTML(){return`<div class="data-wrap"><table><thead><tr><th>时间</th><th>方向</th><th>Bot</th><th>用户</th><th>类型</th><th>内容</th></tr></thead><tbody id="cmb"></tbody></table></div>`}
+async function loadCMsgs(){let d=await get(A+'/console/c2c-messages?size=80');document.getElementById('cmb').innerHTML=d.rows.map(r=>`<tr><td>${fmt(r.CREATE_TIME)}</td><td><span class="badge badge-${r.DIRECTION}">${r.DIRECTION}</span></td><td>${r.BOT_ID}</td><td>${r.USER_ID||''}</td><td>${r.MSG_TYPE||''}</td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${e(r.CONTENT)}">${e(r.CONTENT||'').substring(0,80)}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">暂无</td></tr>'}
 
-async function loadSA(){let data=await get(A+'/console/super-admins');document.getElementById('sa-body').innerHTML=data.map(r=>`<tr><td>${r.BOT_KEY}</td><td>${r.GROUP_ID}</td><td>${r.MEMBER_OPENID}</td><td><button class="btn-sm btn-danger" onclick="delSA('${r.BOT_KEY}','${r.GROUP_ID}','${r.MEMBER_OPENID}')">删除</button></td></tr>`).join('')}
-async function addSA(){await fetch(A+'/permission/super-admin/add?botKey='+v('sa-bot')+'&groupId='+v('sa-grp')+'&memberOpenid='+v('sa-uid'),{method:'POST'});loadSA()}
+let ctType=null,ctId=null;
+function rtHTML(){return`<div class="chat-shell"><div class="chat-l" id="chat-l"><div style="padding:8px;text-align:center;color:var(--muted);font-size:12px">加载联系人...</div></div><div class="chat-c"><div class="top" id="chat-top">选择一个联系人</div><div class="msgs" id="chat-msgs"><div class="empty">从左侧选择群聊或好友</div></div></div><div class="chat-r" id="chat-r"><h4>信息</h4><div class="empty" style="font-size:11px">选择后显示详情</div></div></div>`}
+async function initRT(){
+  let gs=await get(A+'/console/contacts/groups'),fs=await get(A+'/console/contacts/friends');
+  document.getElementById('chat-l').innerHTML=`
+    <div class="sec">群聊 (${gs.length})</div>${gs.map(g=>`<div class="row" data-type="group" data-id="${g.GROUP_ID}" onclick="selectChat('group','${g.GROUP_ID}','${(g.NAME||g.GROUP_ID).replace(/'/g,'')}')"><div class="av">群</div><div style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${g.NAME||g.GROUP_ID}</div></div>`).join('')}
+    <div class="sec">单聊 (${fs.length})</div>${fs.map(f=>`<div class="row" data-type="c2c" data-id="${f.USER_ID}" onclick="selectChat('c2c','${f.USER_ID}','${f.USER_ID}')"><div class="av" style="background:var(--ok)">单</div><div style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.USER_ID}</div></div>`).join('')}`;
+}
+async function selectChat(t,id,n){
+  ctType=t;ctId=id;document.getElementById('chat-top').textContent=n||id;
+  document.querySelectorAll('.chat-l .row').forEach(r=>r.classList.remove('on'));
+  let el=document.querySelector(`.row[data-type="${t}"][data-id="${id}"]`);if(el)el.classList.add('on');
+  let ms=await get(A+'/console/contact-messages?type='+t+'&targetId='+id);
+  let bid=ms.length>0?ms[0].BOT_ID:'';
+  document.getElementById('chat-msgs').innerHTML=ms.reverse().map(m=>`<div class="chat-bub ${m.DIRECTION==='OUT'?'me':''}"><div class="bbl"><div class="dir">${m.DIRECTION==='IN'?'接收':'发送'}</div><div>${e(m.CONTENT||'')}</div><div class="t">${fmt(m.CREATE_TIME)}</div></div></div>`).join('')||'<div class="empty">暂无</div>';
+  document.getElementById('chat-r').innerHTML=`<h4>${t==='group'?'群信息':'好友信息'}</h4><div class="kv"><div class="kl">ID</div><div style="word-break:break-all">${id}</div></div><div class="kv"><div class="kl">名称</div><div>${n||id}</div></div><div class="kv"><div class="kl">Bot</div><div>${bid}</div></div><div class="kv"><div class="kl">消息</div><div>${ms.length} 条</div></div>`
+}
+
+// ── 权限 ──
+function permHTML(){return`<div class="card"><h3>群超管</h3><div class="flex"><input id="sa-bot" placeholder="botKey"><input id="sa-grp" placeholder="groupId"><input id="sa-uid" placeholder="memberOpenid"><button class="btn-primary" onclick="addSA()">添加</button></div><table><thead><tr><th>Bot</th><th>群</th><th>成员</th><th></th></tr></thead><tbody id="sa-body"></tbody></table></div><div class="card"><h3>黑名单</h3><div class="flex"><input id="bl-scope" placeholder="scope"><input id="bl-tid" placeholder="memberOpenid"><button class="btn-danger" onclick="addBL()">添加</button></div><table><thead><tr><th>ID</th><th>范围</th><th>目标</th><th>原因</th><th>时间</th><th></th></tr></thead><tbody id="bl-body"></tbody></table></div>`}
+async function loadSA(){let d=await get(A+'/console/super-admins');document.getElementById('sa-body').innerHTML=d.map(r=>`<tr><td>${r.BOT_KEY}</td><td>${r.GROUP_ID}</td><td>${r.MEMBER_OPENID}</td><td><button class="btn-xs btn-danger" onclick="delSA('${r.BOT_KEY}','${r.GROUP_ID}','${r.MEMBER_OPENID}')">删除</button></td></tr>`).join('')}
+async function addSA(){await fetch(A+'/permission/super-admin/add?botKey='+document.getElementById('sa-bot').value+'&groupId='+document.getElementById('sa-grp').value+'&memberOpenid='+document.getElementById('sa-uid').value,{method:'POST'});loadSA()}
 async function delSA(b,g,u){await fetch(A+'/console/super-admin?botKey='+b+'&groupId='+g+'&memberOpenid='+u,{method:'DELETE'});loadSA()}
-async function loadBL(){let data=await get(A+'/console/blacklists');document.getElementById('bl-body').innerHTML=data.map(r=>`<tr><td>${r.ID}</td><td>${r.SCOPE}</td><td>${r.TARGET_ID}</td><td>${r.REASON||''}</td><td>${r.CREATE_TIME||r.CREATED_AT||''}</td><td><button class="btn-sm btn-danger" onclick="delBL(${r.ID})">删除</button></td></tr>`).join('')}
-async function addBL(){await fetch(A+'/permission/blacklist/add?scope='+v('bl-scope')+'&targetType=user&targetId='+v('bl-tid')+'&reason=控制台操作',{method:'POST'});loadBL()}
+async function loadBL(){let d=await get(A+'/console/blacklists');document.getElementById('bl-body').innerHTML=d.map(r=>`<tr><td>${r.ID}</td><td>${r.SCOPE}</td><td>${r.TARGET_ID}</td><td>${r.REASON||''}</td><td>${r.CREATE_TIME||r.CREATED_AT||''}</td><td><button class="btn-xs btn-danger" onclick="delBL(${r.ID})">删除</button></td></tr>`).join('')}
+async function addBL(){await fetch(A+'/permission/blacklist/add?scope='+document.getElementById('bl-scope').value+'&targetType=user&targetId='+document.getElementById('bl-tid').value+'&reason=控制台',{method:'POST'});loadBL()}
 async function delBL(id){await fetch(A+'/console/blacklist?id='+id,{method:'DELETE'});loadBL()}
 
-function clearLogView(){let b=document.getElementById('log-box');if(b)b.innerHTML='<div class="log-line">-- 已清空 --</div>'}
-async function loadLogs(){try{let lines=v('log-lines')||'200';let r=await fetch(A+'/console/logs?lines='+lines);let t=await r.text();let arr=t.split('\n');let box=document.getElementById('log-box');if(!box)return;let ac=document.getElementById('auto-scroll'),atBottom=ac&&ac.checked;box.innerHTML=arr.slice(-500).map(l=>`<div class="log-line${l.match(/ERROR|WARN/)&&!l.includes('[DB]')?' '+(l.includes('ERROR')?'error':'warn'):''}">${esc(l)}</div>`).join('');if(atBottom)box.scrollTop=box.scrollHeight;let si=document.getElementById('log-info');if(si)si.textContent=arr.length+' 行 | '+t.length.toLocaleString()+' 字节'}catch(e){let b=document.getElementById('log-box');if(b)b.innerHTML='<div class="log-line error">失败: '+e.message+'</div>'}}
-function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+// ── 事件 ──
+function eventHTML(){return`<div class="card"><h3>事件日志</h3><div class="flex"><select id="ev-bot"><option value="">全部</option></select><button class="btn-primary btn-sm" onclick="loadEventLogs()">刷新</button></div><div class="data-wrap"><div id="ev-tbl"></div></div></div>`}
+async function loadEventLogs(){
+  let bots=await get(A+'/console/bots');document.getElementById('ev-bot').innerHTML='<option value="">全部</option>'+bots.map(b=>`<option value="${b.appId}">${b.botKey}</option>`).join('');
+  let r=await get(A+'/db/rows?table=xuanji_qqbot_event');
+  document.getElementById('ev-tbl').innerHTML=r.rows.length?`<table><thead><tr><th>方向</th><th>Bot</th><th>类型</th><th>群</th><th>时间</th></tr></thead><tbody>${r.rows.map(r=>`<tr><td>${r.DIRECTION}</td><td>${r.BOT_ID}</td><td>${r.EVENT_TYPE}</td><td>${r.GROUP_ID||'-'}</td><td>${r.CREATE_TIME||''}</td></tr>`).join('')}</tbody></table>`:'<div class="empty">暂无</div>'
+}
 
-async function loadSys(){let d=await get(A+'/console/status');document.getElementById('sys-info').innerHTML=`<table><tr><td>启动时间</td><td>${d.startTime}</td></tr><tr><td>运行时长</td><td>${d.uptime}</td></tr><tr><td>数据表数</td><td>${d.tables}</td></tr><tr><td>内存</td><td>${d.memUsed}</td></tr><tr><td>框架</td><td>Xuanji v1.0.0-SNAPSHOT / SB 4.0.6 / JDK 25</td></tr></table>`}
-render();
-</script></body></html>
+// ── 日志 ──
+function logHTML(){return`<div class="card"><div class="flex"><h3 style="margin:0">运行日志</h3><input id="log-lines" value="200" style="width:60px;text-align:center"><select id="log-src"><option value="file">文件</option><option value="db">数据库</option></select><label style="font-size:12px"><input type="checkbox" id="log-auto" checked>自动滚动</label><button class="btn-primary btn-sm" onclick="loadLogs()">刷新</button></div><div class="log-box" id="log-box"><div class="log-line">点击刷新...</div></div></div>`}
+async function loadLogs(){
+  let src=document.getElementById('log-src')?.value||'file',box=document.getElementById('log-box');if(!box)return;
+  try{
+    if(src==='db'){let r=await get(A+'/console/framework-logs');box.innerHTML=r.map(r=>`<div class="log-line">[${r.LEVEL}] ${r.MODULE} ${r.MESSAGE}</div>`).join('')||'<div class="log-line">暂无</div>'}
+    else{let r=await fetch(A+'/console/logs?lines='+(document.getElementById('log-lines').value||'200'));let t=await r.text();box.innerHTML=t.split('\n').map(l=>`<div class="log-line${l.includes('ERROR')?' e':l.includes('WARN')?' w':''}">${e(l)}</div>`).join('')}
+    if(document.getElementById('log-auto')?.checked)box.scrollTop=box.scrollHeight
+  }catch(ex){box.innerHTML='<div class="log-line e">'+ex.message+'</div>'}
+}
+
+// ── 数据库 ──
+function dbHTML(){return`<div class="card"><h3>数据���</h3><div class="flex"><select id="tb-pick"><option value="">选择表</option></select><button class="btn-primary btn-sm" onclick="loadRows()">查看</button><span style="font-size:11px;color:var(--muted)" id="rc"></span></div><div id="da" class="empty">选择一张表</div></div>`}
+async function loadDbPage(){let ts=await get(A+'/db/tables');document.getElementById('tb-pick').innerHTML='<option value="">选择表</option>'+ts.map(t=>`<option>${t.TABLE_NAME}</option>`).join('')}
+async function loadRows(){let t=document.getElementById('tb-pick').value;if(!t)return;try{document.getElementById('da').innerHTML='<div class="empty">加载中...</div>';let d=await get(A+'/db/rows?table='+t);if(!d.rows.length){document.getElementById('da').innerHTML='<div class="empty">暂无</div>';return}document.getElementById('rc').textContent=d.count+' 行';document.getElementById('da').innerHTML=`<div class="data-wrap"><table><thead><tr>${d.columns.map(c=>`<th>${c}</th>`).join('')}</tr></thead><tbody>${d.rows.map(r=>`<tr>${d.columns.map(c=>`<td>${r[c]!=null?r[c]:'<span style="color:#ccc">-</span>'}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`}catch(ex){document.getElementById('da').innerHTML='<div class="empty" style="color:var(--danger)">'+ex.message+'</div>'}}
+
+// ── 系统 ──
+function sysHTML(){return`<div class="card"><div id="sys-info"></div></div>`}
+async function loadSys(){let d=await get(A+'/console/status');document.getElementById('sys-info').innerHTML=`<table><tr><td>启动时间</td><td>${d.startTime}</td></tr><tr><td>运行时长</td><td>${d.uptime}</td></tr><tr><td>数据表</td><td>${d.tables}</td></tr><tr><td>内存</td><td>${d.memUsed} / ${d.memMax}</td></tr><tr><td>CPU</td><td>${d.cpuCores} 核 | ${d.threads} 线程 | 虚拟线程 ${d.virtualThreads||0}</td></tr><tr><td>DB</td><td>业务 ${d.dbSize||'-'} | 日志 ${d.logDbSize||'-'}</td></tr><tr><td>框架</td><td>Xuanji v1.0.0 / Spring Boot 4.0.6 / JDK 25</td></tr></table>`}
+
+function e(s){return(String(s||'')).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function fmt(v){if(!v)return'';let s=String(v);return s.length>19?s.substring(0,16)+'...':s.replace('T',' ')}
+
+let wiz={step:0,h:document.getElementById('wizard')};
+async function checkWizard(){try{let s=await get(A+'/setup/status');if(!s.completed){wiz.step=s.step||0;showWizard()}}catch(e){}}
+function showWizard(){document.getElementById('wizard').classList.add('on');renderStep()}
+function hideWizard(){document.getElementById('wizard').classList.remove('on')}
+async function renderStep(){
+  let h=document.getElementById('wizard-box');
+  if(wiz.step===0)h.innerHTML=wStep0();
+  if(wiz.step===1)h.innerHTML=wStep1();
+  if(wiz.step===2)h.innerHTML=wStep2();
+}
+function wSteps(n){
+  let a='';for(let i=0;i<=2;i++){
+    let s=i<n?'done':i===n?'now':'';
+    a+=`<div class="step ${s}"><div class="dot">${i<n?'✓':i+1}</div>${['管理员','Bot 凭证','安装插件'][i]}</div>`;
+  }return a;
+}
+function wStep0(){return`<h2>设置管理员密码</h2><div class="sub">设置控制台登录密码，主人 OpenID 可在 Bot 上线后补充</div>${wSteps(0)}<label>管理员密码</label><input id="w-pwd" type="password" placeholder="至少 4 位"><div class="err" id="w-err"></div><div class="btn-row"><button class="btn-primary" onclick="wNext()">下一步</button></div>`}
+function wStep1(){return`<h2>配置 Bot</h2><div class="sub">从 QQ 开放平台获取凭证</div>${wSteps(1)}<label>AppID</label><input id="w-appid" placeholder="从 QQ 开放平台获取"><label>ClientSecret</label><input id="w-secret" placeholder="AppSecret"><label>连接方式</label><select id="w-method" onchange="wToggleWebhook()"><option value="websocket" selected>WebSocket（推荐）</option><option value="webhook">Webhook</option></select><div id="w-domain-row" style="display:none"><label>域名</label><input id="w-domain" placeholder="例如 xuanji.icu"><p style="font-size:10px;color:var(--muted);margin:2px 0 8px">回调地址: <span id="w-url-preview">（输入域名后自动生成）</span></p></div><label style="display:flex;align-items:center;gap:6px;margin-top:12px"><input type="checkbox" id="w-sandbox" style="width:auto">沙箱环境</label><div class="err" id="w-err"></div><div class="btn-row"><button class="btn-ghost" onclick="wiz.step=0;renderStep()">上一步</button><button class="btn-primary" onclick="wNext()">下一步</button></div>`}
+function wStep2(){return`<h2>即将完成</h2><div class="sub">配置已保存，重启后 Bot 即上线</div>${wSteps(2)}<div style="text-align:left;background:#f6f8fa;border-radius:8px;padding:14px;font-size:12px;line-height:1.7;margin:14px 0">1. 重启应用（Bot 自动连接 QQ）<br>2. 在群里 @机器人 发消息测试<br>3. 进入控制台「Bot 管理」补填主人 OpenID</div><div class="err" id="w-err"></div><div class="btn-row"><button class="btn-ghost" onclick="wiz.step=1;renderStep()">上一步</button><button class="btn-primary" onclick="wComplete()">完成配置</button></div>`}
+
+async function wNext(){
+  document.getElementById('w-err').textContent='';
+  if(wiz.step===0){
+    let p=document.getElementById('w-pwd').value;
+    if(p.length<4){document.getElementById('w-err').textContent='密码至少 4 位';return}
+    let r=await post(A+'/setup/password',{password:p});
+    if(r.error){document.getElementById('w-err').textContent=r.error;return}
+    wiz.step=1;renderStep();
+  }else if(wiz.step===1){
+    let a=document.getElementById('w-appid').value,s=document.getElementById('w-secret').value;
+    if(!a){document.getElementById('w-err').textContent='AppID 不能为空';return}
+    if(!s){document.getElementById('w-err').textContent='ClientSecret 不能为空';return}
+    let r=await post(A+'/setup/bot',{appId:a,clientSecret:s,sandbox:document.getElementById('w-sandbox').checked?'true':'false',connectionMethod:document.getElementById('w-method').value,domain:document.getElementById('w-domain')?.value||''});
+    if(r.error){document.getElementById('w-err').textContent=r.error;return}
+    wiz.step=2;renderStep();
+  }
+}
+function wToggleWebhook(){
+  let isW = document.getElementById('w-method').value === 'webhook';
+  document.getElementById('w-domain-row').style.display = isW ? 'block' : 'none';
+  if(isW){
+    var update = function(){
+      let d = document.getElementById('w-domain').value||'';
+      let a = document.getElementById('w-appid').value||'';
+      let prev = d ? 'https://'+d+'/webhook/'+(a||'appid') : '（输入域名后自动生成）';
+      document.getElementById('w-url-preview').textContent = prev;
+    };
+    document.getElementById('w-domain').oninput = update;
+    document.getElementById('w-appid').oninput = update;
+    update();
+  }
+}
+async function wComplete(){
+  await post(A+'/setup/complete',{});
+  await post(A+'/bot-config/reload',{}); // 立即加载 Bot
+  hideWizard();location.reload();
+}
+checkWizard();
+</script>
+
+<div class="wizard-overlay" id="wizard">
+  <div class="wizard-box" id="wizard-box"></div>
+</div>
+</body></html>

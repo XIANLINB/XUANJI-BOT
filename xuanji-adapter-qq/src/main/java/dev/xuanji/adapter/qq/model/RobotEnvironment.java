@@ -34,7 +34,7 @@ public class RobotEnvironment {
     private Long id;
 
     /** 所属机器人 ID（关联 Robot.id） */
-    private Long robotId;
+    private String robotId;
 
     /**
      * 环境类型

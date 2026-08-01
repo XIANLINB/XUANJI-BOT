@@ -63,4 +63,24 @@ public abstract class Bot {
     public abstract String uploadVideo(String filePath);
     public abstract String uploadAudio(String filePath);
     public abstract String uploadFile(String filePath);
+
+    // ==================== 消息撤回 ====================
+    /** 撤回群聊消息 */
+    public abstract void retractGroupMessage(String messageId);
+    /** 撤回单聊消息 */
+    public abstract void retractC2cMessage(String messageId);
+
+    // ==================== Bot 信息查询 ====================
+    public abstract int getGroupCount();
+    public abstract int getUserCount();
+    public abstract java.util.Map<String, String> getBotInfo();
+    /** 今日新增/删除好友数 */
+    public abstract int getTodayFriendAdd();
+    public abstract int getTodayFriendDel();
+    /** 今日新增/退群数 */
+    public abstract int getTodayGroupAdd();
+    public abstract int getTodayGroupDel();
+    /** 某群今日加入/退出人数 */
+    public abstract int getTodayMemberAdd(String groupId);
+    public abstract int getTodayMemberDel(String groupId);
 }

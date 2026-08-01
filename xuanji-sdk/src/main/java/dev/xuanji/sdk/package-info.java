@@ -15,7 +15,8 @@
  * @XuanjiPlugin(id = "my-plugin", name = "我的插件")
  * public class MyPlugin {
  *
- *     @Command("hello")
+ *     @GroupMessage
+ *     @MessageFilter(cmd = "hello")
  *     public String hello(@Arg("名字") String name) {
  *         return "你好, " + name + "!";
  *     }
@@ -26,7 +27,8 @@
  * 它零 Spring 依赖，编译期即可完成插件开发。
  *
  * @see dev.xuanji.api.annotation.XuanjiPlugin
- * @see dev.xuanji.api.annotation.Command
+ * @see dev.xuanji.api.annotation.GroupMessage
+ * @see dev.xuanji.api.annotation.MessageFilter
  * @see dev.xuanji.api.event.BotEvent
  * @see dev.xuanji.api.message.MessageChain
  */

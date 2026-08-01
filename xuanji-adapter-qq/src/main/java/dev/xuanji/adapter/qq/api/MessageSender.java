@@ -1,7 +1,7 @@
 package dev.xuanji.adapter.qq.api;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.xuanji.api.dto.SendMessageRequest;
+import dev.xuanji.adapter.qq.dto.SendMessageRequest;
 import dev.xuanji.adapter.qq.registry.RobotRegistry;
 import lombok.extern.slf4j.Slf4j;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -23,6 +23,8 @@ import org.springframework.stereotype.Component;
 @Component
 public class MessageSender {
 
+    private static final java.util.concurrent.atomic.AtomicLong seq = new java.util.concurrent.atomic.AtomicLong(0);
+
     private final QqApiService qqApiService;
     private final RobotRegistry robotRegistry;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -35,7 +37,7 @@ public class MessageSender {
         this.robotRegistry = robotRegistry;
     }
 
-    public static void setCurrentContext(Long robotId, String envType) {
+    public static void setCurrentContext(String robotId, String envType) {
         CURRENT_CONTEXT.set(new RobotContext(robotId, envType));
     }
 
@@ -43,7 +45,7 @@ public class MessageSender {
         CURRENT_CONTEXT.remove();
     }
 
-    private Long getCurrentRobotId() {
+    private String getCurrentRobotId() {
         RobotContext ctx = CURRENT_CONTEXT.get();
         if (ctx != null) return ctx.robotId;
         return robotRegistry.getAllRobots().keySet().stream()
@@ -119,7 +121,7 @@ public class MessageSender {
 
     // ==================== 完整 API（多机器人场景） ====================
 
-    public ObjectNode sendC2cText(Long robotId, String envType, String openid, String content, String msgId) {
+    public ObjectNode sendC2cText(String robotId, String envType, String openid, String content, String msgId) {
         ObjectNode body = Json.obj();
         body.put("msg_type", 0);
         body.put("content", content);
@@ -135,7 +137,7 @@ public class MessageSender {
         }
     }
 
-    public ObjectNode sendC2cMarkdown(Long robotId, String envType, String openid,
+    public ObjectNode sendC2cMarkdown(String robotId, String envType, String openid,
                                        Object markdown, Object keyboard, String msgId) {
         ObjectNode body = Json.obj();
         body.put("msg_type", 2);
@@ -153,7 +155,7 @@ public class MessageSender {
         }
     }
 
-    public ObjectNode sendC2cArk(Long robotId, String envType, String openid, Object ark, String msgId) {
+    public ObjectNode sendC2cArk(String robotId, String envType, String openid, Object ark, String msgId) {
         ObjectNode body = Json.obj();
         body.put("msg_type", 3);
         body.put("ark", toJsonObject(ark));
@@ -170,7 +172,7 @@ public class MessageSender {
         }
     }
 
-    public ObjectNode sendC2cMedia(Long robotId, String envType, String openid, Object media, String msgId) {
+    public ObjectNode sendC2cMedia(String robotId, String envType, String openid, Object media, String msgId) {
         ObjectNode body = Json.obj();
         body.put("msg_type", 7);
         body.put("media", toJsonObject(media));
@@ -186,7 +188,7 @@ public class MessageSender {
         }
     }
 
-    public ObjectNode sendC2cMessage(Long robotId, String envType, String openid, SendMessageRequest request) {
+    public ObjectNode sendC2cMessage(String robotId, String envType, String openid, SendMessageRequest request) {
         try {
             ObjectNode body = Json.parseObj(objectMapper.writeValueAsString(request));
             ObjectNode result = qqApiService.post(robotId, envType, "/v2/users/" + openid + "/messages", body);
@@ -198,13 +200,14 @@ public class MessageSender {
         }
     }
 
-    public ObjectNode sendGroupText(Long robotId, String envType, String groupOpenid, String content, String msgId) {
+    public ObjectNode sendGroupText(String robotId, String envType, String groupOpenid, String content, String msgId) {
         ObjectNode body = Json.obj();
         body.put("msg_type", 0);
         body.put("content", content);
         if (msgId != null) body.put("msg_id", msgId);
 
         try {
+            addMsgSeq(body);
             ObjectNode result = qqApiService.post(robotId, envType, "/v2/groups/" + groupOpenid + "/messages", body);
             log.info("[发送群聊消息成功][群{}] {}", groupOpenid, truncate(content, 50));
             return result;
@@ -214,7 +217,7 @@ public class MessageSender {
         }
     }
 
-    public ObjectNode sendGroupMarkdown(Long robotId, String envType, String groupOpenid,
+    public ObjectNode sendGroupMarkdown(String robotId, String envType, String groupOpenid,
                                          Object markdown, Object keyboard, String msgId) {
         ObjectNode body = Json.obj();
         body.put("msg_type", 2);
@@ -223,6 +226,7 @@ public class MessageSender {
         if (msgId != null) body.put("msg_id", msgId);
 
         try {
+            addMsgSeq(body);
             ObjectNode result = qqApiService.post(robotId, envType, "/v2/groups/" + groupOpenid + "/messages", body);
             log.info("[发送群聊消息成功][群{}] [Markdown]", groupOpenid);
             return result;
@@ -232,13 +236,14 @@ public class MessageSender {
         }
     }
 
-    public ObjectNode sendGroupArk(Long robotId, String envType, String groupOpenid, Object ark, String msgId) {
+    public ObjectNode sendGroupArk(String robotId, String envType, String groupOpenid, Object ark, String msgId) {
         ObjectNode body = Json.obj();
         body.put("msg_type", 3);
         body.put("ark", toJsonObject(ark));
         if (msgId != null) body.put("msg_id", msgId);
 
         try {
+            addMsgSeq(body);
             ObjectNode result = qqApiService.post(robotId, envType, "/v2/groups/" + groupOpenid + "/messages", body);
             int templateId = toJsonObject(ark).path("template_id").asInt(0);
             log.info("[发送群聊消息成功][群{}] [Ark模板{}]", groupOpenid, templateId);
@@ -249,13 +254,14 @@ public class MessageSender {
         }
     }
 
-    public ObjectNode sendGroupMedia(Long robotId, String envType, String groupOpenid, Object media, String msgId) {
+    public ObjectNode sendGroupMedia(String robotId, String envType, String groupOpenid, Object media, String msgId) {
         ObjectNode body = Json.obj();
         body.put("msg_type", 7);
         body.put("media", toJsonObject(media));
         if (msgId != null) body.put("msg_id", msgId);
 
         try {
+            addMsgSeq(body);
             ObjectNode result = qqApiService.post(robotId, envType, "/v2/groups/" + groupOpenid + "/messages", body);
             log.info("[发送群聊消息成功][群{}] [富媒体]", groupOpenid);
             return result;
@@ -265,9 +271,10 @@ public class MessageSender {
         }
     }
 
-    public ObjectNode sendGroupMessage(Long robotId, String envType, String groupOpenid, SendMessageRequest request) {
+    public ObjectNode sendGroupMessage(String robotId, String envType, String groupOpenid, SendMessageRequest request) {
         try {
             ObjectNode body = Json.parseObj(objectMapper.writeValueAsString(request));
+            addMsgSeq(body);
             ObjectNode result = qqApiService.post(robotId, envType, "/v2/groups/" + groupOpenid + "/messages", body);
             log.info("[发送群聊消息成功][群{}] [msgType={}]", groupOpenid, request.getMsgType());
             return result;
@@ -282,7 +289,7 @@ public class MessageSender {
     /**
      * 上传群聊媒体文件并发送
      */
-    public ObjectNode uploadAndSendGroupMedia(Long robotId, String envType, String groupOpenid,
+    public ObjectNode uploadAndSendGroupMedia(String robotId, String envType, String groupOpenid,
                                                int fileType, String fileUrl, String msgId) {
         ObjectNode uploadBody = Json.obj();
         uploadBody.put("file_type", fileType);
@@ -326,7 +333,7 @@ public class MessageSender {
     /**
      * 上传单聊媒体文件并发送
      */
-    public ObjectNode uploadAndSendC2cMedia(Long robotId, String envType, String openid,
+    public ObjectNode uploadAndSendC2cMedia(String robotId, String envType, String openid,
                                              int fileType, String fileUrl, String msgId) {
         ObjectNode uploadBody = Json.obj();
         uploadBody.put("file_type", fileType);
@@ -415,7 +422,7 @@ public class MessageSender {
         return sendGroupCard(getCurrentRobotId(), getCurrentEnvType(), groupOpenid, card, msgId);
     }
 
-    public ObjectNode sendGroupCard(Long robotId, String envType, String groupOpenid, Object card, String msgId) {
+    public ObjectNode sendGroupCard(String robotId, String envType, String groupOpenid, Object card, String msgId) {
         ObjectNode body = Json.obj();
         body.put("msg_type", 8);
         if (card instanceof ObjectNode) body.set("card", (ObjectNode) card);
@@ -432,7 +439,7 @@ public class MessageSender {
         return uploadMedia(getCurrentRobotId(), getCurrentEnvType(), groupOpenid, fileType, fileUrl);
     }
 
-    public String uploadMedia(Long robotId, String envType, String groupOpenid, int fileType, String fileUrl) {
+    public String uploadMedia(String robotId, String envType, String groupOpenid, int fileType, String fileUrl) {
         ObjectNode body = Json.obj();
         body.put("file_type", fileType);
         body.put("url", fileUrl);
@@ -456,5 +463,41 @@ public class MessageSender {
         return str.length() > max ? str.substring(0, max) + "..." : str;
     }
 
-    private record RobotContext(Long robotId, String envType) {}
+    private void addMsgSeq(ObjectNode body) {
+        body.put("msg_seq", seq.incrementAndGet());
+    }
+
+    // ==================== 消息撤回 ====================
+
+    /** 撤回群聊消息 */
+    public ObjectNode retractGroupMessage(String groupOpenid, String messageId) {
+        String robotId = getCurrentRobotId();
+        String envType = getCurrentEnvType();
+        return qqApiService.delete(robotId, envType,
+                "/v2/groups/" + groupOpenid + "/messages/" + messageId);
+    }
+
+    /** 撤回单聊消息 */
+    public ObjectNode retractC2cMessage(String openid, String messageId) {
+        String robotId = getCurrentRobotId();
+        String envType = getCurrentEnvType();
+        return qqApiService.delete(robotId, envType,
+                "/v2/users/" + openid + "/messages/" + messageId);
+    }
+
+    // ==================== 群信息 ====================
+
+    /** 获取群基础信息 */
+    public ObjectNode getGroupInfo(String groupOpenid, String appId, String appSecret, String envType) {
+        return qqApiService.get(appId, appSecret, envType,
+                "/v2/groups/" + groupOpenid + "/info");
+    }
+
+    /** 获取机器人群内状态 */
+    public ObjectNode getBotGroupState(String groupOpenid, String appId, String appSecret, String envType) {
+        return qqApiService.get(appId, appSecret, envType,
+                "/v2/groups/" + groupOpenid + "/bot_state");
+    }
+
+    private record RobotContext(String robotId, String envType) {}
 }

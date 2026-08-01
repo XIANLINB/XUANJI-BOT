@@ -18,6 +18,14 @@
             <groupId>dev.xuanji</groupId>
             <artifactId>xuanji-api</artifactId>
         </dependency>
+        <dependency>
+            <groupId>dev.xuanji</groupId>
+            <artifactId>xuanji-sdk</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.xuanji</groupId>
+            <artifactId>xuanji-core</artifactId>
+        </dependency>
 
         <!-- Spring 上下文（组件/配置） -->
         <dependency>

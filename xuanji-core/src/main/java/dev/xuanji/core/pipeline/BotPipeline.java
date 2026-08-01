@@ -24,16 +24,8 @@ public class BotPipeline {
         this.stages = stages.stream()
                 .sorted(Comparator.comparingInt(PipelineStage::order))
                 .toList();
-        INSTANCE = this;
         log.info("[Pipeline] 初始化完成，阶段链: {}",
                 this.stages.stream().map(s -> s.order() + ":" + s.name()).toList());
-    }
-
-    /** 供 adapter-qq 的 QqBotWsClient 通过静态方式访问（P3 过渡） */
-    private static BotPipeline INSTANCE;
-
-    public static BotPipeline get() {
-        return INSTANCE;
     }
 
     /**

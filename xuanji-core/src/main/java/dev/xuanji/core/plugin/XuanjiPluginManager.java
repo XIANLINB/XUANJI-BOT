@@ -30,6 +30,7 @@ public class XuanjiPluginManager extends DefaultPluginManager {
 
     private final ApplicationContext parentContext;
     private final Map<String, AnnotationConfigApplicationContext> pluginContexts = new HashMap<>();
+    private final Map<String, java.util.List<Object>> pluginInstances = new HashMap<>();
 
     public XuanjiPluginManager(ApplicationContext parentContext) {
         this.parentContext = parentContext;
@@ -130,12 +131,12 @@ public class XuanjiPluginManager extends DefaultPluginManager {
             Class<?> mainClass = cl.loadClass(pluginClassName);
             // 检查主类本身
             if (mainClass.isAnnotationPresent(dev.xuanji.api.annotation.XuanjiPlugin.class)) {
-                registerIfPossible(mainClass, registry, cl);
+                registerIfPossible(mainClass, registry, cl, wrapper.getPluginId());
             }
             // 检查内部静态类（如 DemoPlugin.Commands）
             for (Class<?> inner : mainClass.getDeclaredClasses()) {
                 if (inner.isAnnotationPresent(dev.xuanji.api.annotation.XuanjiPlugin.class)) {
-                    registerIfPossible(inner, registry, cl);
+                    registerIfPossible(inner, registry, cl, wrapper.getPluginId());
                 }
             }
         } catch (Exception e) {
@@ -143,10 +144,12 @@ public class XuanjiPluginManager extends DefaultPluginManager {
         }
     }
 
-    private void registerIfPossible(Class<?> cls, dev.xuanji.core.command.CommandRegistry registry, ClassLoader cl) {
+    private void registerIfPossible(Class<?> cls, dev.xuanji.core.command.CommandRegistry registry, ClassLoader cl, String pluginId) {
         try {
             Object instance = cls.getDeclaredConstructor().newInstance();
-            registry.register(instance);
+            registry.register(instance, pluginId);
+            // 找到这个调用来自哪个 pluginId（从 scanPluginClasses 传入，通过方法签名无法获取，暂时用 class 名推测）
+            // 这里用简单方案：把所有注册的 instance 放到一个全局列表
             log.info("[Plugin] 注册指令类: {}", cls.getSimpleName());
         } catch (Exception e) {
             log.debug("[Plugin] 无法实例化 {}: {}", cls.getSimpleName(), e.getMessage());

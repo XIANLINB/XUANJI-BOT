@@ -1,6 +1,6 @@
 package dev.xuanji.core.event;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import dev.xuanji.api.event.BotEvent;
 import dev.xuanji.api.json.Json;
 
 /**
@@ -58,5 +58,5 @@ public interface EventHandler {
      * @param envType 环境类型（SANDBOX / PRODUCTION）
      * @param data    事件数据（QQ 平台 Payload 中的 d 字段，已注入元数据）
      */
-    void handle(Long robotId, String envType, ObjectNode data);
+    void handle(BotEvent event);
 }

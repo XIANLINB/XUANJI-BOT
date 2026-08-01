@@ -10,6 +10,7 @@ import dev.xuanji.api.adapter.Bot;
 import dev.xuanji.api.adapter.BotConfig;
 import dev.xuanji.core.config.XuanjiRobotProperties;
 import lombok.RequiredArgsConstructor;
+import org.springframework.jdbc.core.JdbcTemplate;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
@@ -35,6 +36,7 @@ public class XuanjiBotRunner implements CommandLineRunner {
     private final RobotRegistry robotRegistry;
     private final QqBotManager botManager;
     private final QqAdapter qqAdapter;
+    private final JdbcTemplate jdbc;
 
     @Override
     public void run(String... args) {
@@ -102,10 +104,10 @@ public class XuanjiBotRunner implements CommandLineRunner {
         // 确定环境类型
         String envType = isSandbox ? "SANDBOX" : "PRODUCTION";
 
-        // 使用 appId 的哈希值作为 robotId（简化处理）
-        Long robotId = (long) appId.hashCode();
+        // 使用 appId 作为 robotId
+        String robotId = appId;
 
-        // 注册到 RobotRegistry
+        // 注���到 RobotRegistry
         Robot robot = new Robot();
         robot.setId(robotId);
         robot.setAppId(appId);
@@ -114,6 +116,7 @@ public class XuanjiBotRunner implements CommandLineRunner {
         robot.setIsSandbox(isSandbox);
         robot.setConnectionMethod(connectionMethod);
         robot.setStatus(1);
+        robot.setActiveEnv(envType);
         robotRegistry.registerRobot(robot);
 
         log.info("[启动] 机器人 {}: appId={}, env={}, method={}",
@@ -140,5 +143,13 @@ public class XuanjiBotRunner implements CommandLineRunner {
         Bot bot = qqAdapter.connect(botConfig);
         botManager.register(bot);
         log.info("[BotManager] 已注册: {}", bot.id());
+
+        // 写入 xuanji_bot 表（live），保证仪表盘冷启动不为 0/0
+        try {
+            jdbc.update("MERGE INTO xuanji_bot (platform, bot_identifier, bot_key, status) "
+                    + "KEY(platform, bot_identifier) VALUES ('qq', ?, ?, 'ONLINE')", appId, botKey);
+        } catch (Exception e) {
+            log.warn("[启动] 写入 xuanji_bot 失败: {}", e.getMessage());
+        }
     }
 }

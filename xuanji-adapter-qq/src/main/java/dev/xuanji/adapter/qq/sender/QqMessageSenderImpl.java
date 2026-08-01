@@ -29,7 +29,8 @@ public class QqMessageSenderImpl implements MessageSender {
     public SendReceipt reply(MessageChain chain) {
         BotEvent event = BotContext.current();
         String envType = event.bot().isOnline() ? "PRODUCTION" : "SANDBOX";
-        Long robotId = (long) event.bot().selfId().hashCode();
+        String selfId = event.bot().selfId();
+        String robotId = selfId.contains(":") ? selfId.substring(selfId.indexOf(":") + 1) : selfId;
 
         if (event.isGroupEvent() && event.group() != null) {
             return doSend(robotId, envType,
@@ -43,7 +44,7 @@ public class QqMessageSenderImpl implements MessageSender {
     @Override
     public SendReceipt send(Target target, MessageChain chain) {
         String envType = "PRODUCTION";
-        Long robotId = 0L; // 简化：从 BotManager 查找第一个在线 bot
+        String robotId = ""; // 简化：从 BotManager 查找第一个在线 bot
 
         String path = switch (target) {
             case Target.Private p -> "/v2/users/" + p.openid() + "/messages";
@@ -54,7 +55,7 @@ public class QqMessageSenderImpl implements MessageSender {
         return doSend(robotId, envType, path, chain);
     }
 
-    private SendReceipt doSend(Long robotId, String envType, String path, MessageChain chain) {
+    private SendReceipt doSend(String robotId, String envType, String path, MessageChain chain) {
         ObjectNode payload = QqMessageConverter.toQqPayload(chain);
         long start = System.currentTimeMillis();
         try {

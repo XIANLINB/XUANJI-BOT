@@ -32,8 +32,26 @@ public class ConsoleApiController {
         m.put("startTime", START_TIME.toString());
         int tables = jdbc.queryForObject("SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='PUBLIC'", Integer.class);
         m.put("tables", tables);
-        m.put("dbPath", "./data/xuanji/data/xuanji.mv.db");
-        m.put("memUsed", (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1024 / 1024 + "MB");
+        Runtime rt = Runtime.getRuntime();
+        m.put("memUsed", (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024 + "MB");
+        m.put("memMax", rt.maxMemory() / 1024 / 1024 + "MB");
+        m.put("cpuCores", rt.availableProcessors());
+        m.put("threads", Thread.activeCount());
+        // 虚拟线程数（JDK 21+）
+        try {
+            var fb = Thread.class.getMethod("isVirtual");
+            long vt = Thread.getAllStackTraces().keySet().stream().filter(t -> {
+                try { return (boolean) fb.invoke(t); } catch (Exception e) { return false; }
+            }).count();
+            m.put("virtualThreads", vt);
+        } catch (Exception ignored) {}
+        // H2 数据库大小
+        try {
+            java.nio.file.Path db = java.nio.file.Paths.get("data", "xuanji", "data", "xuanji.mv.db");
+            if (java.nio.file.Files.exists(db)) m.put("dbSize", java.nio.file.Files.size(db) / 1024 + "KB");
+            java.nio.file.Path logDb = java.nio.file.Paths.get("data", "xuanji", "xuanji.log.mv.db");
+            if (java.nio.file.Files.exists(logDb)) m.put("logDbSize", java.nio.file.Files.size(logDb) / 1024 + "KB");
+        } catch (Exception ignored) {}
         return m;
     }
 

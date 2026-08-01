@@ -44,6 +44,51 @@ public class LogDbInitializer {
         """);
 
         log.info("[LOG-DB] 框架日志表就绪 (xlog_framework)");
-        log.info("[LOG-DB] 日志库文件: data/xuanji/xuanji.log.mv.db (bot 事件流水预留)");
+
+        // ==================== 日志库 — Bot 消息/事件流水 ====================
+
+        // 群聊消息流水
+        logJdbc.execute("""
+            CREATE TABLE IF NOT EXISTS xuanji_qqbot_group_message (
+                id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+                direction   VARCHAR(8)   NOT NULL,
+                bot_id      VARCHAR(64)  NOT NULL,
+                group_id    VARCHAR(128),
+                member_id   VARCHAR(128),
+                msg_type    VARCHAR(32),
+                content     TEXT,
+                raw_json    TEXT,
+                create_time TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+            )
+        """);
+
+        // 单聊消息流水
+        logJdbc.execute("""
+            CREATE TABLE IF NOT EXISTS xuanji_qqbot_c2c_message (
+                id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+                direction   VARCHAR(8)   NOT NULL,
+                bot_id      VARCHAR(64)  NOT NULL,
+                user_id     VARCHAR(128),
+                msg_type    VARCHAR(32),
+                content     TEXT,
+                raw_json    TEXT,
+                create_time TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+            )
+        """);
+
+        // 事件流水
+        logJdbc.execute("""
+            CREATE TABLE IF NOT EXISTS xuanji_qqbot_event (
+                id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+                direction   VARCHAR(8)   NOT NULL,
+                bot_id      VARCHAR(64)  NOT NULL,
+                event_type  VARCHAR(64),
+                group_id    VARCHAR(128),
+                raw_json    TEXT,
+                create_time TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+            )
+        """);
+
+        log.info("[LOG-DB] QQ Bot 消息/事件流水表就绪 (group_message / c2c_message / event)");
     }
 }

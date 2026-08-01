@@ -103,8 +103,13 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(NoResourceFoundException.class)
     @ResponseStatus(HttpStatus.NOT_FOUND)
-    public R<Void> handleNoResource(NoResourceFoundException e) {
-        return R.fail(404, "接口不存在");
+    public R<Void> handleNoResource(NoResourceFoundException e, jakarta.servlet.http.HttpServletRequest request) {
+        String path = request.getRequestURI();
+        // 只对 API 路径返回 JSON 404，非 API 路径让静态资源处理
+        if (path.startsWith("/xuanji/api/")) {
+            return R.fail(404, "接口不存在");
+        }
+        return null; // 交给默认处理（静态资源 etc.）
     }
 
     /**

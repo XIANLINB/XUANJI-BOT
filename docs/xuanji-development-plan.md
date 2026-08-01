@@ -13,7 +13,7 @@
 | P0 | 工程基线：JDK 25 + 多模块拆分 + 包名迁移 | v0.1 | r8Htgr | — |
 | P1 | 核心抽象：xuanji-api 全部接口与注解 | v0.1 | r8Htgr | P0 |
 | P2 | QQ 适配器搬家：实现四抽象 | v0.1 | r8Htgr | P1 |
-| P3 | 调度与指令：Pipeline + @Command + 可靠投递 | v0.1 | r8Htgr | P2 |
+| P3 | 调度与指令：Pipeline + @GroupMessage/@MessageFilter + 可靠投递 | v0.1 | r8Htgr | P2 |
 | P4 | 持久化：内嵌 H2 + 三级数据域 | v0.1 | r8Htgr | P3 |
 | P5 | 权限体系：五层模型 + 黑名单 | v0.1 | r8Htgr | P4 |
 | P6 | 控制台 v0.1 + 首启向导 | v0.1 | rdKIjR | P4 |
@@ -55,7 +55,7 @@
 | 1.3 | 接入抽象：`BotAdapter` / `Bot` / `BotConfig` / `BotManager` 接口 | adapter 包 |
 | 1.4 | 发送抽象：`MessageSender`（reply/send 分离）/ `SendReceipt` / `Target` | sender 包 |
 | 1.5 | 上下文：`BotContext`（ScopedValue 承载当前事件） | context 包 |
-| 1.6 | 注解全套：`@XuanjiPlugin` `@Command` `@Arg` `@OnMessage` `@RateLimit` `@RequireRole` `@GroupOnly` `@LlmTool` | annotation 包 |
+| 1.6 | 注解全套：`@XuanjiPlugin` `@GroupMessage` `@PrivateMessage` `@MessageFilter` `@Arg` `@RateLimit` `@RequireRole` `@GroupOnly` `@LlmTool` | annotation 包 |
 | 1.7 | 能力 SPI：`ServiceRegistry` + `LlmService` / `EconomyService` 接口 | capability 包 |
 | 1.8 | 平台差异抽象：`GroupAdminAction` / `MediaService` / `ConversationSession` / `SchedulerService` / `PluginContext` | action 包 |
 | 1.9 | 配置模型：`BotsProperties`（`xuanji.bots` 标准 application.yml 绑定） | config 包 |
@@ -80,10 +80,10 @@
 | # | 任务 | 产出物 |
 |---|---|---|
 | 3.1 | EventBus + BotPipeline 八阶段（唤醒/黑白名单/限流/安全/预处理/分发/装饰/响应） | pipeline 包 |
-| 3.2 | `@Command` 扫描注册（BeanPostProcessor）+ `@Arg` 参数绑定（类型转换/必填/默认值） | command 包 |
+| 3.2 | `@GroupMessage`/`@MessageFilter` 扫描注册（BeanPostProcessor）+ `@Arg` 参数绑定（类型转换/必填/默认值） | command 包 |
 | 3.3 | 声明式横切 AOP：cooldown / role / @RateLimit / @GroupOnly | aspect 包 |
 | 3.4 | 可靠投递：eventId 幂等去重 + 发送令牌桶队列 + 优雅停机 | reliability 包 |
-| 3.5 | 9 个测试命令改写为示例插件（@Command 版，switch 彻底消失） | xuanji-plugin-demo |
+| 3.5 | 9 个测试命令改写为示例插件（@GroupMessage+@MessageFilter 版，switch 彻底消失） | xuanji-plugin-demo |
 
 **验收**：群里发"文本/markdown/图片"指令正常回复；同一 eventId 重推只处理一次（日志可证）；连续高频发送不触发 429。
 
@@ -165,7 +165,7 @@
 | 10.1 | plugin.json schema 定稿 + 打包工具 | 规范文档 + maven 插件 |
 | 10.2 | GitHub 索引仓库（plugins.json + PR 收录流程） | market-index repo |
 | 10.3 | 控制台市场页：浏览/一键安装（兼容校验+权限确认+哈希校验） | market UI |
-| 10.4 | 消息模拟器（与事件录播同源）：控制台发假消息调试插件 | simulator |
+| 10.4 | 消息模拟器（与事件录播同源）：控制台发假消息调试插件 | simulator |  
 
 **验收**：签到插件按规范打包，通过索引仓库被控制台安装成功；模拟器里不调真 QQ 可调试指令。
 

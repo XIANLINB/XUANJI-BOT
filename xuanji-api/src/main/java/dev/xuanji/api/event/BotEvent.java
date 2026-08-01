@@ -33,7 +33,13 @@ public record BotEvent(
         String replyToMsgId,
 
         /** 平台原生数据透传（身份组、附加字段等精细场景用） */
-        JsonNode platformData
+        JsonNode platformData,
+
+        /** 平台原始事件类型字符串（如 GROUP_AT_MESSAGE_CREATE），用于分发路由 */
+        String rawEventType,
+
+        /** 环境类型（SANDBOX / PRODUCTION） */
+        String envType
 ) {
     /** 是否为群聊事件 */
     public boolean isGroupEvent() {

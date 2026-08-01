@@ -1,20 +1,28 @@
 package dev.xuanji.sdk.event;
 
 /**
- * 单聊消息事件封装 — 包装 QQ 的 C2cMessageEvent DTO，用于私聊场景。
+ * 单聊/私聊消息事件 — SDK 封装，平台无关。
  */
 public class PrivateMessageEvent {
+    private final String messageId;
+    private final String content;
+    private final String senderId;
+    private final String senderName;
+    private final int messageType;
 
-    private final dev.xuanji.api.dto.C2cMessageEvent raw;
+    public PrivateMessageEvent(String messageId, String content, String senderId, String senderName, int messageType) {
+        this.messageId = messageId;
+        this.content = content;
+        this.senderId = senderId;
+        this.senderName = senderName;
+        this.messageType = messageType;
+    }
 
-    public PrivateMessageEvent(dev.xuanji.api.dto.C2cMessageEvent raw) { this.raw = raw; }
-
-    public String getMessageId() { return raw.getId(); }
-    public String getContent() { return raw.getContent(); }
-    public String getSenderId() { return raw.getSenderId(); }
-    public String getSenderName() { return raw.getSenderName(); }
-    public int getMessageType() { return raw.getMessageType() != null ? raw.getMessageType() : 0; }
-    public String getTimestamp() { return raw.getTimestamp(); }
-    public boolean hasAttachments() { return raw.getAttachments() != null && !raw.getAttachments().isEmpty(); }
-    public dev.xuanji.api.dto.C2cMessageEvent raw() { return raw; }
+    public String getMessageId() { return messageId; }
+    public String getContent() { return content; }
+    public String getSenderId() { return senderId; }
+    public String getSenderName() { return senderName; }
+    public int getMessageType() { return messageType; }
+    public boolean hasAttachments() { return false; }
+    public Object raw() { return this; }
 }

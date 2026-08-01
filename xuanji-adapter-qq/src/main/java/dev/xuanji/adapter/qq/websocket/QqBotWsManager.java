@@ -1,9 +1,8 @@
 package dev.xuanji.adapter.qq.websocket;
 
 import dev.xuanji.adapter.qq.config.QqPlatformConfig;
-
 import dev.xuanji.adapter.qq.registry.AccessTokenService;
-import dev.xuanji.api.event.EventSink;
+import dev.xuanji.core.pipeline.BotPipeline;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
@@ -47,8 +46,8 @@ import java.util.concurrent.*;
 @Component
 public class QqBotWsManager {
 
-    /** 事件分发器，注入到每个新建的客户端中 */
-    private final EventSink eventDispatcher;
+    /** 事件流水线，注入到每个新建的客户端中 */
+    private final BotPipeline botPipeline;
 
     /** 网关地址服务，用于获取 WebSocket 连接地址 */
     private final GatewayService gatewayService;
@@ -94,14 +93,14 @@ public class QqBotWsManager {
     /**
      * 构造函数，注入必要的服务
      *
-     * @param eventDispatcher    事件分发器
+     * @param botPipeline        事件流水线（Whitelist/RateLimit/权限等阶段在此生效）
      * @param gatewayService     网关地址服务
      * @param accessTokenService AccessToken 管理服务
      */
-    public QqBotWsManager(EventSink eventDispatcher,
+    public QqBotWsManager(BotPipeline botPipeline,
                            GatewayService gatewayService,
                            AccessTokenService accessTokenService) {
-        this.eventDispatcher = eventDispatcher;
+        this.botPipeline = botPipeline;
         this.gatewayService = gatewayService;
         this.accessTokenService = accessTokenService;
     }
@@ -168,7 +167,6 @@ public class QqBotWsManager {
      * 注册机器人配置
      *
      * <p>将机器人的凭证信息存储到内存注册表中，供后续启动连接时使用。
-     * 注册后需要调用 {@link #start(Long, String)} 才会真正建立连接。
      *
      * @param robotId   机器人 ID
      * @param envType   环境类型（SANDBOX / PRODUCTION）
@@ -176,7 +174,7 @@ public class QqBotWsManager {
      * @param appSecret 机器人 AppSecret（明文）
      * @param intents   事件订阅意图位掩码，0 表示使用默认值
      */
-    public void registerRobot(Long robotId, String envType, String appId, String appSecret, int intents) {
+    public void registerRobot(String robotId, String envType, String appId, String appSecret, int intents) {
         String key = robotId + ":" + envType;
         int finalIntents = intents > 0 ? intents : QqPlatformConfig.DEFAULT_INTENTS;
         robotConfigs.put(key, new RobotConfig(robotId, envType, appId, appSecret, finalIntents));
@@ -190,7 +188,7 @@ public class QqBotWsManager {
      * @param envType 环境类型
      * @throws RuntimeException 如果机器人未注册
      */
-    public void start(Long robotId, String envType) {
+    public void start(String robotId, String envType) {
         String key = robotId + ":" + envType;
         RobotConfig config = robotConfigs.get(key);
         if (config == null) {
@@ -228,7 +226,7 @@ public class QqBotWsManager {
      *
      * @param robotId 机器人 ID
      */
-    public void stop(Long robotId) {
+    public void stop(String robotId) {
         clients.entrySet().removeIf(entry -> {
             if (entry.getKey().startsWith(robotId + ":")) {
                 entry.getValue().stop();
@@ -247,7 +245,7 @@ public class QqBotWsManager {
      * @param robotId 机器人 ID
      * @param envType 环境类型
      */
-    public void restart(Long robotId, String envType) {
+    public void restart(String robotId, String envType) {
         stop(robotId);
         start(robotId, envType);
     }
@@ -298,7 +296,7 @@ public class QqBotWsManager {
      * @param envType 环境类型
      * @return 连接状态枚举，未找到返回 DISCONNECTED
      */
-    public QqBotWsClient.WsState getState(Long robotId, String envType) {
+    public QqBotWsClient.WsState getState(String robotId, String envType) {
         QqBotWsClient client = clients.get(robotId + ":" + envType);
         return client != null ? client.getState() : QqBotWsClient.WsState.DISCONNECTED;
     }
@@ -310,7 +308,7 @@ public class QqBotWsManager {
      * @param envType 环境类型
      * @return true=已连接且正在运行
      */
-    public boolean isConnected(Long robotId, String envType) {
+    public boolean isConnected(String robotId, String envType) {
         QqBotWsClient client = clients.get(robotId + ":" + envType);
         return client != null && client.isRunning() && client.getState() == QqBotWsClient.WsState.CONNECTED;
     }
@@ -353,7 +351,7 @@ public class QqBotWsManager {
      * @param envType 环境类型
      * @return 包含 running、state、totalEvents、totalReconnects 的 Map
      */
-    public Map<String, Object> getStatus(Long robotId, String envType) {
+    public Map<String, Object> getStatus(String robotId, String envType) {
         QqBotWsClient client = clients.get(robotId + ":" + envType);
         Map<String, Object> status = new LinkedHashMap<>();
         if (client != null) {
@@ -413,7 +411,7 @@ public class QqBotWsManager {
         QqBotWsClient client = new QqBotWsClient(
                 config.robotId, config.envType,
                 config.appId, config.appSecret,
-                gatewayUrl, eventDispatcher, gatewayService, accessTokenService,
+                gatewayUrl, botPipeline, gatewayService, accessTokenService,
                 config.intents, isNewOpenBot,
                 heartbeatScheduler,
                 connectExecutor);
@@ -432,5 +430,5 @@ public class QqBotWsManager {
      * @param appId     AppID
      * @param appSecret AppSecret（明文）
      */
-    public record RobotConfig(Long robotId, String envType, String appId, String appSecret, int intents) {}
+    public record RobotConfig(String robotId, String envType, String appId, String appSecret, int intents) {}
 }

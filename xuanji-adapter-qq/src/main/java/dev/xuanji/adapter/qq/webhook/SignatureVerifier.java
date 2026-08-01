@@ -66,7 +66,7 @@ public class SignatureVerifier {
      * @param envType         环境类型（SANDBOX / PRODUCTION）
      * @param secretEncrypted AES 加密后的 Ed25519 密钥（Base64 编码）
      */
-    public void registerSecret(Long robotId, String envType, String secretEncrypted) {
+    public void registerSecret(String robotId, String envType, String secretEncrypted) {
         try {
             String secret = aesUtil.decrypt(secretEncrypted);
             secretRegistry.put(robotId + ":" + envType, secret);
@@ -85,7 +85,7 @@ public class SignatureVerifier {
      * @param envType     环境类型
      * @param secretPlain 明文 Ed25519 密钥
      */
-    public void registerSecretPlain(Long robotId, String envType, String secretPlain) {
+    public void registerSecretPlain(String robotId, String envType, String secretPlain) {
         secretRegistry.put(robotId + ":" + envType, secretPlain);
     }
 
@@ -102,7 +102,7 @@ public class SignatureVerifier {
      * @param eventTs    事件时间戳
      * @return 包含 plain_token 和 signature 的 JSON 字符串
      */
-    public String handleVerifyRequest(Long robotId, String envType, String plainToken, String eventTs) {
+    public String handleVerifyRequest(String robotId, String envType, String plainToken, String eventTs) {
         String botSecret = secretRegistry.get(robotId + ":" + envType);
         if (botSecret == null) {
             log.error("[签名验证] 密钥未注册: robotId={}, env={}", robotId, envType);
@@ -139,7 +139,7 @@ public class SignatureVerifier {
      * @param body             请求体原始 JSON 字符串
      * @return true=验签通过（请求合法），false=验签失败（请求可能被伪造）
      */
-    public boolean verifyEventSignature(Long robotId, String envType,
+    public boolean verifyEventSignature(String robotId, String envType,
                                         String signatureHeader, String timestampHeader, String body) {
         if (signatureHeader == null || timestampHeader == null) {
             log.warn("[签名验证] 签名头缺失: robotId={}, env={}", robotId, envType);

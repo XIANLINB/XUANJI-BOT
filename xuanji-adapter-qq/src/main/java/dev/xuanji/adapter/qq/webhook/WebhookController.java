@@ -64,19 +64,41 @@ public class WebhookController {
      * @param request HTTP 请求（用于读取请求体和签名头）
      * @return 验证请求返回签名 JSON，普通事件返回空 200，错误返回 400/404
      */
+    /**
+     * Webhook 回调入口（按 appId）
+     * 路径: POST /webhook/{appId}
+     */
+    @PostMapping(value = "/{appId}", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<String> handleWebhookByAppId(
+            @PathVariable String appId,
+            HttpServletRequest request) {
+        Robot robot = robotRegistry.findByAppId(appId);
+        if (robot == null) {
+            log.warn("[Webhook] AppID 未注册: appId={}", appId);
+            return ResponseEntity.notFound().build();
+        }
+        return doHandle(robot.getId(), robot, request);
+    }
+
+    /**
+     * Webhook 回调入口（按 robotId，向后兼容）
+     * 路径: POST /webhook/xuanji/{robotId}
+     */
     @PostMapping(value = "/xuanji/{robotId}", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<String> handleWebhook(
-            @PathVariable Long robotId,
+            @PathVariable String robotId,
             HttpServletRequest request) {
-
-        // 1. 查找机器人配置
         Robot robot = robotRegistry.getRobot(robotId);
         if (robot == null) {
             log.warn("[Webhook] 机器人不存在: robotId={}", robotId);
             return ResponseEntity.notFound().build();
         }
+        return doHandle(robotId, robot, request);
+    }
 
-        // 2. 获取环境类型（默认 SANDBOX）
+    private ResponseEntity<String> doHandle(String robotId, Robot robot, HttpServletRequest request) {
+
+        // 1. 获取环境类型（默认 SANDBOX）
         String envType = robot.getActiveEnv();
         if (envType == null || envType.isBlank()) envType = "SANDBOX";
 

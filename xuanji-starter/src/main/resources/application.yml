@@ -25,11 +25,22 @@ logging:
     dev.xuanji: DEBUG
     root: INFO
 
+# Actuator 监控
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics
+  metrics:
+    export:
+      simple:
+        enabled: true
+
 # 璇玑框架配置
 xuanji:
   # 机器人主人（按 botKey 配置 member_openid）
   master:
-    bot1: "F5C011165910EB4FF2D63A9A582445F7"
+    bot1: ""
     bot2: ""
 
   # 日志库（独立 H2 文件，data/xuanji/xuanji.log.mv.db）

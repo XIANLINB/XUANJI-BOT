@@ -1,7 +1,7 @@
 package dev.xuanji.adapter.qq.websocket;
 
 import dev.xuanji.api.adapter.Bot;
-import dev.xuanji.api.event.EventSink;
+import dev.xuanji.core.pipeline.BotPipeline;
 import lombok.extern.slf4j.Slf4j;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.NullNode;
@@ -60,7 +60,7 @@ public class QqBotWsClient {
     // ==================== 配置字段（构造时注入，不可变） ====================
 
     /** 机器人 ID（数据库主键），用于标识和日志记录 */
-    private final Long robotId;
+    private final String robotId;
 
     /** 环境类型："SANDBOX" 或 "PRODUCTION"，决定连接的网关环境 */
     private final String envType;
@@ -74,8 +74,8 @@ public class QqBotWsClient {
     /** WebSocket 网关地址（如 wss://api.sgroup.qq.com/websocket），运行时可更新 */
     private volatile String gatewayUrl;
 
-    /** 事件分发器，将接收到的事件路由到对应的 Handler */
-    private final EventSink eventDispatcher;
+    /** 事件流水线，将接收到的事件路由到对应的 Handler（阶段在此生效） */
+    private final BotPipeline botPipeline;
 
     /** 网关服务，用于重连时获取新的网关地址 */
     private final GatewayService gatewayService;
@@ -169,7 +169,7 @@ public class QqBotWsClient {
      * @param appId            机器人 AppID
      * @param appSecret        机器人 AppSecret（明文）
      * @param gatewayUrl       WebSocket 网关地址
-     * @param eventDispatcher  事件分发器
+     * @param botPipeline      事件流水线（Whitelist/RateLimit/权限等阶段在此生效）
      * @param gatewayService   网关地址服务（用于重连时获取新地址）
      * @param accessTokenService AccessToken 服务
      * @param intents          事件订阅意图位掩码
@@ -177,8 +177,8 @@ public class QqBotWsClient {
      * @param scheduler        共享心跳调度线程池
      * @param connectExecutor  共享连接线程池
      */
-    public QqBotWsClient(Long robotId, String envType, String appId, String appSecret,
-                          String gatewayUrl, EventSink eventDispatcher,
+    public QqBotWsClient(String robotId, String envType, String appId, String appSecret,
+                          String gatewayUrl, BotPipeline botPipeline,
                           GatewayService gatewayService, AccessTokenService accessTokenService,
                           int intents, boolean isNewOpenBot,
                           ScheduledExecutorService scheduler,
@@ -188,7 +188,7 @@ public class QqBotWsClient {
         this.appId = appId;
         this.appSecret = appSecret;
         this.gatewayUrl = gatewayUrl;
-        this.eventDispatcher = eventDispatcher;
+        this.botPipeline = botPipeline;
         this.gatewayService = gatewayService;
         this.accessTokenService = accessTokenService;
         this.intents = intents;
@@ -243,7 +243,7 @@ public class QqBotWsClient {
     public String getLastError() { return lastError; }
 
     /** @return 机器人 ID */
-    public Long getRobotId() { return robotId; }
+    public String getRobotId() { return robotId; }
 
     /** @return 环境类型（SANDBOX / PRODUCTION） */
     public String getEnvType() { return envType; }
@@ -484,35 +484,22 @@ public class QqBotWsClient {
         // 记录收到的事件
         log.info("[BotWS] 收到事件: type={}, robotId={}, seq={}", eventType, robotId, seq);
 
-        // 提取事件 ID 并分发给 EventSink
+        // 提取事件 ID 并交给 Pipeline 处理
         String eventId = data.path("id").asText("");
         totalEvents++;
 
-        // P3: 注入元数据到原始 ObjectNode（供 DispatchStage 桥接旧分发器）
-        data.put("_eventType", eventType);
-        data.put("_robotId", robotId);
-        data.put("_envType", envType);
-        if (eventId != null && !eventId.isEmpty()) {
-            data.put("_eventId", eventId);
-        }
-
-        // P2: 转换为统一 BotEvent 并记录
+        // 转换为统一 BotEvent，交由 Pipeline 处理（Whitelist/RateLimit/权限等阶段生效）
+        // rawEventType / envType 作为 BotEvent 一等字段携带，不再污染原始 data
         try {
             Bot bot = new Bot("qq:" + appId, "qq", appId, dev.xuanji.api.adapter.Bot.Status.ONLINE, java.util.Set.of());
-            dev.xuanji.api.event.BotEvent be = dev.xuanji.adapter.qq.converter.QqEventConverter.convert(bot, eventType, data, eventId);
+            dev.xuanji.api.event.BotEvent be = dev.xuanji.adapter.qq.converter.QqEventConverter.convert(bot, eventType, envType, data, eventId);
             log.info("[BotEvent] 已转换: type={}, user={}, group={}, text={}",
                     be.type().fullName(), be.sender().nickname(),
                     be.group() != null ? be.group().groupId() : "私聊",
                     be.message() != null ? be.message().plainText() : "");
+            botPipeline.proceed(be);
         } catch (Exception e) {
-            log.warn("[BotEvent] 转换跳过: {}", e.getMessage());
-        }
-
-        // 原有分发（EventDispatcher 内部会走 Pipeline）
-        try {
-            eventDispatcher.dispatch(eventType, robotId, envType, data, eventId);
-        } catch (Exception e) {
-            log.error("[BotWS] 事件分发异常: {}", e.getMessage(), e);
+            log.error("[BotWS] 事件处理异常: type={}, robotId={}, error={}", eventType, robotId, e.getMessage(), e);
         }
     }
 

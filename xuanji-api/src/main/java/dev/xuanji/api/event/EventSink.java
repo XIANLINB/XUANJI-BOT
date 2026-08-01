@@ -21,5 +21,5 @@ public interface EventSink {
      * @param data      事件数据（平台推送的 d 字段）
      * @param eventId   事件 ID（用于去重和日志），可为 null
      */
-    void dispatch(String eventType, Long robotId, String envType, ObjectNode data, String eventId);
+    void dispatch(String eventType, String robotId, String envType, ObjectNode data, String eventId);
 }

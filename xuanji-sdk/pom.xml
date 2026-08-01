@@ -14,7 +14,7 @@
     <description>璇玑插件开发 SDK — 插件开发者唯一需要的依赖，后续发布到 Maven Central</description>
 
     <dependencies>
-        <!-- SDK 薄封装层：插件开发者只需引入这一个 artifact -->
+        <!-- SDK = api 能力封装 + 便捷工具类，插件开发者只需引入这一个 artifact -->
         <dependency>
             <groupId>dev.xuanji</groupId>
             <artifactId>xuanji-api</artifactId>

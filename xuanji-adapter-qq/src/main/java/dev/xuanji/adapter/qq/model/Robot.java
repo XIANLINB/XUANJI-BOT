@@ -34,7 +34,7 @@ import java.time.LocalDateTime;
 public class Robot {
 
     /** 机器人唯一标识（数据库主键），在 {@link RobotRegistry} 中作为 Map 的 key */
-    private Long id;
+    private String id;
 
     /** 所属用户 ID，用于多用户系统中的数据隔离 */
     private Long userId;

@@ -1,45 +1,64 @@
 package dev.xuanji.sdk.event;
 
-import java.util.List;
-import java.util.stream.Collectors;
+import java.util.*;
 
 /**
- * 群聊消息事件封装 — 包装 QQ 的 GroupMessageEvent DTO，为插件提供便捷 API。
+ * 群聊消息事件 — SDK 封装，平台无关。
  */
 public class GroupMessageEvent {
+    private final String messageId;
+    private final String content;
+    private final String plainText;
+    private final int messageType;
+    private final String groupId;
+    private final String senderId;
+    private final String senderName;
+    private final String senderRole;
+    private final boolean atBot;
+    private final List<String> mentionedUserIds;
 
-    private final dev.xuanji.api.dto.GroupMessageEvent raw;
-
-    public GroupMessageEvent(dev.xuanji.api.dto.GroupMessageEvent raw) {
-        this.raw = raw;
+    private GroupMessageEvent(Builder b) {
+        this.messageId = b.messageId;
+        this.content = b.content;
+        this.plainText = b.plainText;
+        this.messageType = b.messageType;
+        this.groupId = b.groupId;
+        this.senderId = b.senderId;
+        this.senderName = b.senderName;
+        this.senderRole = b.senderRole;
+        this.atBot = b.atBot;
+        this.mentionedUserIds = b.mentionedUserIds != null ? b.mentionedUserIds : List.of();
     }
 
-    public String getMessageId() { return raw.getId(); }
-    public String getContent() { return raw.getContent(); }
-    public String getPlainText() { return raw.getPlainTextContent(); }
-    public int getMessageType() { return raw.getMessageType() != null ? raw.getMessageType() : 0; }
-    public String getTimestamp() { return raw.getTimestamp(); }
-    public String getGroupId() { return raw.getGroupOpenid(); }
-    public String getSenderId() { return raw.getSenderId(); }
-    public String getSenderName() {
-        return raw.getAuthor() != null && raw.getAuthor().getUsername() != null
-                ? raw.getAuthor().getUsername() : "未知";
-    }
-    public String getSenderRole() {
-        return raw.getAuthor() != null ? raw.getAuthor().getMemberRole() : null;
-    }
-    public boolean isAtBot() { return raw.isAtBot(); }
+    public String getMessageId() { return messageId; }
+    public String getContent() { return content; }
+    public String getPlainText() { return plainText; }
+    public int getMessageType() { return messageType; }
+    public String getGroupId() { return groupId; }
+    public String getSenderId() { return senderId; }
+    public String getSenderName() { return senderName; }
+    public String getSenderRole() { return senderRole; }
+    public boolean isAtBot() { return atBot; }
+    public List<String> getMentionedUserIds() { return mentionedUserIds; }
+    public boolean hasAttachments() { return false; }
+    public Object raw() { return this; }
 
-    public List<String> getMentionedUserIds() {
-        if (raw.getMentions() == null) return List.of();
-        return raw.getMentions().stream()
-                .filter(m -> !Boolean.TRUE.equals(m.getIsYou()))
-                .map(m -> m.getMemberOpenid() != null ? m.getMemberOpenid() : m.getId())
-                .collect(Collectors.toList());
+    public static class Builder {
+        String messageId, content, plainText, groupId, senderId, senderName, senderRole;
+        int messageType;
+        boolean atBot;
+        List<String> mentionedUserIds;
+
+        public Builder messageId(String v) { messageId = v; return this; }
+        public Builder content(String v) { content = v; return this; }
+        public Builder plainText(String v) { plainText = v; return this; }
+        public Builder messageType(int v) { messageType = v; return this; }
+        public Builder groupId(String v) { groupId = v; return this; }
+        public Builder senderId(String v) { senderId = v; return this; }
+        public Builder senderName(String v) { senderName = v; return this; }
+        public Builder senderRole(String v) { senderRole = v; return this; }
+        public Builder atBot(boolean v) { atBot = v; return this; }
+        public Builder mentionedUserIds(List<String> v) { mentionedUserIds = v; return this; }
+        public GroupMessageEvent build() { return new GroupMessageEvent(this); }
     }
-
-    public boolean hasAttachments() { return raw.getAttachments() != null && !raw.getAttachments().isEmpty(); }
-
-    /** 返回原始 QQ DTO 对象（调试用） */
-    public Object raw() { return raw; }
 }

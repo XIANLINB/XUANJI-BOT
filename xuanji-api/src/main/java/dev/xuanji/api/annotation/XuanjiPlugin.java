@@ -23,6 +23,8 @@ public @interface XuanjiPlugin {
     Perm[] permissions() default {};
     /** 依赖的能力（如 EconomyService） */
     String[] dependsOn() default {};
+    /** 消息触发频率限制（秒，0=不限制，5=同一用户5秒内仅触发一次） */
+    int rateLimit() default 0;
 
     enum Perm {
         /** 联网（调用外部 API） */

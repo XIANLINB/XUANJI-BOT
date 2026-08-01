@@ -34,6 +34,6 @@ public interface WebhookService {
      * @param tsHeader    X-Signature-Timestamp 头的值（可为 null）
      * @return 验证请求时返回签名 JSON，普通事件返回 null（表示 HTTP 200 ACK）
      */
-    String handleWebhook(Long robotId, String envType, String body,
+    String handleWebhook(String robotId, String envType, String body,
                          String signHeader, String tsHeader);
 }

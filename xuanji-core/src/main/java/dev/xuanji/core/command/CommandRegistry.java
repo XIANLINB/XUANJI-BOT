@@ -1,80 +1,94 @@
 package dev.xuanji.core.command;
 
 import dev.xuanji.api.annotation.*;
-import dev.xuanji.api.dto.GroupMessageEvent;
 import dev.xuanji.sdk.bot.Bot;
+import dev.xuanji.sdk.event.GroupMessageEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeParseException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * 指令注册表 — 扫描 @Command 方法，建立指令名→处理器的映射。
- *
- * <p>参数注入支持：{@code @Arg String}, {@code int/long/double}, {@code BotEvent}, {@code MessageSender}。
+ * 指令注册表 — 按事件类型（@GroupMessage / @PrivateMessage 等）注册 handler。
  */
 @Slf4j
 @Component
 public class CommandRegistry {
 
-    private final Map<String, List<HandlerEntry>> map = new ConcurrentHashMap<>();
-    /** @GroupMessageHandler 注解方法列表（无前缀限制，每条消息都尝试匹配） */
-    private final List<HandlerEntry> groupHandlers = new CopyOnWriteArrayList<>();
+    private final List<HandlerEntry> groupMsgHandlers = new CopyOnWriteArrayList<>();
+    private final List<HandlerEntry> privateMsgHandlers = new CopyOnWriteArrayList<>();
+    private final List<HandlerEntry> groupEventHandlers = new CopyOnWriteArrayList<>();
+    private final List<HandlerEntry> privateEventHandlers = new CopyOnWriteArrayList<>();
+    private final Map<String, Long> rateLimitMap = new ConcurrentHashMap<>();
+    private final java.util.Set<String> disabledPlugins = ConcurrentHashMap.newKeySet();
 
-    /** 注册一个插件对象中的所有 @Command 和 @GroupMessageHandler 方法。 */
-    public void register(Object pluginInstance) {
+    public void setPluginEnabled(String pluginId, boolean enabled) {
+        if (enabled) disabledPlugins.remove(pluginId);
+        else disabledPlugins.add(pluginId);
+    }
+    public boolean isPluginEnabled(String pluginId) { return !disabledPlugins.contains(pluginId); }
+
+    public void register(Object pluginInstance, String pluginId) {
+        int rateLimit = 0;
+        XuanjiPlugin plg = pluginInstance.getClass().getAnnotation(XuanjiPlugin.class);
+        if (plg != null) rateLimit = plg.rateLimit();
+
         for (Method m : pluginInstance.getClass().getDeclaredMethods()) {
-            Command cmd = m.getAnnotation(Command.class);
-            if (cmd != null) {
-                HandlerEntry entry = new HandlerEntry(null, m, pluginInstance, cmd, null);
-                if (cmd.match() == Command.Match.EXACT) {
-                    map.computeIfAbsent(cmd.value(), k -> new ArrayList<>()).add(entry);
-                } else {
-                    groupHandlers.add(entry);
-                    groupHandlers.sort(Comparator.comparingInt(e -> e.gmhAnnotation != null ? e.gmhAnnotation.order() : 0));
-                }
-                log.info("[Command] 注册: {} (match={}) → {}.{}", cmd.value(), cmd.match(),
-                        pluginInstance.getClass().getSimpleName(), m.getName());
-                continue;
-            }
+            MessageFilter filter = m.getAnnotation(MessageFilter.class);
 
-            GroupMessageHandler gmh = m.getAnnotation(GroupMessageHandler.class);
-            if (gmh != null) {
-                HandlerFilter filter = m.getAnnotation(HandlerFilter.class);
-                HandlerEntry entry = new HandlerEntry(gmh, m, pluginInstance, null, filter);
-                groupHandlers.add(entry);
-                groupHandlers.sort(Comparator.comparingInt(e -> e.gmhAnnotation != null ? e.gmhAnnotation.order() : 0));
-                log.info("[Handler] 注册群聊处理器: {}.{}", pluginInstance.getClass().getSimpleName(), m.getName());
+            if (m.isAnnotationPresent(GroupMessage.class)) {
+                groupMsgHandlers.add(new HandlerEntry(m, pluginInstance, filter,
+                        m.getAnnotation(GroupMessage.class).order(), rateLimit, roles(m), pluginId));
+                log.info("[Handler] 注册群聊消息: {}.{} (rateLimit={}s)", pluginInstance.getClass().getSimpleName(), m.getName(), rateLimit);
+            }
+            if (m.isAnnotationPresent(PrivateMessage.class)) {
+                privateMsgHandlers.add(new HandlerEntry(m, pluginInstance, filter, m.getAnnotation(PrivateMessage.class).order(), rateLimit, roles(m), pluginId));
+                log.info("[Handler] 注册私聊消息: {}.{} (rateLimit={}s)", pluginInstance.getClass().getSimpleName(), m.getName(), rateLimit);
+            }
+            if (m.isAnnotationPresent(GroupEvent.class)) {
+                groupEventHandlers.add(new HandlerEntry(m, pluginInstance, null, m.getAnnotation(GroupEvent.class).order(), rateLimit, roles(m), pluginId));
+                log.info("[Handler] 注册群事件: {}.{}", pluginInstance.getClass().getSimpleName(), m.getName());
+            }
+            if (m.isAnnotationPresent(PrivateEvent.class)) {
+                privateEventHandlers.add(new HandlerEntry(m, pluginInstance, null, m.getAnnotation(PrivateEvent.class).order(), rateLimit, roles(m), pluginId));
+                log.info("[Handler] 注册私聊事件: {}.{}", pluginInstance.getClass().getSimpleName(), m.getName());
             }
         }
-        map.values().forEach(l -> l.sort(Comparator.comparingInt(e -> -e.cmdAnnotation.priority())));
+        groupMsgHandlers.sort(Comparator.comparingInt(e -> e.order));
+        privateMsgHandlers.sort(Comparator.comparingInt(e -> e.order));
     }
 
-    // ==================== 上下文（ThreadLocal，GroupMessageHandler 设置） ====================
+    /** 批量注销指定实例注册的所有 handler */
+    public void unregister(Object pluginInstance) {
+        groupMsgHandlers.removeIf(h -> h.instance == pluginInstance);
+        privateMsgHandlers.removeIf(h -> h.instance == pluginInstance);
+        groupEventHandlers.removeIf(h -> h.instance == pluginInstance);
+        privateEventHandlers.removeIf(h -> h.instance == pluginInstance);
+        log.info("[Handler] 已注销: {}", pluginInstance.getClass().getSimpleName());
+    }
+
+    // ==================== 上下文 ====================
 
     private static final ThreadLocal<String> userIdTL = new ThreadLocal<>();
     private static final ThreadLocal<String> botKeyTL = new ThreadLocal<>();
     private static final ThreadLocal<String> groupIdTL = new ThreadLocal<>();
     private static final ThreadLocal<String> msgIdTL = new ThreadLocal<>();
-    private static final ThreadLocal<GroupMessageEvent> eventDtoTL = new ThreadLocal<>();
+    private static final ThreadLocal<GroupMessageEvent> groupEventDtoTL = new ThreadLocal<>();
     private static final ThreadLocal<Bot> botTL = new ThreadLocal<>();
 
     public static void setContext(String botKey, String groupId, String msgId, String userId,
                                   GroupMessageEvent eventDto, Bot bot) {
         botKeyTL.set(botKey); groupIdTL.set(groupId);
         msgIdTL.set(msgId); userIdTL.set(userId);
-        eventDtoTL.set(eventDto); botTL.set(bot);
+        groupEventDtoTL.set(eventDto); botTL.set(bot);
     }
     public static void clearContext() {
         botKeyTL.remove(); groupIdTL.remove(); msgIdTL.remove();
-        userIdTL.remove(); eventDtoTL.remove(); botTL.remove();
+        userIdTL.remove(); groupEventDtoTL.remove(); botTL.remove();
     }
 
     public static String getCurrentUser()   { return userIdTL.get(); }
@@ -82,94 +96,94 @@ public class CommandRegistry {
     public static String getCurrentGroupId(){ return groupIdTL.get(); }
     public static String getCurrentMsgId()  { return msgIdTL.get(); }
 
-    // ==================== 指令执行 ====================
+    // ==================== 群聊消息分发 ====================
 
-    /**
-     * 匹配并执行指令。
-     *
-     * <p>返回值由 GroupMessageHandler 处理：String → 发文本；null → 未匹配。
-     */
-    public String execute(String rawText) {
-        if (rawText == null || rawText.isBlank()) return null;
-        String trimmed = rawText.trim();
-        String[] parts = trimmed.split("\\s+", 2);
-        String cmdName = parts[0];
-        String args = parts.length > 1 ? parts[1] : "";
+    public String executeGroupMessage(String rawText) {
+        return dispatch(groupMsgHandlers, rawText, true);
+    }
 
-        List<HandlerEntry> entries = map.get(cmdName);
-        if (entries == null) return null;
+    public String executePrivateMessage(String rawText) {
+        return dispatch(privateMsgHandlers, rawText, false);
+    }
 
-        for (HandlerEntry entry : entries) {
+    public void dispatchGroupEvent(GroupMessageEvent event) {
+        for (HandlerEntry e : groupEventHandlers) {
             try {
-                Object[] methodArgs = resolveArgs(entry.method, args);
-                Object result = entry.method.invoke(entry.instance, methodArgs);
-                return result != null ? result.toString() : null;
-            } catch (Exception e) {
-                log.warn("[Command] {} 执行失败: {}", cmdName, e.getMessage());
+                e.method.invoke(e.instance, resolveArgs(e.method, "", event));
+            } catch (Exception ex) { log.warn("[GroupEvent] {}:", ex.getMessage()); }
+        }
+    }
+
+    private String dispatch(List<HandlerEntry> list, String rawText, boolean isGroup) {
+        String trimmed = rawText != null ? rawText.trim() : "";
+        for (HandlerEntry e : list) {
+            try {
+                if (!matchFilter(e.filter, trimmed, isGroup)) continue;
+                if (!isPluginEnabled(e.pluginId)) continue;
+                if (!checkRateLimit(e)) continue;
+                if (!checkRole(e)) continue;  // @RequireRole
+                Object[] ma = resolveArgs(e.method, trimmed, groupEventDtoTL.get());
+                Object result = e.method.invoke(e.instance, ma);
+                if (result != null) return result.toString();
+            } catch (Exception ex) {
+                log.warn("[Handler] {}: {}", e.method.getName(), ex.getMessage());
             }
         }
-        // 2. 尝试非精确模式 @Command + @GroupMessageHandler
-        for (HandlerEntry entry : groupHandlers) {
-            try {
-                // @Command 非精确匹配模式
-                if (entry.cmdAnnotation != null) {
-                    if (!matchCommand(entry.cmdAnnotation, trimmed)) continue;
-                }
-                // @GroupMessageHandler 过滤
-                if (entry.filterAnnotation != null) {
-                    if (!matchFilter(entry.filterAnnotation)) continue;
-                }
-                Object[] methodArgs = resolveArgs(entry.method, trimmed);
-                entry.method.invoke(entry.instance, methodArgs);
-                return null; // void 方法已自行发送，不返回文本
-            } catch (Exception e) {
-                log.debug("[Handler] 执行失败: {}", e.getMessage());
-            }
-        }
-
         return null;
     }
 
-    private boolean matchCommand(Command cmd, String text) {
-        return switch (cmd.match()) {
-            case EXACT -> text.startsWith(cmd.value() + " ") || text.equals(cmd.value());
-            case PREFIX -> text.startsWith(cmd.value());
-            case SUFFIX -> text.endsWith(cmd.value());
-            case CONTAINS -> text.contains(cmd.value());
-            case REGEX -> text.matches(cmd.value());
-        };
+    // ==================== 过滤 ====================
+
+    private boolean matchFilter(MessageFilter f, String text, boolean isGroup) {
+        if (f == null) return true;
+        boolean match = true;
+
+        if (!f.cmd().isEmpty()) {
+            match = text.matches("(?s).*(" + f.cmd() + ").*");
+        }
+        if (!f.startWith().isEmpty() && !text.startsWith(f.startWith())) match = false;
+        if (!f.endWith().isEmpty() && !text.endsWith(f.endWith())) match = false;
+
+        if (isGroup && f.at() != AtMode.IGNORE && groupEventDtoTL.get() != null) {
+            boolean atBot = groupEventDtoTL.get().isAtBot();
+            if (f.at() == AtMode.NEED && !atBot) match = false;
+            if (f.at() == AtMode.NOT && atBot) match = false;
+        }
+
+        if (f.groups().length > 0 && groupEventDtoTL.get() != null) {
+            if (!Arrays.asList(f.groups()).contains(groupEventDtoTL.get().getGroupId())) match = false;
+        }
+        if (f.senders().length > 0) {
+            if (!Arrays.asList(f.senders()).contains(userIdTL.get())) match = false;
+        }
+        if (f.roles().length > 0 && groupEventDtoTL.get() != null) {
+            String role = groupEventDtoTL.get().getSenderRole();
+            if (role == null || !Arrays.asList(f.roles()).contains(role)) match = false;
+        }
+
+        return f.invert() != match;
     }
 
-    /** 解析方法参数：@Arg String → 文本分段；BotEvent → 当前事件；MessageSender → 发送器 */
-    private Object[] resolveArgs(Method method, String args) {
+    // ==================== 参数注入 ====================
+
+    private Object[] resolveArgs(Method method, String args, dev.xuanji.sdk.event.GroupMessageEvent event) {
         Parameter[] params = method.getParameters();
         Object[] values = new Object[params.length];
-        String[] argParts = splitArgs(args);
+        String[] argParts = args != null ? args.split("\\s+") : new String[0];
 
         for (int i = 0; i < params.length; i++) {
             Class<?> type = params[i].getType();
-
-            // 注入 SDK 事件封装
             if (dev.xuanji.sdk.event.GroupMessageEvent.class.isAssignableFrom(type)) {
-                values[i] = eventDtoTL.get() != null
-                        ? new dev.xuanji.sdk.event.GroupMessageEvent(eventDtoTL.get()) : null;
-                continue;
+                values[i] = event; continue;
             }
-
-            // 注入 Bot（SDK 消息发送器）
             if (Bot.class.isAssignableFrom(type)) {
-                values[i] = botTL.get();
-                continue;
+                values[i] = botTL.get(); continue;
             }
-
-            // @Arg 参数绑定
             Arg arg = params[i].getAnnotation(Arg.class);
             if (arg != null) {
                 String raw = i < argParts.length ? argParts[i] : null;
                 if (raw == null || raw.isEmpty()) {
-                    if (arg.required()) return new Object[]{
-                        "缺少参数: " + arg.value() + (arg.missing().isEmpty() ? "" : " - " + arg.missing())
-                    };
+                    if (arg.required()) return new Object[]{"缺少参数: " + arg.value()};
                     values[i] = null;
                 } else {
                     values[i] = coerce(raw, type);
@@ -179,57 +193,41 @@ public class CommandRegistry {
         return values;
     }
 
-    private String[] splitArgs(String args) {
-        if (args == null || args.isBlank()) return new String[0];
-        return args.split("\\s+");
-    }
-
     private Object coerce(String s, Class<?> type) {
         if (type == String.class) return s;
         if (type == int.class || type == Integer.class) { try { return Integer.parseInt(s); } catch (NumberFormatException e) { return null; } }
         if (type == long.class || type == Long.class) { try { return Long.parseLong(s); } catch (NumberFormatException e) { return null; } }
-        if (type == double.class || type == Double.class) { try { return Double.parseDouble(s); } catch (NumberFormatException e) { return null; } }
         return s;
     }
 
-    /** 检查 @HandlerFilter 条件是否满足 */
-    private boolean matchFilter(HandlerFilter f) {
-        if (f == null) return true;
-        GroupMessageEvent evt = eventDtoTL.get();
-        String text = evt != null ? evt.getPlainTextContent().trim() : "";
-
-        // cmd 正则匹配
-        if (!f.cmd().isEmpty()) {
-            if (!text.matches(".*(" + f.cmd() + ").*")) return false;
-        }
-
-        // @模式
-        if (f.at() == AtMode.NEED && (evt == null || !evt.isAtBot())) return false;
-        if (f.at() == AtMode.NOT && evt != null && evt.isAtBot()) return false;
-
-        // 限定群
-        if (f.groups().length > 0 && evt != null) {
-            if (!Arrays.asList(f.groups()).contains(evt.getGroupOpenid())) return false;
-        }
-
-        // 限定发送者
-        if (f.senders().length > 0) {
-            String uid = userIdTL.get();
-            if (uid == null || !Arrays.asList(f.senders()).contains(uid)) return false;
-        }
-
-        // 前缀
-        if (!f.startWith().isEmpty() && !text.startsWith(f.startWith())) return false;
-
-        // 后缀
-        if (!f.endWith().isEmpty() && !text.endsWith(f.endWith())) return false;
-
+    private boolean checkRateLimit(HandlerEntry e) {
+        if (e.rateLimit <= 0) return true;
+        String key = e.method.getName() + ":" + userIdTL.get();
+        long now = System.currentTimeMillis();
+        Long last = rateLimitMap.get(key);
+        if (last != null && (now - last) < e.rateLimit * 1000L) return false;
+        rateLimitMap.put(key, now);
         return true;
     }
 
-    private record HandlerEntry(
-            GroupMessageHandler gmhAnnotation,
-            Method method, Object instance,
-            Command cmdAnnotation,
-            HandlerFilter filterAnnotation) {}
+    /** 检查 @RequireRole 注解 */
+    private boolean checkRole(HandlerEntry e) {
+        if (e.requiredRole == null || e.requiredRole.isEmpty()) return true;
+        var evt = groupEventDtoTL.get();
+        if (evt == null) return false;
+        String senderRole = evt.getSenderRole();
+        if (senderRole == null) senderRole = "member";
+        return e.requiredRole.contains(senderRole);
+    }
+
+    private record HandlerEntry(Method method, Object instance, MessageFilter filter,
+                                int order, int rateLimit, java.util.Set<String> requiredRole,
+                                String pluginId) {}
+
+    /** 提取 @RequireRole 要求的角色 */
+    private static java.util.Set<String> roles(Method m) {
+        var rr = m.getAnnotation(RequireRole.class);
+        if (rr == null || rr.value().equals("MEMBER")) return java.util.Set.of();
+        return java.util.Set.of(rr.value());
+    }
 }

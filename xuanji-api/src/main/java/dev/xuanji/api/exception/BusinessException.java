@@ -10,7 +10,7 @@ import lombok.Getter;
  *
  * <h3>使用场景</h3>
  * <ul>
- *   <li>{@link dev.xuanji.adapter.qq.api.QqApiService} — QQ 平台 API 调用失败时抛出</li>
+ *   <li>平台适配器 API 调用失败时抛出</li>
  *   <li>事件 Handler — 业务逻辑校验失败时抛出</li>
  *   <li>由 {@link dev.xuanji.api.exception.GlobalExceptionHandler} 统一捕获并返回给前端</li>
  * </ul>

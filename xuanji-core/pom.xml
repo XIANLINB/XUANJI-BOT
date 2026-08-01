@@ -14,15 +14,14 @@
     <description>璇玑框架 - 运行时核心（事件调度/配置）</description>
 
     <dependencies>
-        <!-- 过渡形态：P3 引入 MessageSender 接口后反转为依赖 api -->
         <dependency>
             <groupId>dev.xuanji</groupId>
             <artifactId>xuanji-sdk</artifactId>
         </dependency>
 
         <dependency>
-            <groupId>dev.xuanji</groupId>
-            <artifactId>xuanji-adapter-qq</artifactId>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
         </dependency>
 
         <dependency>
@@ -56,6 +55,11 @@
             <groupId>jakarta.servlet</groupId>
             <artifactId>jakarta.servlet-api</artifactId>
             <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
         </dependency>
 
         <dependency>
