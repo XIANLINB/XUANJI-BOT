@@ -1,5 +1,6 @@
 package dev.xuanji.adapter.qq.storage;
 
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -8,10 +9,13 @@ import java.util.*;
 @Component
 public class BotDataQuery {
 
-    private static JdbcTemplate jdbc;
+    private static JdbcTemplate jdbc;       // 业务库（@Primary）：qqbot_group / user / info
+    private static JdbcTemplate logJdbc;    // 日志库：xuanji_qqbot_event 流水
 
-    public BotDataQuery(JdbcTemplate jdbc) {
+    public BotDataQuery(JdbcTemplate jdbc,
+                       @Qualifier("logJdbcTemplate") JdbcTemplate logJdbc) {
         BotDataQuery.jdbc = jdbc;
+        BotDataQuery.logJdbc = logJdbc;
     }
 
     // ==================== 计数 ====================
@@ -75,9 +79,9 @@ public class BotDataQuery {
     }
 
     private static int todayEventCount(String appId, String eventType) {
-        if (jdbc == null || appId == null) return 0;
+        if (logJdbc == null || appId == null) return 0;
         try {
-            Integer c = jdbc.queryForObject(
+            Integer c = logJdbc.queryForObject(
                     "SELECT COUNT(*) FROM xuanji_qqbot_event WHERE bot_id=? AND event_type=? AND create_time >= CURRENT_DATE",
                     Integer.class, appId, eventType);
             return c != null ? c : 0;
@@ -85,9 +89,9 @@ public class BotDataQuery {
     }
 
     private static int todayGroupEventCount(String appId, String groupId, String eventType) {
-        if (jdbc == null || appId == null) return 0;
+        if (logJdbc == null || appId == null) return 0;
         try {
-            Integer c = jdbc.queryForObject(
+            Integer c = logJdbc.queryForObject(
                     "SELECT COUNT(*) FROM xuanji_qqbot_event WHERE bot_id=? AND group_id=? AND event_type=? AND create_time >= CURRENT_DATE",
                     Integer.class, appId, groupId, eventType);
             return c != null ? c : 0;

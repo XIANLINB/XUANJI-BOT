@@ -16,6 +16,7 @@ public class GroupMessageEvent {
     private final String senderRole;
     private final boolean atBot;
     private final List<String> mentionedUserIds;
+    private final String platform;
 
     private GroupMessageEvent(Builder b) {
         this.messageId = b.messageId;
@@ -28,6 +29,7 @@ public class GroupMessageEvent {
         this.senderRole = b.senderRole;
         this.atBot = b.atBot;
         this.mentionedUserIds = b.mentionedUserIds != null ? b.mentionedUserIds : List.of();
+        this.platform = b.platform;
     }
 
     public String getMessageId() { return messageId; }
@@ -40,11 +42,12 @@ public class GroupMessageEvent {
     public String getSenderRole() { return senderRole; }
     public boolean isAtBot() { return atBot; }
     public List<String> getMentionedUserIds() { return mentionedUserIds; }
+    public String getPlatform() { return platform; }
     public boolean hasAttachments() { return false; }
     public Object raw() { return this; }
 
     public static class Builder {
-        String messageId, content, plainText, groupId, senderId, senderName, senderRole;
+        String messageId, content, plainText, groupId, senderId, senderName, senderRole, platform;
         int messageType;
         boolean atBot;
         List<String> mentionedUserIds;
@@ -59,6 +62,7 @@ public class GroupMessageEvent {
         public Builder senderRole(String v) { senderRole = v; return this; }
         public Builder atBot(boolean v) { atBot = v; return this; }
         public Builder mentionedUserIds(List<String> v) { mentionedUserIds = v; return this; }
+        public Builder platform(String v) { platform = v; return this; }
         public GroupMessageEvent build() { return new GroupMessageEvent(this); }
     }
 }

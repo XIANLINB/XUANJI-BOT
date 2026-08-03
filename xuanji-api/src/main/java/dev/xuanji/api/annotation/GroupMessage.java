@@ -8,4 +8,6 @@ import java.lang.annotation.*;
 @Documented
 public @interface GroupMessage {
     int order() default 0;
+    /** 限定平台（空=全部平台）：如 {"qq"} / {"onebot"} / {"qq","onebot"} */
+    String[] platforms() default {};
 }

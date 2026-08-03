@@ -1,14 +1,24 @@
 package dev.xuanji.plugin.demo;
 
 import dev.xuanji.api.annotation.*;
+import dev.xuanji.api.plugin.XuanjiPluginBase;
 import dev.xuanji.sdk.bot.Bot;
 import dev.xuanji.sdk.event.GroupMessageEvent;
 import dev.xuanji.sdk.msg.*;
-import org.pf4j.Plugin;
 import org.pf4j.PluginWrapper;
 
-public class DemoPlugin extends Plugin {
+public class DemoPlugin extends XuanjiPluginBase {
     public DemoPlugin(PluginWrapper wrapper) { super(wrapper); }
+
+    @Override
+    public void onEnable() {
+        System.out.println("[DemoPlugin] onEnable() 钩子已触发 — 插件进入启用态");
+    }
+
+    @Override
+    public void onDisable() {
+        System.out.println("[DemoPlugin] onDisable() 钩子已触发 — 插件进入停用态");
+    }
 
     @XuanjiPlugin(id = "demo-plugin", name = "演示插件", version = "1.0.0",
         author = "XuanJi Team", description = "展示璇玑 SDK 全部能力", rateLimit = 5)

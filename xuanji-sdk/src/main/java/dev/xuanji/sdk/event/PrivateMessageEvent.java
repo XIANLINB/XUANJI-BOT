@@ -9,13 +9,15 @@ public class PrivateMessageEvent {
     private final String senderId;
     private final String senderName;
     private final int messageType;
+    private final String platform;
 
-    public PrivateMessageEvent(String messageId, String content, String senderId, String senderName, int messageType) {
+    public PrivateMessageEvent(String messageId, String content, String senderId, String senderName, int messageType, String platform) {
         this.messageId = messageId;
         this.content = content;
         this.senderId = senderId;
         this.senderName = senderName;
         this.messageType = messageType;
+        this.platform = platform;
     }
 
     public String getMessageId() { return messageId; }
@@ -23,6 +25,7 @@ public class PrivateMessageEvent {
     public String getSenderId() { return senderId; }
     public String getSenderName() { return senderName; }
     public int getMessageType() { return messageType; }
+    public String getPlatform() { return platform; }
     public boolean hasAttachments() { return false; }
     public Object raw() { return this; }
 }

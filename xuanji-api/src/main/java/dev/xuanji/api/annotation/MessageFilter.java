@@ -25,4 +25,6 @@ public @interface MessageFilter {
     boolean invert() default false;
     /** 限定角色（空=不限制，如 {"owner","admin"}） */
     String[] roles() default {};
+    /** 限定平台（空=不限制，如 {"qq"} / {"onebot"}） */
+    String[] platforms() default {};
 }

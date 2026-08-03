@@ -1,12 +1,21 @@
 package dev.xuanji.core.config;
 
 import lombok.Data;
+import org.springframework.beans.factory.config.YamlPropertiesFactoryBean;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.Bindable;
+import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.PropertySource;
+import org.springframework.core.io.FileSystemResource;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Properties;
 
 /**
  * 机器人配置属性
@@ -66,6 +75,46 @@ public class XuanjiRobotProperties {
 
         /** 连接方式：websocket 或 webhook */
         private String connectionMethod;
+    }
+
+    /**
+     * 运行时热重载：从磁盘重新读取 {@code data/xuanji-robots.yml} 并刷新本 bean 的字段。
+     *
+     * <p>原因：{@code @PropertySource} + {@code @ConfigurationProperties} 仅在上下文刷新时
+     * 静态绑定一次。向导（BotConfigController）保存/删除配置并热重载后，本 bean 若不被刷新，
+     * 后续读取 {@link #getRobots()} / {@link #findBotKeyByRobotId(String)} / {@link #isIgnoreBotMessages()}
+     * 的代码会拿到过期数据。本方法用 Spring {@link Binder} 重建一次绑定，效果等价于重启时的绑定。
+     *
+     * <p>路径必须与 {@code RobotsFile.PATH} 一致（{@code data/xuanji-robots.yml}）。
+     */
+    public void reloadFromYaml() {
+        Path path = Paths.get("data", "xuanji-robots.yml");
+        if (!Files.exists(path)) {
+            // 与 @PropertySource(ignoreResourceNotFound=true) 行为一致：文件缺失时清空
+            this.robots.clear();
+            this.master.clear();
+            return;
+        }
+        YamlPropertiesFactoryBean factory = new YamlPropertiesFactoryBean();
+        factory.setResources(new FileSystemResource(path));
+        Properties props = factory.getObject();
+        if (props == null || props.isEmpty()) return;
+
+        Map<String, Object> map = new HashMap<>();
+        for (String name : props.stringPropertyNames()) {
+            map.put(name, props.getProperty(name));
+        }
+        MapConfigurationPropertySource source = new MapConfigurationPropertySource(map);
+        XuanjiRobotProperties fresh = new Binder(source)
+                .bind("xuanji", Bindable.of(XuanjiRobotProperties.class))
+                .orElse(null);
+        if (fresh == null) return;
+
+        this.webhookUrl = fresh.webhookUrl;
+        this.isNewOpenBot = fresh.isNewOpenBot;
+        this.ignoreBotMessages = fresh.ignoreBotMessages;
+        this.robots = fresh.robots;
+        this.master = fresh.master;
     }
 
     /** 根据 appId 反查 YAML 中的 botKey */

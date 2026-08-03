@@ -34,32 +34,50 @@ public class CommandRegistry {
 
     public void register(Object pluginInstance, String pluginId) {
         int rateLimit = 0;
+        java.util.Set<String> pluginPlatforms = java.util.Set.of();
         XuanjiPlugin plg = pluginInstance.getClass().getAnnotation(XuanjiPlugin.class);
-        if (plg != null) rateLimit = plg.rateLimit();
+        if (plg != null) {
+            rateLimit = plg.rateLimit();
+            if (plg.platforms().length > 0) pluginPlatforms = java.util.Set.of(plg.platforms());
+        }
 
         for (Method m : pluginInstance.getClass().getDeclaredMethods()) {
             MessageFilter filter = m.getAnnotation(MessageFilter.class);
+            // 平台白名单：handler 级注解优先，插件级 @XuanjiPlugin(platforms=) 兜底；两者皆空 = 全平台。
+            java.util.Set<String> methodPlatforms = resolvePlatforms(m, pluginPlatforms);
 
             if (m.isAnnotationPresent(GroupMessage.class)) {
                 groupMsgHandlers.add(new HandlerEntry(m, pluginInstance, filter,
-                        m.getAnnotation(GroupMessage.class).order(), rateLimit, roles(m), pluginId));
-                log.info("[Handler] 注册群聊消息: {}.{} (rateLimit={}s)", pluginInstance.getClass().getSimpleName(), m.getName(), rateLimit);
+                        m.getAnnotation(GroupMessage.class).order(), rateLimit, roles(m), pluginId, methodPlatforms));
+                log.info("[Handler] 注册群聊消息: {}.{} (rateLimit={}s, platforms={})", pluginInstance.getClass().getSimpleName(), m.getName(), rateLimit, methodPlatforms);
             }
             if (m.isAnnotationPresent(PrivateMessage.class)) {
-                privateMsgHandlers.add(new HandlerEntry(m, pluginInstance, filter, m.getAnnotation(PrivateMessage.class).order(), rateLimit, roles(m), pluginId));
-                log.info("[Handler] 注册私聊消息: {}.{} (rateLimit={}s)", pluginInstance.getClass().getSimpleName(), m.getName(), rateLimit);
+                privateMsgHandlers.add(new HandlerEntry(m, pluginInstance, filter, m.getAnnotation(PrivateMessage.class).order(), rateLimit, roles(m), pluginId, methodPlatforms));
+                log.info("[Handler] 注册私聊消息: {}.{} (rateLimit={}s, platforms={})", pluginInstance.getClass().getSimpleName(), m.getName(), rateLimit, methodPlatforms);
             }
             if (m.isAnnotationPresent(GroupEvent.class)) {
-                groupEventHandlers.add(new HandlerEntry(m, pluginInstance, null, m.getAnnotation(GroupEvent.class).order(), rateLimit, roles(m), pluginId));
-                log.info("[Handler] 注册群事件: {}.{}", pluginInstance.getClass().getSimpleName(), m.getName());
+                groupEventHandlers.add(new HandlerEntry(m, pluginInstance, null, m.getAnnotation(GroupEvent.class).order(), rateLimit, roles(m), pluginId, methodPlatforms));
+                log.info("[Handler] 注册群事件: {}.{} (platforms={})", pluginInstance.getClass().getSimpleName(), m.getName(), methodPlatforms);
             }
             if (m.isAnnotationPresent(PrivateEvent.class)) {
-                privateEventHandlers.add(new HandlerEntry(m, pluginInstance, null, m.getAnnotation(PrivateEvent.class).order(), rateLimit, roles(m), pluginId));
-                log.info("[Handler] 注册私聊事件: {}.{}", pluginInstance.getClass().getSimpleName(), m.getName());
+                privateEventHandlers.add(new HandlerEntry(m, pluginInstance, null, m.getAnnotation(PrivateEvent.class).order(), rateLimit, roles(m), pluginId, methodPlatforms));
+                log.info("[Handler] 注册私聊事件: {}.{} (platforms={})", pluginInstance.getClass().getSimpleName(), m.getName(), methodPlatforms);
             }
         }
         groupMsgHandlers.sort(Comparator.comparingInt(e -> e.order));
         privateMsgHandlers.sort(Comparator.comparingInt(e -> e.order));
+    }
+
+    /** 解析方法的平台白名单：合并各事件注解与 @MessageFilter 的 platforms，handler 级优先于插件级默认。 */
+    private java.util.Set<String> resolvePlatforms(Method m, java.util.Set<String> pluginPlatforms) {
+        java.util.Set<String> ps = new java.util.LinkedHashSet<>();
+        var gm = m.getAnnotation(GroupMessage.class); if (gm != null) for (String p : gm.platforms()) ps.add(p);
+        var pm = m.getAnnotation(PrivateMessage.class); if (pm != null) for (String p : pm.platforms()) ps.add(p);
+        var ge = m.getAnnotation(GroupEvent.class); if (ge != null) for (String p : ge.platforms()) ps.add(p);
+        var pe = m.getAnnotation(PrivateEvent.class); if (pe != null) for (String p : pe.platforms()) ps.add(p);
+        var mf = m.getAnnotation(MessageFilter.class); if (mf != null) for (String p : mf.platforms()) ps.add(p);
+        // 空 = 未显式限定 → 用插件级默认（插件默认也空 = 全平台）
+        return ps.isEmpty() ? pluginPlatforms : ps;
     }
 
     /** 批量注销指定实例注册的所有 handler */
@@ -79,16 +97,19 @@ public class CommandRegistry {
     private static final ThreadLocal<String> msgIdTL = new ThreadLocal<>();
     private static final ThreadLocal<GroupMessageEvent> groupEventDtoTL = new ThreadLocal<>();
     private static final ThreadLocal<Bot> botTL = new ThreadLocal<>();
+    private static final ThreadLocal<String> currentPlatformTL = new ThreadLocal<>();
 
     public static void setContext(String botKey, String groupId, String msgId, String userId,
-                                  GroupMessageEvent eventDto, Bot bot) {
+                                  GroupMessageEvent eventDto, Bot bot, String platform) {
         botKeyTL.set(botKey); groupIdTL.set(groupId);
         msgIdTL.set(msgId); userIdTL.set(userId);
         groupEventDtoTL.set(eventDto); botTL.set(bot);
+        currentPlatformTL.set(platform);
     }
     public static void clearContext() {
         botKeyTL.remove(); groupIdTL.remove(); msgIdTL.remove();
         userIdTL.remove(); groupEventDtoTL.remove(); botTL.remove();
+        currentPlatformTL.remove();
     }
 
     public static String getCurrentUser()   { return userIdTL.get(); }
@@ -107,8 +128,15 @@ public class CommandRegistry {
     }
 
     public void dispatchGroupEvent(GroupMessageEvent event) {
-        for (HandlerEntry e : groupEventHandlers) {
+        String platform = event.getPlatform();
+        // 同 order 内：显式命中当前平台(0) > 默认全平台(1) > 其他平台(2)，使默认 handler 作为兜底而不抢占平台专属 handler
+        List<HandlerEntry> ordered = new java.util.ArrayList<>(groupEventHandlers);
+        ordered.sort(Comparator.comparingInt((HandlerEntry e) -> e.order)
+                .thenComparingInt(e -> platformPriority(e, platform)));
+        for (HandlerEntry e : ordered) {
             try {
+                // 平台白名单：限定了平台但事件平台不在其中 → 跳过
+                if (!e.platforms.isEmpty() && !e.platforms.contains(platform)) continue;
                 e.method.invoke(e.instance, resolveArgs(e.method, "", event));
             } catch (Exception ex) { log.warn("[GroupEvent] {}:", ex.getMessage()); }
         }
@@ -116,8 +144,15 @@ public class CommandRegistry {
 
     private String dispatch(List<HandlerEntry> list, String rawText, boolean isGroup) {
         String trimmed = rawText != null ? rawText.trim() : "";
-        for (HandlerEntry e : list) {
+        String currentPlatform = currentPlatformTL.get();
+        // 同 order 内：显式命中当前平台(0) > 默认全平台(1) > 其他平台(2)
+        List<HandlerEntry> ordered = new java.util.ArrayList<>(list);
+        ordered.sort(Comparator.comparingInt((HandlerEntry e) -> e.order)
+                .thenComparingInt(e -> platformPriority(e, currentPlatform)));
+        for (HandlerEntry e : ordered) {
             try {
+                // 平台白名单：限定了平台但当前平台不在其中 → 跳过
+                if (!e.platforms.isEmpty() && !e.platforms.contains(currentPlatform)) continue;
                 if (!matchFilter(e.filter, trimmed, isGroup)) continue;
                 if (!isPluginEnabled(e.pluginId)) continue;
                 if (!checkRateLimit(e)) continue;
@@ -130,6 +165,12 @@ public class CommandRegistry {
             }
         }
         return null;
+    }
+
+    /** 平台优先级：显式命中当前平台=0，默认全平台(兜底)=1，其他平台=2（会被白名单拦截） */
+    private static int platformPriority(HandlerEntry e, String platform) {
+        if (e.platforms.isEmpty()) return 1;
+        return e.platforms.contains(platform) ? 0 : 2;
     }
 
     // ==================== 过滤 ====================
@@ -222,7 +263,7 @@ public class CommandRegistry {
 
     private record HandlerEntry(Method method, Object instance, MessageFilter filter,
                                 int order, int rateLimit, java.util.Set<String> requiredRole,
-                                String pluginId) {}
+                                String pluginId, java.util.Set<String> platforms) {}
 
     /** 提取 @RequireRole 要求的角色 */
     private static java.util.Set<String> roles(Method m) {

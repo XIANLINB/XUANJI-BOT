@@ -5,6 +5,7 @@ import dev.xuanji.adapter.qq.model.Robot;
 import dev.xuanji.adapter.qq.model.RobotEnvironment;
 import dev.xuanji.adapter.qq.webhook.SignatureVerifier;
 import dev.xuanji.adapter.qq.websocket.QqBotWsManager;
+import dev.xuanji.core.config.XuanjiRobotProperties;
 import org.springframework.context.ApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
@@ -23,10 +24,12 @@ public class BotConfigController {
 
     private final ApplicationContext ctx;
     private final JdbcTemplate jdbc;
+    private final XuanjiRobotProperties robotProperties;
 
-    public BotConfigController(ApplicationContext ctx, JdbcTemplate jdbc) {
+    public BotConfigController(ApplicationContext ctx, JdbcTemplate jdbc, XuanjiRobotProperties robotProperties) {
         this.ctx = ctx;
         this.jdbc = jdbc;
+        this.robotProperties = robotProperties;
     }
 
     /** 获取所有 Bot 配置 */
@@ -109,6 +112,7 @@ public class BotConfigController {
             }
             RobotsFile.ensureDirs();
             Files.write(RobotsFile.PATH, yml.getBytes(StandardCharsets.UTF_8));
+            robotProperties.reloadFromYaml(); // 刷新属性 bean，使后续 getRobots()/findBotKeyByRobotId() 拿到新数据
             return Map.of("status", "ok");
         } catch (Exception e) { return Map.of("error", e.getMessage()); }
     }
@@ -120,6 +124,7 @@ public class BotConfigController {
             String yml = Files.readString(RobotsFile.PATH);
             yml = yml.replaceAll("(?m)^    " + Pattern.quote(appId) + ":.*?\\n(?:      .+\\n)*", "");
             Files.write(RobotsFile.PATH, yml.getBytes(StandardCharsets.UTF_8));
+            robotProperties.reloadFromYaml();
             return Map.of("status", "ok");
         } catch (Exception e) { return Map.of("error", e.getMessage()); }
     }
@@ -202,6 +207,7 @@ public class BotConfigController {
                 }
             } catch (Exception ignored) {}
 
+            robotProperties.reloadFromYaml(); // 刷新属性 bean，使 handlers/PermissionService/WhitelistStage 拿到最新配置
             return Map.of("status", "ok", "updated", count, "msg", "已重新加载 " + count + " 个 Bot");
         } catch (Exception e) {
             return Map.of("error", "重载失败，确认 xuanji-adapter-qq 已加载: " + e.getMessage());

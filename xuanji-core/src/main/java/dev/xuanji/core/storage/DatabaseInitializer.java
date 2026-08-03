@@ -204,6 +204,10 @@ public class DatabaseInitializer {
                 bot_id      VARCHAR(64)  NOT NULL,
                 group_id    VARCHAR(128) NOT NULL,
                 group_name  VARCHAR(256),
+                join_time   TIMESTAMP,
+                inviter_id  VARCHAR(64),
+                owner_id    VARCHAR(64),
+                member_count INT         DEFAULT 0,
                 status      VARCHAR(16)  DEFAULT 'active',
                 is_deleted  TINYINT      DEFAULT 0,
                 create_time TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
@@ -218,11 +222,46 @@ public class DatabaseInitializer {
                 group_id    VARCHAR(128) NOT NULL,
                 member_id   VARCHAR(128) NOT NULL,
                 role        VARCHAR(32),
+                card        VARCHAR(128),
+                join_time   TIMESTAMP,
+                is_deleted  TINYINT      DEFAULT 0,
                 create_time TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
             )
         """);
 
-        // 11. QQ Bot 信息表（启动时从 /users/@me 接口同步）
+        // 11. OneBot 机器人群档案（与 QQ 同构，按平台分表）
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS xuanji_onebot_group (
+                id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+                bot_id      VARCHAR(64)  NOT NULL,
+                group_id    VARCHAR(128) NOT NULL,
+                group_name  VARCHAR(256),
+                join_time   TIMESTAMP,
+                inviter_id  VARCHAR(64),
+                owner_id    VARCHAR(64),
+                member_count INT         DEFAULT 0,
+                status      VARCHAR(16)  DEFAULT 'active',
+                is_deleted  TINYINT      DEFAULT 0,
+                create_time TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+            )
+        """);
+
+        // 12. OneBot 机器人群成员
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS xuanji_onebot_group_member (
+                id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+                bot_id      VARCHAR(64)  NOT NULL,
+                group_id    VARCHAR(128) NOT NULL,
+                member_id   VARCHAR(128) NOT NULL,
+                role        VARCHAR(32),
+                card        VARCHAR(128),
+                join_time   TIMESTAMP,
+                is_deleted  TINYINT      DEFAULT 0,
+                create_time TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+            )
+        """);
+
+        // 13. QQ Bot 信息表（启动时从 /users/@me 接口同步）
         jdbc.execute("""
             CREATE TABLE IF NOT EXISTS xuanji_qqbot_info (
                 id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -241,7 +280,32 @@ public class DatabaseInitializer {
             )
         """);
 
-        log.info("[DB] {}", firstRun ? "框架初始化建表完成（11 张）" : "建表已完成（已存在）");
+        // ==================== 已存在库的结构演进（新增列，幂等） ====================
+        // 群表补强字段
+        jdbc.execute("ALTER TABLE xuanji_qqbot_group ADD COLUMN IF NOT EXISTS join_time TIMESTAMP");
+        jdbc.execute("ALTER TABLE xuanji_qqbot_group ADD COLUMN IF NOT EXISTS inviter_id VARCHAR(64)");
+        jdbc.execute("ALTER TABLE xuanji_qqbot_group ADD COLUMN IF NOT EXISTS owner_id VARCHAR(64)");
+        jdbc.execute("ALTER TABLE xuanji_qqbot_group ADD COLUMN IF NOT EXISTS member_count INT DEFAULT 0");
+        jdbc.execute("ALTER TABLE xuanji_onebot_group ADD COLUMN IF NOT EXISTS join_time TIMESTAMP");
+        jdbc.execute("ALTER TABLE xuanji_onebot_group ADD COLUMN IF NOT EXISTS inviter_id VARCHAR(64)");
+        jdbc.execute("ALTER TABLE xuanji_onebot_group ADD COLUMN IF NOT EXISTS owner_id VARCHAR(64)");
+        jdbc.execute("ALTER TABLE xuanji_onebot_group ADD COLUMN IF NOT EXISTS member_count INT DEFAULT 0");
+        // 成员表补强字段
+        jdbc.execute("ALTER TABLE xuanji_qqbot_group_member ADD COLUMN IF NOT EXISTS card VARCHAR(128)");
+        jdbc.execute("ALTER TABLE xuanji_qqbot_group_member ADD COLUMN IF NOT EXISTS join_time TIMESTAMP");
+        jdbc.execute("ALTER TABLE xuanji_qqbot_group_member ADD COLUMN IF NOT EXISTS is_deleted TINYINT DEFAULT 0");
+        jdbc.execute("ALTER TABLE xuanji_onebot_group_member ADD COLUMN IF NOT EXISTS card VARCHAR(128)");
+        jdbc.execute("ALTER TABLE xuanji_onebot_group_member ADD COLUMN IF NOT EXISTS join_time TIMESTAMP");
+        jdbc.execute("ALTER TABLE xuanji_onebot_group_member ADD COLUMN IF NOT EXISTS is_deleted TINYINT DEFAULT 0");
+
+        // ==================== 唯一索引（保障 MERGE KEY 幂等，防止重复行） ====================
+        jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_bot_platform_id ON xuanji_bot (platform, bot_identifier)");
+        jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_qqbot_group ON xuanji_qqbot_group (bot_id, group_id)");
+        jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_onebot_group ON xuanji_onebot_group (bot_id, group_id)");
+        jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_qqbot_member ON xuanji_qqbot_group_member (bot_id, group_id, member_id)");
+        jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_onebot_member ON xuanji_onebot_group_member (bot_id, group_id, member_id)");
+
+        log.info("[DB] {}", firstRun ? "框架初始化建表完成（13 张 + 5 唯一索引）" : "建表已完成（已存在）");
     }
 
     /** 从 YAML 配置中注册 Bot 实例到 xuanji_bot 表 */

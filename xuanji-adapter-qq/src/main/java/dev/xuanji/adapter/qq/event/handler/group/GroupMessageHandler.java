@@ -10,7 +10,6 @@ import dev.xuanji.core.event.EventMapping;
 import dev.xuanji.adapter.qq.util.KeyboardBuilder;
 import dev.xuanji.adapter.qq.util.MarkdownBuilder;
 import dev.xuanji.core.command.CommandRegistry;
-import dev.xuanji.core.permission.PermissionService;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.extern.slf4j.Slf4j;
@@ -47,7 +46,6 @@ public class GroupMessageHandler implements EventHandler {
     private final XuanjiRobotProperties robotProperties;
     private final MessageSender messageSender;
     private final CommandRegistry commandRegistry;
-    private final PermissionService permissionService;
     private final JdbcTemplate jdbc;
     private final dev.xuanji.core.storage.log.MessageLogService logSvc;
 
@@ -55,13 +53,12 @@ public class GroupMessageHandler implements EventHandler {
     private final Timer e2eTimer;
 
     public GroupMessageHandler(XuanjiRobotProperties robotProperties, MessageSender messageSender,
-                               CommandRegistry commandRegistry, PermissionService permissionService,
+                               CommandRegistry commandRegistry,
                                JdbcTemplate jdbc, dev.xuanji.core.storage.log.MessageLogService logSvc,
                                MeterRegistry meterRegistry) {
         this.robotProperties = robotProperties;
         this.messageSender = messageSender;
         this.commandRegistry = commandRegistry;
-        this.permissionService = permissionService;
         this.jdbc = jdbc;
         this.logSvc = logSvc;
         this.handleTimer = Timer.builder("xuanji.message.handle")
@@ -128,12 +125,9 @@ public class GroupMessageHandler implements EventHandler {
             // 事件注解指令调度
             var xjBot = new dev.xuanji.adapter.qq.bot.QqXjBot(messageSender, groupOpenid, msgId, appId, logSvc);
                 CommandRegistry.setContext(botKey, groupOpenid, msgId, memberOpenid,
-                        sdkEvent(event), xjBot);
+                        sdkEvent(event), xjBot, "qq");
             try {
-                // 权限检查
-                if (!permissionService.check(botKey, groupOpenid, memberOpenid, null)) {
-                    return;
-                }
+                // 权限已在 Pipeline 的 WhitelistStage(20) 统一裁决，此处不再内联检查
                 String cmdResult = commandRegistry.executeGroupMessage(content);
                 if (cmdResult != null) {
                     messageSender.sendGroupText(groupOpenid, cmdResult, msgId);
@@ -189,6 +183,7 @@ public class GroupMessageHandler implements EventHandler {
                 .senderName(raw.getAuthor() != null ? raw.getAuthor().getUsername() : "?")
                 .senderRole(raw.getAuthor() != null ? raw.getAuthor().getMemberRole() : null)
                 .atBot(raw.isAtBot())
+                .platform("qq")
                 .build();
     }
 }

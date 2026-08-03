@@ -49,3 +49,28 @@ xuanji:
     driver-class-name: org.h2.Driver
     username: sa
     password:
+
+  # ==================== OneBot v11 适配器 ====================
+  # 只认 OneBot v11 标准协议，兼容 Napcat / Lagrange / go-cqhttp 等任意实现。
+  # enabled=false 时整个模块不装配（不开端点、不建 Bean）。
+  onebot:
+    enabled: true
+    # API 调用超时（毫秒）
+    api-timeout-ms: 10000
+    # 忽略 bot 自身发出的消息回显
+    ignore-self-message: true
+
+    # 反向 WS（推荐）：框架作服务端，OneBot 实现主动连过来
+    # Napcat 侧配置 ws-reverse.universal = ws://框架IP:8668/onebot/ws
+    reverse:
+      enabled: true
+      path: /onebot/ws
+      # 强烈建议配置，留空则任何人可连；用环境变量注入，勿写死在文件里
+      access-token: almHduWEJMC~JveO   #${ONEBOT_TOKEN:}
+
+    # 正向 WS：框架作客户端，主动连 OneBot 实现的 WS 端口
+    forward:
+      enabled: false
+      url: ws://127.0.0.1:3001
+      access-token: ${ONEBOT_TOKEN:}
+      reconnect-interval-ms: 5000

@@ -67,7 +67,7 @@ public class C2cMessageHandler implements EventHandler {
 
             // 创建 Bot 实例（C2C 模式）
             var bot = new dev.xuanji.adapter.qq.bot.C2cXjBot(messageSender, openid, msgId, appId, logSvc);
-            CommandRegistry.setContext("bot1", null, msgId, openid, null, bot);
+            CommandRegistry.setContext("bot1", null, msgId, openid, null, bot, "qq");
 
             try {
                 String result = commandRegistry.executePrivateMessage(content);

@@ -1,5 +1,7 @@
 package dev.xuanji.core.plugin;
 
+import dev.xuanji.api.annotation.XuanjiPlugin;
+import dev.xuanji.api.plugin.XuanjiPluginBase;
 import lombok.extern.slf4j.Slf4j;
 import org.pf4j.*;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
@@ -7,11 +9,13 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.stereotype.Component;
 
+import dev.xuanji.core.command.CommandRegistry;
+
 import java.nio.file.Path;
 import java.util.*;
 
 /**
- * 璇玑插件管理器 — PF4J + Spring 子容器隔离。
+ * 璇玑插件管理器 — PF4J + Spring 子容器隔离，并承载「插件真生命周期」。
  *
  * <h3>架构</h3>
  * <pre>
@@ -22,18 +26,32 @@ import java.util.*;
  *             └── ClassLoader = PF4J PluginClassLoader
  * </pre>
  *
- * <p>插件退出时子容器关闭 → 所有 Bean 销毁 → ClassLoader 卸载 → 无内存泄漏。
+ * <h3>生命周期</h3>
+ * 加载后按持久态（{@link PluginStateStore}）应用启用/停用：
+ * 启用 → 调用 {@code onEnable()} 并注册指令；停用 → 调用 {@code onDisable()} 并反注册指令。
+ * 运行时可通过 {@link #enablePlugin}/{@link #disablePlugin}/{@link #reloadPlugin} 热启停。
  */
 @Slf4j(topic = "xuanji.plugin")
 @Component
 public class XuanjiPluginManager extends DefaultPluginManager {
 
     private final ApplicationContext parentContext;
-    private final Map<String, AnnotationConfigApplicationContext> pluginContexts = new HashMap<>();
-    private final Map<String, java.util.List<Object>> pluginInstances = new HashMap<>();
+    private final PluginStateStore stateStore;
+    private final CommandRegistry commandRegistry;
 
-    public XuanjiPluginManager(ApplicationContext parentContext) {
+    /** pluginId → 该插件注册的所有指令实例（用于启用时重注册 / 停用反注册） */
+    private final Map<String, List<Object>> pluginCommands = new HashMap<>();
+    /** pluginId → 当前业务生命周期状态 */
+    private final Map<String, XuanjiPluginState> states = new HashMap<>();
+    /** pluginId → 插件 Spring 子容器 */
+    private final Map<String, AnnotationConfigApplicationContext> pluginContexts = new HashMap<>();
+
+    public XuanjiPluginManager(ApplicationContext parentContext,
+                               PluginStateStore stateStore,
+                               CommandRegistry commandRegistry) {
         this.parentContext = parentContext;
+        this.stateStore = stateStore;
+        this.commandRegistry = commandRegistry;
     }
 
     @Override
@@ -51,7 +69,7 @@ public class XuanjiPluginManager extends DefaultPluginManager {
                 .add(new ManifestPluginDescriptorFinder());
     }
 
-    /** 加载并启动所有插件，为每个插件创建独立 Spring 子容器 */
+    /** 加载并启动所有插件，为每个插件创建独立 Spring 子容器，再按持久态应用启用/停用 */
     public void loadAndStartAll() {
         Path pluginsDir = getPluginsRoot();
         if (!pluginsDir.toFile().exists()) {
@@ -63,15 +81,35 @@ public class XuanjiPluginManager extends DefaultPluginManager {
         startPlugins();
 
         for (PluginWrapper wrapper : getStartedPlugins()) {
+            String id = wrapper.getPluginId();
             try {
                 createPluginContext(wrapper);
-                log.info("[Plugin] 已加载: {} v{}", wrapper.getPluginId(), wrapper.getDescriptor().getVersion());
+                // 指令实例已收集到 pluginCommands；按持久态应用启用/停用
+                applyPersistedState(wrapper);
+                log.info("[Plugin] 已加载: {} v{} (state={})", id, wrapper.getDescriptor().getVersion(), states.get(id));
             } catch (Exception e) {
-                log.error("[Plugin] 加载失败: {}, error={}", wrapper.getPluginId(), e.getMessage());
+                log.error("[Plugin] 加载失败: {}, error={}", id, e.getMessage());
+                states.put(id, XuanjiPluginState.ERROR);
             }
         }
 
         log.info("[Plugin] 插件加载完成: {} 个运行中", pluginContexts.size());
+    }
+
+    /** 按持久态应用启用/停用 */
+    private void applyPersistedState(PluginWrapper wrapper) {
+        String id = wrapper.getPluginId();
+        boolean enabled = stateStore.isEnabled(id);
+        if (enabled) {
+            callHook(wrapper, true);
+            commandRegistry.setPluginEnabled(id, true);
+            states.put(id, XuanjiPluginState.ENABLED);
+        } else {
+            callHook(wrapper, false);
+            unregisterCommands(id);
+            commandRegistry.setPluginEnabled(id, false);
+            states.put(id, XuanjiPluginState.DISABLED);
+        }
     }
 
     /** 为指定插件创建独立的 Spring 子容器 */
@@ -85,7 +123,6 @@ public class XuanjiPluginManager extends DefaultPluginManager {
             return;
         }
 
-        // 用插件 ClassLoader 创建子容器
         Thread currentThread = Thread.currentThread();
         ClassLoader original = currentThread.getContextClassLoader();
         currentThread.setContextClassLoader(pluginClassLoader);
@@ -94,48 +131,41 @@ public class XuanjiPluginManager extends DefaultPluginManager {
             ctx.setClassLoader(pluginClassLoader);
             ctx.setParent(parentContext);
 
-            // 创建共享 BeanFactory，让插件能访问父容器 Bean
             DefaultListableBeanFactory beanFactory = new DefaultListableBeanFactory();
             beanFactory.setParentBeanFactory(parentContext.getAutowireCapableBeanFactory());
-            // 扫描插件类所在的包
             String basePackage = pluginClass.getPackageName();
             ctx.scan(basePackage);
             ctx.refresh();
 
             pluginContexts.put(wrapper.getPluginId(), ctx);
 
-            // 扫描插件 classpath，找出所有 @XuanjiPlugin 类并注册 @Command
             try {
-                dev.xuanji.core.command.CommandRegistry registry =
-                        parentContext.getBean(dev.xuanji.core.command.CommandRegistry.class);
-                // 遍历插件 jar 中的类（通过 ClassLoader 扫描）
+                CommandRegistry registry = parentContext.getBean(CommandRegistry.class);
                 scanPluginClasses(wrapper, registry);
             } catch (Exception e) {
                 log.debug("[Plugin] CommandRegistry 不可用，跳过指令注册: {}", e.getMessage());
             }
-
         } finally {
             currentThread.setContextClassLoader(original);
         }
     }
 
     /**
-     * 从插件主类中找所有 @XuanjiPlugin 注解的类（含内部类），注册到 CommandRegistry。
+     * 从插件主类中找所有 @XuanjiPlugin 注解的类（含内部类），注册到 CommandRegistry，
+     * 并收集实例以便后续反注册。
      */
-    private void scanPluginClasses(PluginWrapper wrapper, dev.xuanji.core.command.CommandRegistry registry) {
+    private void scanPluginClasses(PluginWrapper wrapper, CommandRegistry registry) {
         String pluginClassName = wrapper.getDescriptor().getPluginClass();
         if (pluginClassName == null || pluginClassName.isBlank()) return;
 
         ClassLoader cl = wrapper.getPluginClassLoader();
         try {
             Class<?> mainClass = cl.loadClass(pluginClassName);
-            // 检查主类本身
-            if (mainClass.isAnnotationPresent(dev.xuanji.api.annotation.XuanjiPlugin.class)) {
+            if (mainClass.isAnnotationPresent(XuanjiPlugin.class)) {
                 registerIfPossible(mainClass, registry, cl, wrapper.getPluginId());
             }
-            // 检查内部静态类（如 DemoPlugin.Commands）
             for (Class<?> inner : mainClass.getDeclaredClasses()) {
-                if (inner.isAnnotationPresent(dev.xuanji.api.annotation.XuanjiPlugin.class)) {
+                if (inner.isAnnotationPresent(XuanjiPlugin.class)) {
                     registerIfPossible(inner, registry, cl, wrapper.getPluginId());
                 }
             }
@@ -144,25 +174,105 @@ public class XuanjiPluginManager extends DefaultPluginManager {
         }
     }
 
-    private void registerIfPossible(Class<?> cls, dev.xuanji.core.command.CommandRegistry registry, ClassLoader cl, String pluginId) {
+    private void registerIfPossible(Class<?> cls, CommandRegistry registry, ClassLoader cl, String pluginId) {
         try {
             Object instance = cls.getDeclaredConstructor().newInstance();
             registry.register(instance, pluginId);
-            // 找到这个调用来自哪个 pluginId（从 scanPluginClasses 传入，通过方法签名无法获取，暂时用 class 名推测）
-            // 这里用简单方案：把所有注册的 instance 放到一个全局列表
+            pluginCommands.computeIfAbsent(pluginId, k -> new ArrayList<>()).add(instance);
             log.info("[Plugin] 注册指令类: {}", cls.getSimpleName());
         } catch (Exception e) {
             log.debug("[Plugin] 无法实例化 {}: {}", cls.getSimpleName(), e.getMessage());
         }
     }
 
-    /** 卸载指定插件（关闭其 Spring 子容器） */
+    // ==================== 运行时生命周期控制 ====================
+
+    /** 启用插件：重注册指令 → 调用 onEnable → 持久化启用 */
+    public synchronized boolean enablePlugin(String id) {
+        if (states.get(id) == XuanjiPluginState.ENABLED) return true;
+        PluginWrapper w = getPlugin(id);
+        if (w == null) return false;
+
+        registerCommands(id);
+        callHook(w, true);
+        commandRegistry.setPluginEnabled(id, true);
+        stateStore.setEnabled(id, true);
+        states.put(id, XuanjiPluginState.ENABLED);
+        log.info("[Plugin] 已启用: {}", id);
+        return true;
+    }
+
+    /** 停用插件：调用 onDisable → 反注册指令 → 持久化停用 */
+    public synchronized boolean disablePlugin(String id) {
+        if (states.get(id) != XuanjiPluginState.ENABLED) return false;
+        PluginWrapper w = getPlugin(id);
+        if (w == null) return false;
+
+        callHook(w, false);
+        unregisterCommands(id);
+        commandRegistry.setPluginEnabled(id, false);
+        stateStore.setEnabled(id, false);
+        states.put(id, XuanjiPluginState.DISABLED);
+        log.info("[Plugin] 已停用: {}", id);
+        return true;
+    }
+
+    /** 重载插件：先停用再启用（重跑 onDisable/onEnable 钩子，指令重注册） */
+    public synchronized boolean reloadPlugin(String id) {
+        XuanjiPluginState s = states.get(id);
+        if (s == null) return false;
+        if (s == XuanjiPluginState.ENABLED) disablePlugin(id);
+        return enablePlugin(id);
+    }
+
+    private void registerCommands(String id) {
+        for (Object inst : pluginCommands.getOrDefault(id, List.of())) {
+            commandRegistry.register(inst, id);
+        }
+    }
+
+    private void unregisterCommands(String id) {
+        for (Object inst : pluginCommands.getOrDefault(id, List.of())) {
+            commandRegistry.unregister(inst);
+        }
+    }
+
+    /** 调用插件生命周期钩子（onEnable/onDisable） */
+    private void callHook(PluginWrapper w, boolean enable) {
+        try {
+            Object p = w.getPlugin();
+            if (p instanceof XuanjiPluginBase xp) {
+                if (enable) xp.onEnable();
+                else xp.onDisable();
+            }
+        } catch (Exception e) {
+            log.warn("[Plugin] 生命周期钩子执行异常 ({}): {}", w.getPluginId(), e.getMessage());
+        }
+    }
+
+    /** 插件列表（含 id/version/state/enabled） */
+    public List<PluginInfo> listPlugins() {
+        List<PluginInfo> list = new ArrayList<>();
+        for (PluginWrapper w : getPlugins()) {
+            String id = w.getPluginId();
+            String version = w.getDescriptor() != null ? w.getDescriptor().getVersion() : "?";
+            XuanjiPluginState st = states.getOrDefault(id, XuanjiPluginState.LOADED);
+            list.add(new PluginInfo(id, version, st.name(), st == XuanjiPluginState.ENABLED));
+        }
+        return list;
+    }
+
+    public record PluginInfo(String id, String version, String state, boolean enabled) {}
+
+    /** 卸载指定插件（关闭其 Spring 子容器 + 反注册指令 + 清理状态） */
+    @Override
     public boolean unloadPlugin(String pluginId) {
         AnnotationConfigApplicationContext ctx = pluginContexts.remove(pluginId);
-        if (ctx != null) {
-            ctx.close();
-            log.info("[Plugin] 已卸载: {}", pluginId);
-        }
+        if (ctx != null) ctx.close();
+        unregisterCommands(pluginId);
+        pluginCommands.remove(pluginId);
+        states.remove(pluginId);
+        stateStore.delete(pluginId);
         return stopPlugin(pluginId) == PluginState.STOPPED;
     }
 

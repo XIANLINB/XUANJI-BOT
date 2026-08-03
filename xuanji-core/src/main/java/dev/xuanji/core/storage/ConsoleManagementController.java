@@ -48,18 +48,26 @@ public class ConsoleManagementController {
         m.put("botsOnline", botsOnline);
         m.put("botsTotal", botsTotal);
 
-        // 群/好友
-        m.put("groupsTotal", qInt("SELECT COUNT(*) FROM xuanji_qqbot_group WHERE is_deleted=0"));
-        m.put("friendsTotal", qInt("SELECT COUNT(*) FROM xuanji_qqbot_user WHERE is_deleted=0"));
+        // 群/好友（跨平台汇总：QQ + OneBot）
+        m.put("groupsTotal", qInt("SELECT COUNT(*) FROM xuanji_qqbot_group WHERE is_deleted=0")
+                + qInt("SELECT COUNT(*) FROM xuanji_onebot_group WHERE is_deleted=0"));
+        m.put("friendsTotal", qInt("SELECT COUNT(*) FROM xuanji_qqbot_user WHERE is_deleted=0")
+                + qInt("SELECT COUNT(*) FROM xuanji_onebot_user WHERE is_deleted=0"));
 
         // 今日
         String today = "CURRENT_DATE";
-        m.put("todayGroupAdd", qInt("SELECT COUNT(*) FROM xuanji_qqbot_event WHERE event_type='GROUP_ADD_ROBOT' AND create_time>="+today));
-        m.put("todayGroupDel", qInt("SELECT COUNT(*) FROM xuanji_qqbot_event WHERE event_type='GROUP_DEL_ROBOT' AND create_time>="+today));
-        m.put("todayFriendAdd", qInt("SELECT COUNT(*) FROM xuanji_qqbot_event WHERE event_type='FRIEND_ADD' AND create_time>="+today));
-        m.put("todayFriendDel", qInt("SELECT COUNT(*) FROM xuanji_qqbot_event WHERE event_type='FRIEND_DEL' AND create_time>="+today));
-        m.put("todayGroupMessages", logInt("SELECT COUNT(*) FROM xuanji_qqbot_group_message WHERE create_time>=CURRENT_DATE"));
-        m.put("todayC2cMessages", logInt("SELECT COUNT(*) FROM xuanji_qqbot_c2c_message WHERE create_time>=CURRENT_DATE"));
+        m.put("todayGroupAdd", logInt("SELECT COUNT(*) FROM xuanji_qqbot_event WHERE event_type='GROUP_ADD_ROBOT' AND create_time>="+today)
+                + logInt("SELECT COUNT(*) FROM xuanji_onebot_event WHERE event_type='GROUP_ADD_ROBOT' AND create_time>="+today));
+        m.put("todayGroupDel", logInt("SELECT COUNT(*) FROM xuanji_qqbot_event WHERE event_type='GROUP_DEL_ROBOT' AND create_time>="+today)
+                + logInt("SELECT COUNT(*) FROM xuanji_onebot_event WHERE event_type='GROUP_DEL_ROBOT' AND create_time>="+today));
+        m.put("todayFriendAdd", logInt("SELECT COUNT(*) FROM xuanji_qqbot_event WHERE event_type='FRIEND_ADD' AND create_time>="+today)
+                + logInt("SELECT COUNT(*) FROM xuanji_onebot_event WHERE event_type='FRIEND_ADD' AND create_time>="+today));
+        m.put("todayFriendDel", logInt("SELECT COUNT(*) FROM xuanji_qqbot_event WHERE event_type='FRIEND_DEL' AND create_time>="+today)
+                + logInt("SELECT COUNT(*) FROM xuanji_onebot_event WHERE event_type='FRIEND_DEL' AND create_time>="+today));
+        m.put("todayGroupMessages", logInt("SELECT COUNT(*) FROM xuanji_qqbot_group_message WHERE create_time>=CURRENT_DATE")
+                + logInt("SELECT COUNT(*) FROM xuanji_onebot_group_message WHERE create_time>=CURRENT_DATE"));
+        m.put("todayC2cMessages", logInt("SELECT COUNT(*) FROM xuanji_qqbot_c2c_message WHERE create_time>=CURRENT_DATE")
+                + logInt("SELECT COUNT(*) FROM xuanji_onebot_event WHERE event_type='message.private' AND create_time>=CURRENT_DATE"));
 
         // 插件
         m.put("pluginsLoaded", pluginManager.getPlugins().size());
@@ -88,9 +96,13 @@ public class ConsoleManagementController {
             b.put("appId", appId);
             b.put("platform", platform);
             b.put("status", status);
-            b.put("groupsTotal", qInt("SELECT COUNT(*) FROM xuanji_qqbot_group WHERE bot_id=? AND is_deleted=0", appId));
-            b.put("friendsTotal", qInt("SELECT COUNT(*) FROM xuanji_qqbot_user WHERE bot_id=? AND is_deleted=0", appId));
-            b.put("todayMessages", logInt("SELECT COUNT(*) FROM xuanji_qqbot_group_message WHERE bot_id=? AND create_time>=CURRENT_DATE", appId));
+            // 群/好友按平台分表查询
+            String groupTable = "onebot".equals(platform) ? "xuanji_onebot_group" : "xuanji_qqbot_group";
+            String userTable = "onebot".equals(platform) ? "xuanji_onebot_user" : "xuanji_qqbot_user";
+            String flowTable = "onebot".equals(platform) ? "xuanji_onebot_group_message" : "xuanji_qqbot_group_message";
+            b.put("groupsTotal", qInt("SELECT COUNT(*) FROM " + groupTable + " WHERE bot_id=? AND is_deleted=0", appId));
+            b.put("friendsTotal", qInt("SELECT COUNT(*) FROM " + userTable + " WHERE bot_id=? AND is_deleted=0", appId));
+            b.put("todayMessages", logInt("SELECT COUNT(*) FROM " + flowTable + " WHERE bot_id=? AND create_time>=CURRENT_DATE", appId));
 
             try {
                 var info = jdbc.queryForMap("SELECT username, avatar, share_url, welcome_msg FROM xuanji_qqbot_info WHERE bot_id=?", appId);
@@ -209,17 +221,25 @@ public class ConsoleManagementController {
         return queryLogTable("xuanji_qqbot_c2c_message", bot, page, size);
     }
 
-    /** 群列表（用于联系人列表） */
+    /** 群列表（用于联系人列表，跨平台：QQ + OneBot） */
     @GetMapping("/contacts/groups")
     public List<Map<String, Object>> contactGroups() {
-        return logJdbc.queryForList("SELECT DISTINCT group_id, bot_id FROM (SELECT group_id, bot_id FROM xuanji_qqbot_group_message ORDER BY create_time DESC) LIMIT 100")
+        String union = "SELECT group_id, bot_id FROM xuanji_qqbot_group_message " +
+                "UNION ALL SELECT group_id, bot_id FROM xuanji_onebot_group_message";
+        return logJdbc.queryForList("SELECT DISTINCT group_id, bot_id FROM (" + union + " ORDER BY 1 DESC) LIMIT 100")
                 .stream().map(m -> {
+                    String gid = String.valueOf(m.get("GROUP_ID"));
                     Map<String, Object> r = new LinkedHashMap<>(m);
                     r.put("type", "group");
                     try {
-                        var n = jdbc.queryForMap("SELECT group_name FROM xuanji_qqbot_group WHERE group_id=?", m.get("GROUP_ID"));
-                        r.put("name", n.getOrDefault("GROUP_NAME", m.get("GROUP_ID")));
-                    } catch (Exception e) { r.put("name", m.get("GROUP_ID")); }
+                        var n = jdbc.queryForMap("SELECT group_name FROM xuanji_qqbot_group WHERE group_id=?", gid);
+                        r.put("name", n.getOrDefault("GROUP_NAME", gid));
+                    } catch (Exception e) {
+                        try {
+                            var n2 = jdbc.queryForMap("SELECT group_name FROM xuanji_onebot_group WHERE group_id=?", gid);
+                            r.put("name", n2.getOrDefault("GROUP_NAME", gid));
+                        } catch (Exception e2) { r.put("name", gid); }
+                    }
                     return r;
                 }).toList();
     }

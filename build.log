@@ -1,0 +1,245 @@
+﻿[INFO] Scanning for projects...
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Build Order:
+[INFO] 
+[INFO] XuanJi Parent                                                      [pom]
+[INFO] XuanJi API                                                         [jar]
+[INFO] XuanJi SDK                                                         [jar]
+[INFO] XuanJi Core                                                        [jar]
+[INFO] XuanJi Adapter QQ                                                  [jar]
+[INFO] XuanJi Adapter OneBot                                              [jar]
+[INFO] XuanJi Plugin Demo                                                 [jar]
+[INFO] XuanJi Starter                                                     [jar]
+[INFO] 
+[INFO] ----------------------< dev.xuanji:xuanji-parent >----------------------
+[INFO] Building XuanJi Parent 1.0.0-SNAPSHOT                              [1/8]
+[INFO]   from pom.xml
+[INFO] --------------------------------[ pom ]---------------------------------
+[INFO] 
+[INFO] --- install:3.1.4:install (default-install) @ xuanji-parent ---
+[INFO] Installing D:\Program\bot\xuanji\pom.xml to D:\Program\Maven\maven-repository\dev\xuanji\xuanji-parent\1.0.0-SNAPSHOT\xuanji-parent-1.0.0-SNAPSHOT.pom
+[INFO] 
+[INFO] -----------------------< dev.xuanji:xuanji-api >------------------------
+[INFO] Building XuanJi API 1.0.0-SNAPSHOT                                 [2/8]
+[INFO]   from xuanji-api\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ xuanji-api ---
+[INFO] skip non existing resourceDirectory D:\Program\bot\xuanji\xuanji-api\src\main\resources
+[INFO] skip non existing resourceDirectory D:\Program\bot\xuanji\xuanji-api\src\main\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ xuanji-api ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ xuanji-api ---
+[INFO] skip non existing resourceDirectory D:\Program\bot\xuanji\xuanji-api\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ xuanji-api ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] --- surefire:3.5.5:test (default-test) @ xuanji-api ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.4.2:jar (default-jar) @ xuanji-api ---
+[INFO] 
+[INFO] --- install:3.1.4:install (default-install) @ xuanji-api ---
+[INFO] Installing D:\Program\bot\xuanji\xuanji-api\pom.xml to D:\Program\Maven\maven-repository\dev\xuanji\xuanji-api\1.0.0-SNAPSHOT\xuanji-api-1.0.0-SNAPSHOT.pom
+[INFO] Installing D:\Program\bot\xuanji\xuanji-api\target\xuanji-api-1.0.0-SNAPSHOT.jar to D:\Program\Maven\maven-repository\dev\xuanji\xuanji-api\1.0.0-SNAPSHOT\xuanji-api-1.0.0-SNAPSHOT.jar
+[INFO] 
+[INFO] -----------------------< dev.xuanji:xuanji-sdk >------------------------
+[INFO] Building XuanJi SDK 1.0.0-SNAPSHOT                                 [3/8]
+[INFO]   from xuanji-sdk\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ xuanji-sdk ---
+[INFO] skip non existing resourceDirectory D:\Program\bot\xuanji\xuanji-sdk\src\main\resources
+[INFO] skip non existing resourceDirectory D:\Program\bot\xuanji\xuanji-sdk\src\main\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ xuanji-sdk ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ xuanji-sdk ---
+[INFO] skip non existing resourceDirectory D:\Program\bot\xuanji\xuanji-sdk\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ xuanji-sdk ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] --- surefire:3.5.5:test (default-test) @ xuanji-sdk ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.4.2:jar (default-jar) @ xuanji-sdk ---
+[INFO] 
+[INFO] --- install:3.1.4:install (default-install) @ xuanji-sdk ---
+[INFO] Installing D:\Program\bot\xuanji\xuanji-sdk\pom.xml to D:\Program\Maven\maven-repository\dev\xuanji\xuanji-sdk\1.0.0-SNAPSHOT\xuanji-sdk-1.0.0-SNAPSHOT.pom
+[INFO] Installing D:\Program\bot\xuanji\xuanji-sdk\target\xuanji-sdk-1.0.0-SNAPSHOT.jar to D:\Program\Maven\maven-repository\dev\xuanji\xuanji-sdk\1.0.0-SNAPSHOT\xuanji-sdk-1.0.0-SNAPSHOT.jar
+[INFO] 
+[INFO] -----------------------< dev.xuanji:xuanji-core >-----------------------
+[INFO] Building XuanJi Core 1.0.0-SNAPSHOT                                [4/8]
+[INFO]   from xuanji-core\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ xuanji-core ---
+[INFO] skip non existing resourceDirectory D:\Program\bot\xuanji\xuanji-core\src\main\resources
+[INFO] skip non existing resourceDirectory D:\Program\bot\xuanji\xuanji-core\src\main\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ xuanji-core ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 29 source files with javac [debug parameters release 25] to target\classes
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ xuanji-core ---
+[INFO] skip non existing resourceDirectory D:\Program\bot\xuanji\xuanji-core\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ xuanji-core ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] --- surefire:3.5.5:test (default-test) @ xuanji-core ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.4.2:jar (default-jar) @ xuanji-core ---
+[INFO] Building jar: D:\Program\bot\xuanji\xuanji-core\target\xuanji-core-1.0.0-SNAPSHOT.jar
+[INFO] 
+[INFO] --- install:3.1.4:install (default-install) @ xuanji-core ---
+[INFO] Installing D:\Program\bot\xuanji\xuanji-core\pom.xml to D:\Program\Maven\maven-repository\dev\xuanji\xuanji-core\1.0.0-SNAPSHOT\xuanji-core-1.0.0-SNAPSHOT.pom
+[INFO] Installing D:\Program\bot\xuanji\xuanji-core\target\xuanji-core-1.0.0-SNAPSHOT.jar to D:\Program\Maven\maven-repository\dev\xuanji\xuanji-core\1.0.0-SNAPSHOT\xuanji-core-1.0.0-SNAPSHOT.jar
+[INFO] 
+[INFO] --------------------< dev.xuanji:xuanji-adapter-qq >--------------------
+[INFO] Building XuanJi Adapter QQ 1.0.0-SNAPSHOT                          [5/8]
+[INFO]   from xuanji-adapter-qq\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ xuanji-adapter-qq ---
+[INFO] skip non existing resourceDirectory D:\Program\bot\xuanji\xuanji-adapter-qq\src\main\resources
+[INFO] skip non existing resourceDirectory D:\Program\bot\xuanji\xuanji-adapter-qq\src\main\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ xuanji-adapter-qq ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 54 source files with javac [debug parameters release 25] to target\classes
+[INFO] /D:/Program/bot/xuanji/xuanji-adapter-qq/src/main/java/dev/xuanji/adapter/qq/api/MessageSender.java: 某些输入文件使用或覆盖了已过时的 API。
+[INFO] /D:/Program/bot/xuanji/xuanji-adapter-qq/src/main/java/dev/xuanji/adapter/qq/api/MessageSender.java: 有关详细信息, 请使用 -Xlint:deprecation 重新编译。
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ xuanji-adapter-qq ---
+[INFO] skip non existing resourceDirectory D:\Program\bot\xuanji\xuanji-adapter-qq\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ xuanji-adapter-qq ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] --- surefire:3.5.5:test (default-test) @ xuanji-adapter-qq ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.4.2:jar (default-jar) @ xuanji-adapter-qq ---
+[INFO] Building jar: D:\Program\bot\xuanji\xuanji-adapter-qq\target\xuanji-adapter-qq-1.0.0-SNAPSHOT.jar
+[INFO] 
+[INFO] --- install:3.1.4:install (default-install) @ xuanji-adapter-qq ---
+[INFO] Installing D:\Program\bot\xuanji\xuanji-adapter-qq\pom.xml to D:\Program\Maven\maven-repository\dev\xuanji\xuanji-adapter-qq\1.0.0-SNAPSHOT\xuanji-adapter-qq-1.0.0-SNAPSHOT.pom
+[INFO] Installing D:\Program\bot\xuanji\xuanji-adapter-qq\target\xuanji-adapter-qq-1.0.0-SNAPSHOT.jar to D:\Program\Maven\maven-repository\dev\xuanji\xuanji-adapter-qq\1.0.0-SNAPSHOT\xuanji-adapter-qq-1.0.0-SNAPSHOT.jar
+[INFO] 
+[INFO] ------------------< dev.xuanji:xuanji-adapter-onebot >------------------
+[INFO] Building XuanJi Adapter OneBot 1.0.0-SNAPSHOT                      [6/8]
+[INFO]   from xuanji-adapter-onebot\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ xuanji-adapter-onebot ---
+[INFO] skip non existing resourceDirectory D:\Program\bot\xuanji\xuanji-adapter-onebot\src\main\resources
+[INFO] skip non existing resourceDirectory D:\Program\bot\xuanji\xuanji-adapter-onebot\src\main\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ xuanji-adapter-onebot ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 14 source files with javac [debug parameters release 25] to target\classes
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ xuanji-adapter-onebot ---
+[INFO] skip non existing resourceDirectory D:\Program\bot\xuanji\xuanji-adapter-onebot\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ xuanji-adapter-onebot ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 2 source files with javac [debug parameters release 25] to target\test-classes
+[INFO] 
+[INFO] --- surefire:3.5.5:test (default-test) @ xuanji-adapter-onebot ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.4.2:jar (default-jar) @ xuanji-adapter-onebot ---
+[INFO] Building jar: D:\Program\bot\xuanji\xuanji-adapter-onebot\target\xuanji-adapter-onebot-1.0.0-SNAPSHOT.jar
+[INFO] 
+[INFO] --- install:3.1.4:install (default-install) @ xuanji-adapter-onebot ---
+[INFO] Installing D:\Program\bot\xuanji\xuanji-adapter-onebot\pom.xml to D:\Program\Maven\maven-repository\dev\xuanji\xuanji-adapter-onebot\1.0.0-SNAPSHOT\xuanji-adapter-onebot-1.0.0-SNAPSHOT.pom
+[INFO] Installing D:\Program\bot\xuanji\xuanji-adapter-onebot\target\xuanji-adapter-onebot-1.0.0-SNAPSHOT.jar to D:\Program\Maven\maven-repository\dev\xuanji\xuanji-adapter-onebot\1.0.0-SNAPSHOT\xuanji-adapter-onebot-1.0.0-SNAPSHOT.jar
+[INFO] 
+[INFO] -------------------< dev.xuanji:xuanji-plugin-demo >--------------------
+[INFO] Building XuanJi Plugin Demo 1.0.0-SNAPSHOT                         [7/8]
+[INFO]   from xuanji-plugin-demo\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ xuanji-plugin-demo ---
+[INFO] skip non existing resourceDirectory D:\Program\bot\xuanji\xuanji-plugin-demo\src\main\resources
+[INFO] skip non existing resourceDirectory D:\Program\bot\xuanji\xuanji-plugin-demo\src\main\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ xuanji-plugin-demo ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ xuanji-plugin-demo ---
+[INFO] skip non existing resourceDirectory D:\Program\bot\xuanji\xuanji-plugin-demo\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ xuanji-plugin-demo ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] --- surefire:3.5.5:test (default-test) @ xuanji-plugin-demo ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.4.2:jar (default-jar) @ xuanji-plugin-demo ---
+[INFO] 
+[INFO] --- install:3.1.4:install (default-install) @ xuanji-plugin-demo ---
+[INFO] Installing D:\Program\bot\xuanji\xuanji-plugin-demo\pom.xml to D:\Program\Maven\maven-repository\dev\xuanji\xuanji-plugin-demo\1.0.0-SNAPSHOT\xuanji-plugin-demo-1.0.0-SNAPSHOT.pom
+[INFO] Installing D:\Program\bot\xuanji\xuanji-plugin-demo\target\xuanji-plugin-demo-1.0.0-SNAPSHOT.jar to D:\Program\Maven\maven-repository\dev\xuanji\xuanji-plugin-demo\1.0.0-SNAPSHOT\xuanji-plugin-demo-1.0.0-SNAPSHOT.jar
+[INFO] 
+[INFO] ---------------------< dev.xuanji:xuanji-starter >----------------------
+[INFO] Building XuanJi Starter 1.0.0-SNAPSHOT                             [8/8]
+[INFO]   from xuanji-starter\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ xuanji-starter ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] Copying 2 resources from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ xuanji-starter ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 7 source files with javac [debug parameters release 25] to target\classes
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ xuanji-starter ---
+[INFO] skip non existing resourceDirectory D:\Program\bot\xuanji\xuanji-starter\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ xuanji-starter ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] --- surefire:3.5.5:test (default-test) @ xuanji-starter ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.4.2:jar (default-jar) @ xuanji-starter ---
+[INFO] Building jar: D:\Program\bot\xuanji\xuanji-starter\target\xuanji-starter-1.0.0-SNAPSHOT.jar
+[INFO] 
+[INFO] --- spring-boot:4.0.6:repackage (repackage) @ xuanji-starter ---
+[INFO] Replacing main artifact D:\Program\bot\xuanji\xuanji-starter\target\xuanji-starter-1.0.0-SNAPSHOT.jar with repackaged archive, adding nested dependencies in BOOT-INF/.
+[INFO] The original artifact has been renamed to D:\Program\bot\xuanji\xuanji-starter\target\xuanji-starter-1.0.0-SNAPSHOT.jar.original
+[INFO] 
+[INFO] --- spring-boot:4.0.6:repackage (default) @ xuanji-starter ---
+[INFO] Replacing main artifact D:\Program\bot\xuanji\xuanji-starter\target\xuanji-starter-1.0.0-SNAPSHOT.jar with repackaged archive, adding nested dependencies in BOOT-INF/.
+[INFO] The original artifact has been renamed to D:\Program\bot\xuanji\xuanji-starter\target\xuanji-starter-1.0.0-SNAPSHOT.jar.original
+[INFO] 
+[INFO] --- install:3.1.4:install (default-install) @ xuanji-starter ---
+[INFO] Installing D:\Program\bot\xuanji\xuanji-starter\pom.xml to D:\Program\Maven\maven-repository\dev\xuanji\xuanji-starter\1.0.0-SNAPSHOT\xuanji-starter-1.0.0-SNAPSHOT.pom
+[INFO] Installing D:\Program\bot\xuanji\xuanji-starter\target\xuanji-starter-1.0.0-SNAPSHOT.jar to D:\Program\Maven\maven-repository\dev\xuanji\xuanji-starter\1.0.0-SNAPSHOT\xuanji-starter-1.0.0-SNAPSHOT.jar
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Summary for XuanJi Parent 1.0.0-SNAPSHOT:
+[INFO] 
+[INFO] XuanJi Parent ...................................... SUCCESS [  0.432 s]
+[INFO] XuanJi API ......................................... SUCCESS [  0.954 s]
+[INFO] XuanJi SDK ......................................... SUCCESS [  0.300 s]
+[INFO] XuanJi Core ........................................ SUCCESS [  3.673 s]
+[INFO] XuanJi Adapter QQ .................................. SUCCESS [  4.382 s]
+[INFO] XuanJi Adapter OneBot .............................. SUCCESS [  2.994 s]
+[INFO] XuanJi Plugin Demo ................................. SUCCESS [  0.289 s]
+[INFO] XuanJi Starter ..................................... SUCCESS [  2.459 s]
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  15.864 s
+[INFO] Finished at: 2026-08-01T13:52:25+08:00
+[INFO] ------------------------------------------------------------------------

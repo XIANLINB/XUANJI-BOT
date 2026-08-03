@@ -97,12 +97,12 @@ button{cursor:pointer;transition:all .1s}button:hover{background:#f0f2f5}
 
 <script>
 const A='/xuanji/api';
-const icons={dash:'&#9632;',bot:'&#9881;',plugin:'&#9883;',group:'&#9776;',friend:'&#9993;',monitor:'&#9673;',perm:'&#9819;',event:'&#9776;',log:'&#9776;',db:'&#9856;',sys:'&#9681;'};
+const icons={dash:'&#9632;',bot:'&#9881;',plugin:'&#9883;',group:'&#9776;',friend:'&#9993;',monitor:'&#9673;',perm:'&#9819;',event:'&#9776;',log:'&#9776;',db:'&#9856;',sys:'&#9681;',onebot:'&#9783;'};
 const navs=[
   {id:'dash',label:'仪表盘'},{id:'bot',label:'Bot 管理'},{id:'plugin',label:'插件管理'},
   {id:'group',label:'群聊管理'},{id:'friend',label:'好友列表'},{id:'monitor',label:'消息监控'},
   {id:'perm',label:'权限管理'},{id:'event',label:'事件日志'},{id:'log',label:'框架日志'},
-  {id:'db',label:'数据库'},{id:'sys',label:'系统'}
+  {id:'db',label:'数据库'},{id:'sys',label:'系统'},{id:'onebot',label:'OneBot'}
 ];
 let active='dash',timer,subTab='group-msg';
 
@@ -116,6 +116,8 @@ let active='dash',timer,subTab='group-msg';
 function switchTab(t){active=t;clearInterval(timer);document.querySelectorAll('#nav a').forEach(a=>a.classList.toggle('active',a.dataset.tab===t));render()}
 
 async function get(u){let r=await fetch(u);if(!r.ok)throw new Error(r.status);return r.json()}
+/** 容错请求：接口不存在/未启用时返回 null，供多平台板块优雅降级 */
+async function getSafe(u){try{let r=await fetch(u);if(!r.ok)return null;return await r.json()}catch(ex){return null}}
 async function post(u,b){let r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):''});return r.json()}
 
 async function render(){
@@ -131,14 +133,16 @@ async function render(){
   if(active==='log'){m.innerHTML=logHTML();await loadLogs();timer=setInterval(loadLogs,5000)}
   if(active==='db'){m.innerHTML=dbHTML();await loadDbPage()}
   if(active==='sys'){m.innerHTML=sysHTML();await loadSys()}
+  if(active==='onebot'){m.innerHTML=onebotHTML();await loadOnebot()}
   document.getElementById('stamp').textContent=new Date().toLocaleTimeString()
 }
 
-// ─�� 仪表盘 ──
-function dashHTML(){return`<div class="metrics" id="stats"></div><div class="card" style="margin-top:14px"><h3>Bot 状态</h3><div id="bot-list"></div></div>`}
+// ── 仪表盘 ──
+function dashHTML(){return`<div class="metrics" id="stats"></div><div class="card" style="margin-top:14px"><h3>Bot 状态 <span style="font-size:11px;font-weight:400;color:var(--muted)">（QQ 官方 + OneBot 全平台）</span></h3><div id="bot-list"></div></div><div class="card" style="margin-top:14px"><h3>最近事件 <span style="font-size:11px;font-weight:400;color:var(--muted)">（全平台实时流水，5 秒刷新）</span></h3><div class="data-wrap" id="dash-events"><div class="empty">加载中…</div></div></div>`}
 async function loadDash(){
   try{
     let d=await get(A+'/console/dashboard');
+    let ob=await getSafe(A+'/onebot/status');
     document.getElementById('stats').innerHTML=`
       <div class="metric"><div class="num">${d.botsOnline}/${d.botsTotal}</div><div class="label">Bot 在线</div></div>
       <div class="metric"><div class="num">${d.groupsTotal}</div><div class="label">总群</div></div>
@@ -149,17 +153,31 @@ async function loadDash(){
       <div class="metric"><div class="num">${d.todayGroupAdd||0}</div><div class="label">今日加群</div></div>
       <div class="metric"><div class="num d">${d.todayGroupDel||0}</div><div class="label">今日退群</div></div>
       <div class="metric"><div class="num w">${d.todayFriendAdd||0}</div><div class="label">今日新增好友</div></div>
-      <div class="metric"><div class="num d">${d.todayFriendDel||0}</div><div class="label">今日删除好友</div></div>`;
+      <div class="metric"><div class="num d">${d.todayFriendDel||0}</div><div class="label">今日删除好友</div></div>
+      ${ob?`<div class="metric"><div class="num">${ob.onlineCount||0}</div><div class="label">OneBot 会话</div></div>`:''}`;
     let bots=await get(A+'/console/bots');
-    document.getElementById('bot-list').innerHTML=bots.length?bots.map(b=>`<div class="bot-row">${b.avatar?`<img src="${b.avatar}">`:''}<div style="flex:1"><div class="name">${b.nickname||b.appId} <span class="badge badge-${b.status==='ONLINE'?'on':'off'}">${b.status||'?'}</span></div><div class="meta">${b.botKey} | ${b.groupsTotal} 群 | ${b.friendsTotal} 好友</div></div></div>`).join(''):'<div class="empty">暂无</div>';
+    let rows=bots.map(b=>`<div class="bot-row">${b.avatar?`<img src="${b.avatar}">`:''}<div style="flex:1"><div class="name">${b.nickname||b.appId} <span class="badge badge-${b.status==='ONLINE'?'on':'off'}">${b.status||'?'}</span> <span class="badge badge-IN">QQ 官方</span></div><div class="meta">${b.botKey} | ${b.groupsTotal} 群 | ${b.friendsTotal} 好友</div></div></div>`);
+    if(ob&&ob.sessions) rows=rows.concat(ob.sessions.map(x=>`<div class="bot-row"><div style="flex:1"><div class="name">selfId=${e(String(x.selfId))} <span class="badge badge-${x.open?'on':'off'}">${x.open?'ONLINE':'OFFLINE'}</span> <span class="badge badge-OUT">OneBot</span></div><div class="meta">${e(x.direction||'')} 连接</div></div></div>`));
+    document.getElementById('bot-list').innerHTML=rows.length?rows.join(''):'<div class="empty">暂无</div>';
+    let evs=await getSafe(A+'/console/events');
+    let eb=document.getElementById('dash-events');
+    if(eb) eb.innerHTML=(evs&&evs.length)
+      ?`<table><thead><tr><th>时间</th><th>方向</th><th>用户</th><th>群</th><th>内容</th><th>来源</th></tr></thead><tbody>${evs.slice(-12).reverse().map(v=>`<tr><td>${e(v.time||'')}</td><td>${dirBadge(v.direction)}</td><td>${e(v.user||'')}</td><td>${e(v.groupId||'')}</td><td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${e(v.content)}">${e(v.content||'').substring(0,60)}</td><td style="font-size:10px;color:var(--muted)">${e(v.detail||'')}</td></tr>`).join('')}</tbody></table>`
+      :'<div class="empty">暂无事件（收到消息后自动出现）</div>';
   }catch(e){}
 }
 
 // ── Bot ──
-function botHTML(){return`<div class="card"><h3>Bot 列表</h3><div id="bot-list"></div><button class="btn-primary btn-sm" style="margin-top:12px" onclick="showBotForm()">添加 Bot</button></div><div class="modal" id="bot-modal" onclick="if(event.target===this)closeModal()"><div class="box" id="bot-modal-c"></div></div>`}
+function botHTML(){return`<div class="card"><h3>QQ 官方 Bot</h3><div id="bot-list"></div><button class="btn-primary btn-sm" style="margin-top:12px" onclick="showBotForm()">添加 Bot</button></div><div class="card" style="margin-top:14px"><h3>OneBot 连接 <span style="font-size:11px;font-weight:400;color:var(--muted)">（Napcat / go-cqhttp / Lagrange 等客户端主动接入，无需在此添加）</span></h3><div id="ob-conn"><div class="empty">加载中…</div></div></div><div class="modal" id="bot-modal" onclick="if(event.target===this)closeModal()"><div class="box" id="bot-modal-c"></div></div>`}
 async function loadBots(){
   let bots=await get(A+'/bot-config');
   document.getElementById('bot-list').innerHTML=bots.length?bots.map(b=>`<div class="bot-row"><div style="flex:1"><div class="name">${b.appId||b.key} <span class="badge badge-${b.sandbox==='true'?'off':'on'}">${b.sandbox==='true'?'沙箱':'生产'}</span> <span class="badge badge-IN">${b.connectionMethod||'websocket'}</span></div><div class="meta">AppID: ${b.appId||'-'} | Secret: ***${b.clientSecret?b.clientSecret.slice(-4):''}</div></div><button class="btn-sm" onclick="showBotForm('${b.key||b.appId}')">编辑</button><button class="btn-sm btn-danger" onclick="deleteBot('${b.key||b.appId}')" style="margin-left:6px">删除</button></div>`).join(''):'<div class="empty">暂无 Bot</div>';
+  let ob=await getSafe(A+'/onebot/status'),c=document.getElementById('ob-conn');
+  if(!c)return;
+  if(!ob){c.innerHTML='<div class="empty">OneBot 适配器未启用 —— 在 application.yml 设置 <code>xuanji.onebot.enabled: true</code> 后重启</div>';return}
+  c.innerHTML=ob.sessions&&ob.sessions.length
+    ?ob.sessions.map(x=>`<div class="bot-row"><div style="flex:1"><div class="name">selfId=${e(String(x.selfId))} <span class="badge badge-${x.open?'on':'off'}">${x.open?'在线':'离线'}</span> <span class="badge badge-OUT">${e(x.direction||'')}</span></div><div class="meta">通过 OneBot v11 协议接入，与 QQ 官方 Bot 共用同一套插件</div></div></div>`).join('')
+    :'<div class="empty">适配器已启用，等待客户端接入（把反向 WS 地址填进 Napcat 即可，详见 OneBot 板块）</div>';
 }
 async function showBotForm(key){
   let all = key ? await get(A+'/bot-config') : [];
@@ -213,30 +231,86 @@ async function stopPlugin(id){await post(A+'/console/plugins/'+id+'/stop');loadP
 async function startPlugin(id){await post(A+'/console/plugins/'+id+'/start');loadPlugins()}
 
 // ── 群聊/好友 ──
-function groupHTML(){return`<div class="card"><h3>群列表</h3><div class="flex"><select id="grp-bot"><option value="">全部</option></select><button class="btn-primary btn-sm" onclick="loadGroups()">刷新</button></div><div class="data-wrap" id="group-tbl"></div></div>`}
+/** 按关键字发现数据表填充下拉（多平台：qqbot / onebot 各自建表） */
+async function fillTablePicker(selId,keyword,preferred){
+  let sel=document.getElementById(selId);if(!sel)return null;
+  let ts=await getSafe(A+'/db/tables')||[];
+  let names=ts.map(t=>t.TABLE_NAME).filter(n=>n&&n.toLowerCase().includes(keyword));
+  if(!names.length){sel.innerHTML='<option value="">（暂无数据表）</option>';return null}
+  // H2 返回的表名为全大写，统一按小写比较，避免默认项选不中
+  let def=names.find(n=>n.toLowerCase()===String(preferred||'').toLowerCase())||names[0];
+  sel.innerHTML=names.map(n=>`<option value="${n}"${n===def?' selected':''}>${platLabel(n)}</option>`).join('');
+  return def;
+}
+/** 从表名推断所属平台，给出易读标签（表名大小写不敏感） */
+function platLabel(n){
+  let l=String(n).toLowerCase();
+  let p=l.includes('_qqbot')?'QQ 官方':l.includes('_onebot')?'OneBot':'框架';
+  return p+' · '+n;
+}
+/** 方向徽章：IN/OUT 有专属配色，框架内部 LOG 用 warn 色，其余降级为默认 */
+function dirBadge(d){
+  d=String(d||'');
+  let cls=d==='IN'||d==='OUT'?'badge-'+d:d==='LOG'?'badge-warn':'badge-off';
+  return `<span class="badge ${cls}">${e(d)}</span>`;
+}
+/** 通用表格渲染：列由后端返回，兼容任意平台的表结构 */
+function renderRows(box,d,empty){
+  if(!box)return;
+  if(!d||!d.rows||!d.rows.length){box.innerHTML='<div class="empty">'+(empty||'暂无数据')+'</div>';return}
+  box.innerHTML=`<table><thead><tr>${d.columns.map(c=>`<th>${e(c)}</th>`).join('')}</tr></thead><tbody>${d.rows.map(r=>`<tr>${d.columns.map(c=>`<td>${r[c]!=null?e(String(r[c])):'<span style="color:#ccc">-</span>'}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+}
+
+function groupHTML(){return`<div class="card"><h3>群列表</h3><div class="flex"><select id="grp-bot"><option value="">全部</option></select><select id="grp-tbl" onchange="loadGroupRows()"></select><button class="btn-primary btn-sm" onclick="loadGroups()">刷新</button></div><div class="data-wrap" id="group-tbl"></div></div>`}
 async function loadGroups(){
   let bots=await get(A+'/console/bots');document.getElementById('grp-bot').innerHTML='<option value="">全部</option>'+bots.map(b=>`<option value="${b.appId}">${b.botKey}</option>`).join('');
-  let r=await get(A+'/db/rows?table=xuanji_qqbot_group');
-  document.getElementById('group-tbl').innerHTML=r.rows.length?`<table><thead><tr><th>Bot</th><th>群 ID</th><th>群名</th><th>状态</th><th>删除</th><th>时间</th></tr></thead><tbody>${r.rows.map(r=>`<tr><td>${r.BOT_ID}</td><td>${r.GROUP_ID}</td><td>${r.GROUP_NAME||'-'}</td><td><span class="badge ${r.IS_DELETED==1?'badge-danger':'badge-on'}">${r.IS_DELETED==1?'已删除':'active'}</span></td><td>${r.IS_DELETED==1?'🗑':''}</td><td>${r.CREATE_TIME||''}</td></tr>`).join('')}</tbody></table>`:'<div class="empty">暂无</div>'
+  await fillTablePicker('grp-tbl','group','xuanji_qqbot_group');
+  await loadGroupRows();
 }
-function friendHTML(){return`<div class="card"><h3>好友列表</h3><div class="flex"><select id="fr-bot"><option value="">全部</option></select><button class="btn-primary btn-sm" onclick="loadFriends()">刷新</button></div><div class="data-wrap" id="friend-tbl"></div></div>`}
+async function loadGroupRows(){
+  let t=document.getElementById('grp-tbl')?.value,box=document.getElementById('group-tbl');
+  if(!t){renderRows(box,null,'暂无群数据表');return}
+  renderRows(box,await getSafe(A+'/db/rows?table='+encodeURIComponent(t)),'该表暂无数据');
+}
+function friendHTML(){return`<div class="card"><h3>好友列表</h3><div class="flex"><select id="fr-bot"><option value="">全部</option></select><select id="fr-tbl" onchange="loadFriendRows()"></select><button class="btn-primary btn-sm" onclick="loadFriends()">刷新</button></div><div class="data-wrap" id="friend-tbl"></div></div>`}
 async function loadFriends(){
   let bots=await get(A+'/console/bots');document.getElementById('fr-bot').innerHTML='<option value="">全部</option>'+bots.map(b=>`<option value="${b.appId}">${b.botKey}</option>`).join('');
-  let r=await get(A+'/db/rows?table=xuanji_qqbot_user');
-  document.getElementById('friend-tbl').innerHTML=r.rows.length?`<table><thead><tr><th>Bot</th><th>用户 ID</th><th>昵称</th><th>权限</th><th>删除</th></tr></thead><tbody>${r.rows.map(r=>`<tr><td>${r.BOT_ID}</td><td>${r.PLATFORM_USER_ID}</td><td>${r.NICKNAME||'-'}</td><td>${r.FRAMEWORK_ROLE||'-'}</td><td>${r.IS_DELETED==1?'🗑':''}</td></tr>`).join('')}</tbody></table>`:'<div class="empty">暂无</div>'
+  await fillTablePicker('fr-tbl','user','xuanji_qqbot_user');
+  await loadFriendRows();
+}
+async function loadFriendRows(){
+  let t=document.getElementById('fr-tbl')?.value,box=document.getElementById('friend-tbl');
+  if(!t){renderRows(box,null,'暂无用户数据表');return}
+  renderRows(box,await getSafe(A+'/db/rows?table='+encodeURIComponent(t)),'该表暂无数据');
 }
 
 // ── 消息监控 ──
 function monitorHTML(){return`<div class="card"><div class="sub-tabs" id="msub"></div><div id="mcnt"></div></div>`}
 function monitorRender(){
+  clearInterval(timer);
   document.getElementById('msub').innerHTML=`
     <a href="#" data-sub="group-msg" class="${subTab==='group-msg'?'active':''}">群聊消息</a>
     <a href="#" data-sub="c2c-msg" class="${subTab==='c2c-msg'?'active':''}">单聊消息</a>
+    <a href="#" data-sub="stream" class="${subTab==='stream'?'active':''}">全平台事件流</a>
     <a href="#" data-sub="realtime" class="${subTab==='realtime'?'active':''}">实时监控</a>`;
-  document.querySelectorAll('#msub a').forEach(a=>a.onclick=e=>{e.preventDefault();subTab=a.dataset.sub;monitorRender()});
+  document.querySelectorAll('#msub a').forEach(a=>a.onclick=ev=>{ev.preventDefault();subTab=a.dataset.sub;monitorRender()});
   if(subTab==='group-msg'){document.getElementById('mcnt').innerHTML=gmHTML();loadGMsgs()}
   if(subTab==='c2c-msg'){document.getElementById('mcnt').innerHTML=cmHTML();loadCMsgs()}
+  if(subTab==='stream'){document.getElementById('mcnt').innerHTML=streamHTML();loadStream(true);timer=setInterval(loadStream,3000)}
   if(subTab==='realtime'){document.getElementById('mcnt').innerHTML=rtHTML();initRT()}
+}
+/** 全平台事件流：读框架内存环形缓冲，QQ 与 OneBot 的收发都会落在这里 */
+function streamHTML(){return`<div class="flex" style="margin-bottom:8px"><label style="font-size:12px"><input type="checkbox" id="st-auto" checked>自动刷新(3s)</label><select id="st-dir" onchange="loadStream(true)"><option value="">全部方向</option><option value="IN">仅接收</option><option value="OUT">仅发送</option><option value="LOG">仅框架日志</option><option value="MSG">仅收发(隐藏日志)</option></select><button class="btn-primary btn-sm" onclick="loadStream(true)">刷新</button><span id="st-count" style="font-size:11px;color:var(--muted)"></span></div><div class="data-wrap"><table><thead><tr><th>时间</th><th>方向</th><th>用户</th><th>群</th><th>类型</th><th>内容</th><th>来源</th></tr></thead><tbody id="stb"></tbody></table></div>`}
+async function loadStream(force){
+  let tb=document.getElementById('stb');if(!tb)return;
+  if(!force&&tb.dataset.loaded==='1'&&!document.getElementById('st-auto')?.checked)return;
+  let d=await getSafe(A+'/console/events')||[];
+  let f=document.getElementById('st-dir')?.value||'';
+  if(f==='MSG')d=d.filter(v=>v.direction==='IN'||v.direction==='OUT');
+  else if(f)d=d.filter(v=>v.direction===f);
+  let c=document.getElementById('st-count');if(c)c.textContent=d.length+' 条';
+  tb.dataset.loaded='1';
+  tb.innerHTML=d.length?d.slice().reverse().map(v=>`<tr><td>${e(v.time||'')}</td><td>${dirBadge(v.direction)}</td><td>${e(v.user||'')}</td><td>${e(v.groupId||'')}</td><td>${e(v.type||'')}</td><td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${e(v.content)}">${e(v.content||'').substring(0,100)}</td><td style="font-size:10px;color:var(--muted)">${e(v.detail||'')}</td></tr>`).join(''):'<tr><td colspan="7" class="empty">暂无事件（收到消息后自动出现）</td></tr>';
 }
 function gmHTML(){return`<div class="data-wrap"><table><thead><tr><th>时间</th><th>方向</th><th>Bot</th><th>群</th><th>成员</th><th>类型</th><th>内容</th></tr></thead><tbody id="gmb"></tbody></table></div>`}
 async function loadGMsgs(){let d=await get(A+'/console/group-messages?size=80');document.getElementById('gmb').innerHTML=d.rows.map(r=>`<tr><td>${fmt(r.CREATE_TIME)}</td><td><span class="badge badge-${r.DIRECTION}">${r.DIRECTION}</span></td><td>${r.BOT_ID}</td><td>${r.GROUP_ID||''}</td><td>${r.MEMBER_ID||''}</td><td>${r.MSG_TYPE||''}</td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${e(r.CONTENT)}">${e(r.CONTENT||'').substring(0,80)}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">暂无</td></tr>'}
@@ -271,11 +345,16 @@ async function addBL(){await fetch(A+'/permission/blacklist/add?scope='+document
 async function delBL(id){await fetch(A+'/console/blacklist?id='+id,{method:'DELETE'});loadBL()}
 
 // ── 事件 ──
-function eventHTML(){return`<div class="card"><h3>事件日志</h3><div class="flex"><select id="ev-bot"><option value="">全部</option></select><button class="btn-primary btn-sm" onclick="loadEventLogs()">刷新</button></div><div class="data-wrap"><div id="ev-tbl"></div></div></div>`}
+function eventHTML(){return`<div class="card"><h3>事件日志 <span style="font-size:11px;font-weight:400;color:var(--muted)">（持久化事件表，按平台切换）</span></h3><div class="flex"><select id="ev-bot"><option value="">全部</option></select><select id="ev-tbl-pick" onchange="loadEventRows()"></select><button class="btn-primary btn-sm" onclick="loadEventLogs()">刷新</button></div><div class="data-wrap"><div id="ev-tbl"></div></div></div>`}
 async function loadEventLogs(){
   let bots=await get(A+'/console/bots');document.getElementById('ev-bot').innerHTML='<option value="">全部</option>'+bots.map(b=>`<option value="${b.appId}">${b.botKey}</option>`).join('');
-  let r=await get(A+'/db/rows?table=xuanji_qqbot_event');
-  document.getElementById('ev-tbl').innerHTML=r.rows.length?`<table><thead><tr><th>方向</th><th>Bot</th><th>类型</th><th>群</th><th>时间</th></tr></thead><tbody>${r.rows.map(r=>`<tr><td>${r.DIRECTION}</td><td>${r.BOT_ID}</td><td>${r.EVENT_TYPE}</td><td>${r.GROUP_ID||'-'}</td><td>${r.CREATE_TIME||''}</td></tr>`).join('')}</tbody></table>`:'<div class="empty">暂无</div>'
+  await fillTablePicker('ev-tbl-pick','event','xuanji_qqbot_event');
+  await loadEventRows();
+}
+async function loadEventRows(){
+  let t=document.getElementById('ev-tbl-pick')?.value,box=document.getElementById('ev-tbl');
+  if(!t){renderRows(box,null,'暂无事件表');return}
+  renderRows(box,await getSafe(A+'/db/rows?table='+encodeURIComponent(t)),'该表暂无数据');
 }
 
 // ── 日志 ──
@@ -290,17 +369,71 @@ async function loadLogs(){
 }
 
 // ── 数据库 ──
-function dbHTML(){return`<div class="card"><h3>数据���</h3><div class="flex"><select id="tb-pick"><option value="">选择表</option></select><button class="btn-primary btn-sm" onclick="loadRows()">查看</button><span style="font-size:11px;color:var(--muted)" id="rc"></span></div><div id="da" class="empty">选择一张表</div></div>`}
+function dbHTML(){return`<div class="card"><h3>数据库</h3><div class="flex"><select id="tb-pick"><option value="">选择表</option></select><button class="btn-primary btn-sm" onclick="loadRows()">查看</button><span style="font-size:11px;color:var(--muted)" id="rc"></span></div><div id="da" class="empty">选择一张表</div></div>`}
 async function loadDbPage(){let ts=await get(A+'/db/tables');document.getElementById('tb-pick').innerHTML='<option value="">选择表</option>'+ts.map(t=>`<option>${t.TABLE_NAME}</option>`).join('')}
 async function loadRows(){let t=document.getElementById('tb-pick').value;if(!t)return;try{document.getElementById('da').innerHTML='<div class="empty">加载中...</div>';let d=await get(A+'/db/rows?table='+t);if(!d.rows.length){document.getElementById('da').innerHTML='<div class="empty">暂无</div>';return}document.getElementById('rc').textContent=d.count+' 行';document.getElementById('da').innerHTML=`<div class="data-wrap"><table><thead><tr>${d.columns.map(c=>`<th>${c}</th>`).join('')}</tr></thead><tbody>${d.rows.map(r=>`<tr>${d.columns.map(c=>`<td>${r[c]!=null?r[c]:'<span style="color:#ccc">-</span>'}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`}catch(ex){document.getElementById('da').innerHTML='<div class="empty" style="color:var(--danger)">'+ex.message+'</div>'}}
 
 // ── 系统 ──
 function sysHTML(){return`<div class="card"><div id="sys-info"></div></div>`}
-async function loadSys(){let d=await get(A+'/console/status');document.getElementById('sys-info').innerHTML=`<table><tr><td>启动时间</td><td>${d.startTime}</td></tr><tr><td>运行时长</td><td>${d.uptime}</td></tr><tr><td>数据表</td><td>${d.tables}</td></tr><tr><td>内存</td><td>${d.memUsed} / ${d.memMax}</td></tr><tr><td>CPU</td><td>${d.cpuCores} 核 | ${d.threads} 线程 | 虚拟线程 ${d.virtualThreads||0}</td></tr><tr><td>DB</td><td>业务 ${d.dbSize||'-'} | 日志 ${d.logDbSize||'-'}</td></tr><tr><td>框架</td><td>Xuanji v1.0.0 / Spring Boot 4.0.6 / JDK 25</td></tr></table>`}
+async function loadSys(){
+  let d=await get(A+'/console/status'),ob=await getSafe(A+'/onebot/status');
+  let obTxt=ob?`<span class="badge badge-on">已启用</span> 反向WS ${ob.reverse.enabled?'开':'关'} · 正向WS ${ob.forward.enabled?'开':'关'} · 在线会话 ${ob.onlineCount}`:'<span class="badge badge-off">未启用</span> 设置 xuanji.onebot.enabled=true 后重启';
+  document.getElementById('sys-info').innerHTML=`<table><tr><td>启动时间</td><td>${d.startTime}</td></tr><tr><td>运行时长</td><td>${d.uptime}</td></tr><tr><td>数据表</td><td>${d.tables}</td></tr><tr><td>内存</td><td>${d.memUsed} / ${d.memMax}</td></tr><tr><td>CPU</td><td>${d.cpuCores} 核 | ${d.threads} 线程 | 虚拟线程 ${d.virtualThreads||0}</td></tr><tr><td>DB</td><td>业务 ${d.dbSize||'-'} | 日志 ${d.logDbSize||'-'}</td></tr><tr><td>QQ 官方适配器</td><td><span class="badge badge-on">内置</span></td></tr><tr><td>OneBot 适配器</td><td>${obTxt}</td></tr><tr><td>框架</td><td>Xuanji v1.0.0 / Spring Boot 4.0.6 / JDK 25</td></tr></table>`}
 
 function e(s){return(String(s||'')).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 function fmt(v){if(!v)return'';let s=String(v);return s.length>19?s.substring(0,16)+'...':s.replace('T',' ')}
 
+
+function onebotHTML(){
+  return `<div class="card"><h3>OneBot 适配器状态</h3>
+    <div id="ob-status" class="empty">加载中…</div>
+    <div class="flex" style="margin-top:12px"><button class="btn-primary btn-sm" onclick="loadOnebot()">刷新</button></div>
+  </div>
+  <div class="card" style="margin-top:14px"><h3>接入地址 <span style="font-size:11px;font-weight:400;color:var(--muted)">（填进 Napcat 的「反向 WS」配置）</span></h3><div id="ob-connect" class="empty">加载中…</div></div>
+  <div class="card" style="margin-top:14px"><h3>已连接会话</h3><div id="ob-sessions" class="empty">暂无</div></div>
+  <div class="card" style="margin-top:14px"><h3>主动发送测试</h3>
+    <div class="flex" style="flex-wrap:wrap;gap:8px">
+      <input id="ob-self" placeholder="selfId(留空=任一)">
+      <select id="ob-type"><option value="group">群</option><option value="private">私聊</option></select>
+      <input id="ob-target" placeholder="群号/用户ID">
+      <input id="ob-text" placeholder="文本内容" style="flex:1;min-width:160px">
+      <button class="btn-primary btn-sm" onclick="obSend()">发送</button>
+    </div>
+    <div id="ob-send-result" style="font-size:11px;color:var(--muted);margin-top:6px"></div>
+  </div>`;
+}
+async function loadOnebot(){
+  let box=document.getElementById('ob-status');
+  let s=await getSafe(A+'/onebot/status');
+  if(!s){
+    box.innerHTML='<div class="empty">OneBot 适配器未启用 —— 在 application.yml 设置 <code>xuanji.onebot.enabled: true</code> 后重启应用</div>';
+    document.getElementById('ob-connect').innerHTML='<div class="empty">启用适配器后显示接入地址</div>';
+    document.getElementById('ob-sessions').innerHTML='<div class="empty">-</div>';
+    return;
+  }
+  let rev=s.reverse,fwd=s.forward;
+  box.innerHTML=`<div class="kv"><div class="kl">适配器</div><div><span class="badge badge-on">已启用</span></div></div>
+    <div class="kv"><div class="kl">反向WS</div><div>${rev.enabled?'开启':'关闭'} · 路径 <code>${e(rev.path)}</code> · ${rev.accessTokenSet?'<span class="badge badge-on">已设令牌</span>':'<span class="badge badge-off">无令牌·仅限本机</span>'}</div></div>
+    <div class="kv"><div class="kl">正向WS</div><div>${fwd.enabled?'开启 → '+e(fwd.url):'关闭'}</div></div>
+    <div class="kv"><div class="kl">在线会话</div><div>${s.onlineCount} 个</div></div>`;
+  let wsUrl='ws://'+location.host+(rev.path||'/onebot/ws');
+  document.getElementById('ob-connect').innerHTML=rev.enabled
+    ?`<div class="kv"><div class="kl">WS 地址</div><div><code style="user-select:all">${e(wsUrl)}</code></div></div>
+      <div class="kv"><div class="kl">令牌</div><div>${rev.accessTokenSet?'已配置，Napcat 侧 <code>token</code> 需填相同值':'<span style="color:var(--danger)">未配置 —— 公网暴露前务必设置 access-token</span>'}</div></div>
+      <div class="kv"><div class="kl">Napcat 配置</div><div style="font-size:11px;line-height:1.6">在 Napcat 的 <code>onebot11.json</code> 里加一条 <code>wsReverses</code>：<br><code style="user-select:all">{"enable":true,"url":"${e(wsUrl)}","token":"与框架一致"}</code><br>并设 <code>"messagePostFormat":"array"</code>。若框架不在同机，把 <code>${e(location.hostname)}</code> 换成框架所在主机可达的 IP。</div></div>`
+    :'<div class="empty">反向 WS 已关闭，请设置 xuanji.onebot.reverse.enabled=true</div>';
+  document.getElementById('ob-sessions').innerHTML=s.sessions&&s.sessions.length
+    ?s.sessions.map(x=>`<div class="bot-row"><div style="flex:1"><div class="name">selfId=${e(String(x.selfId))} <span class="badge badge-${x.open?'on':'off'}">${e(x.direction||'')}${x.open?'·在线':'·离线'}</span></div><div class="meta">可直接被 @GroupMessage / @PrivateMessage 插件响应</div></div></div>`).join('')
+    :'<div class="empty">暂无连接（Napcat 未连入）</div>';
+}
+async function obSend(){
+  let r=document.getElementById('ob-send-result');
+  try{
+    let res=await post(A+'/onebot/send',{selfId:document.getElementById('ob-self').value,type:document.getElementById('ob-type').value,target:document.getElementById('ob-target').value,text:document.getElementById('ob-text').value});
+    r.textContent = res.ok?'发送成功':'发送失败: '+(res.error||'未知');
+    r.style.color = res.ok?'var(--ok)':'var(--danger)';
+  }catch(e){ r.textContent='请求失败: '+e.message; r.style.color='var(--danger)'; }
+}
 let wiz={step:0,h:document.getElementById('wizard')};
 async function checkWizard(){try{let s=await get(A+'/setup/status');if(!s.completed){wiz.step=s.step||0;showWizard()}}catch(e){}}
 function showWizard(){document.getElementById('wizard').classList.add('on');renderStep()}

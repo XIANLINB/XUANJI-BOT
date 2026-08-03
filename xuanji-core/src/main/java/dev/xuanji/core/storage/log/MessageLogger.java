@@ -1,5 +1,6 @@
 package dev.xuanji.core.storage.log;
 
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -11,7 +12,7 @@ public class MessageLogger {
 
     private static JdbcTemplate logJdbc;
 
-    public MessageLogger(JdbcTemplate logJdbc) {
+    public MessageLogger(@Qualifier("logJdbcTemplate") JdbcTemplate logJdbc) {
         MessageLogger.logJdbc = logJdbc;
     }
 
@@ -51,5 +52,24 @@ public class MessageLogger {
     private static String truncate(String s, int max) {
         if (s == null) return null;
         return s.length() > max ? s.substring(0, max) : s;
+    }
+
+    // ==================== OneBot 流水（同构 QQ） ====================
+
+    public static void onebotGroupMessage(String direction, String botId, String groupId,
+                                           String memberId, String msgType, String content, String rawJson) {
+        if (logJdbc == null) return;
+        try {
+            logJdbc.update("INSERT INTO xuanji_onebot_group_message (direction,bot_id,group_id,member_id,msg_type,content,raw_json) VALUES (?,?,?,?,?,?,?)",
+                    direction, botId, groupId, memberId, msgType, truncate(content, 4000), rawJson);
+        } catch (Exception ignored) {}
+    }
+
+    public static void onebotEvent(String direction, String botId, String eventType, String groupId, String rawJson) {
+        if (logJdbc == null) return;
+        try {
+            logJdbc.update("INSERT INTO xuanji_onebot_event (direction,bot_id,event_type,group_id,raw_json) VALUES (?,?,?,?,?)",
+                    direction, botId, eventType, groupId, rawJson);
+        } catch (Exception ignored) {}
     }
 }

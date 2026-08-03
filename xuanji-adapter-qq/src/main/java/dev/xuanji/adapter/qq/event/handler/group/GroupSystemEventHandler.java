@@ -54,8 +54,8 @@ public class GroupSystemEventHandler implements EventHandler {
                 case "GROUP_DEL_ROBOT" -> {
                     try {
                         // 有记录则标记软删除，无记录则插入一条已删除记录
-                        jdbc.update("MERGE INTO xuanji_qqbot_group (bot_id, group_id, group_name, status, is_deleted) KEY(bot_id,group_id) VALUES (?,?,?,?,?)",
-                                appId, groupOpenid, "", "removed", 1);
+                        jdbc.update("MERGE INTO xuanji_qqbot_group (bot_id, group_id, status, is_deleted) KEY(bot_id,group_id) VALUES (?,?,?,?)",
+                                appId, groupOpenid, "removed", 1);
                     } catch (Exception ex) {
                         // 表字段可能还没建好（旧库），只记事件
                         log.debug("群表更新失败(可能是旧库): {}", ex.getMessage());
@@ -68,7 +68,7 @@ public class GroupSystemEventHandler implements EventHandler {
                 }
                 case "GROUP_MEMBER_REMOVE" -> {
                     try {
-                        jdbc.update("DELETE FROM xuanji_qqbot_group_member WHERE bot_id=? AND group_id=? AND member_id=?",
+                        jdbc.update("UPDATE xuanji_qqbot_group_member SET is_deleted=1 WHERE bot_id=? AND group_id=? AND member_id=?",
                                 appId, groupOpenid, memberOpenid);
                     } catch (Exception ex) {
                         log.debug("成员表删除失败: {}", ex.getMessage());
@@ -87,14 +87,14 @@ public class GroupSystemEventHandler implements EventHandler {
 
     private void upsertGroup(String appId, String groupId, String status) {
         try {
-            jdbc.update("MERGE INTO xuanji_qqbot_group (bot_id, group_id, group_name, status) KEY(bot_id,group_id) VALUES (?,?,?,?)",
-                    appId, groupId, "", status);
+            jdbc.update("MERGE INTO xuanji_qqbot_group (bot_id, group_id, status) KEY(bot_id,group_id) VALUES (?,?,?)",
+                    appId, groupId, status);
         } catch (Exception ignored) {}
     }
 
     private void upsertMember(String appId, String groupId, String memberId) {
         try {
-            jdbc.update("MERGE INTO xuanji_qqbot_group_member (bot_id, group_id, member_id) KEY(bot_id,group_id,member_id) VALUES (?,?,?)",
+            jdbc.update("MERGE INTO xuanji_qqbot_group_member (bot_id, group_id, member_id, is_deleted) KEY(bot_id,group_id,member_id) VALUES (?,?,?,0)",
                     appId, groupId, memberId);
         } catch (Exception ignored) {}
     }

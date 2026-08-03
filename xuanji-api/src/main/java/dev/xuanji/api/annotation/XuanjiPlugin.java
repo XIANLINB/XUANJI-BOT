@@ -25,6 +25,8 @@ public @interface XuanjiPlugin {
     String[] dependsOn() default {};
     /** 消息触发频率限制（秒，0=不限制，5=同一用户5秒内仅触发一次） */
     int rateLimit() default 0;
+    /** 插件级平台默认（空=全部平台）；方法级 @GroupMessage(platforms=...) 可覆盖 */
+    String[] platforms() default {};
 
     enum Perm {
         /** 联网（调用外部 API） */
