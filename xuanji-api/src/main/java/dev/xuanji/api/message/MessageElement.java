@@ -38,6 +38,22 @@ public sealed interface MessageElement
         default MediaForm form() {
             return MediaRefResolverHolder.resolve(rawRef(), mediaType()).form();
         }
+
+        /**
+         * 按平台解析并<b>按需下载落盘</b>（P1-D convertToFilePath）：
+         * URL 形态且框架媒体下载已启用时下载到本地，返回 FILE_PATH 形态的 MediaRef；
+         * 未启用 / 非 URL / 下载失败则返回普通解析结果（不抛异常）。
+         *
+         * <p>空间控制：仅显式调用才下载；同内容全框架一份（内容哈希去重）；TTL + 配额自动清理。
+         */
+        default MediaRef resolveFile(String platform) {
+            return MediaRefResolverHolder.resolveFile(platform, rawRef(), mediaType());
+        }
+
+        /** 带 bot 上下文的按需下载（开关判定：bot 级 &gt; 全局）。 */
+        default MediaRef resolveFile(String platform, String botKey) {
+            return MediaRefResolverHolder.resolveFile(platform, rawRef(), mediaType(), botKey);
+        }
     }
 
     /** 纯文本 */

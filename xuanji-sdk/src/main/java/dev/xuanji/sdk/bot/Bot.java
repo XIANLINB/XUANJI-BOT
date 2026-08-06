@@ -18,6 +18,9 @@ package dev.xuanji.sdk.bot;
  */
 public abstract class Bot {
 
+    /** 平台端机器人账号 ID（robotId / appId）；子类可覆写，未知返回 null。 */
+    public String selfId() { return null; }
+
     // ==================== 被动回复（reply* 系列） ====================
 
     public abstract void reply(String text);

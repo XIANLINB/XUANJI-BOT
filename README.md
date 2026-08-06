@@ -1,178 +1,175 @@
-# 璇玑 (XuanJi) QQ 机器人开发框架
+# 璇玑 XuanJi · 机器人框架
 
-> 基于 Java + Spring Boot 的 QQ 官方机器人开发框架，处于早期开发阶段。
-
----
-
-## 项目简介
-
-璇玑是一个面向 QQ 官方 Bot API 的 Java 机器人开发框架，目标是提供简洁的事件处理、消息发送和多机器人管理能力。当前版本聚焦 QQ 官方接口的连接与消息处理，未来会逐步演进为插件化、跨平台的机器人框架。
-
-**注意**：本项目仍在早期开发中，API 和模块结构可能频繁变化，不适合直接用于生产环境。
+> 一个开箱即用的多平台机器人框架 —— QQ 官方 Bot · OneBot · 插件化 · 可视化控制台
+>
+> **小白也能用**：下载 → 双击启动 → 浏览器配置 → 完事。不需要看任何代码。
 
 ---
 
-## 技术栈
+## ✨ 简介
 
-| 层级 | 技术 |
-|------|------|
-| 语言 | Java 17 |
-| 框架 | Spring Boot 4.0.6 |
-| 构建 | Maven |
-| 协议 | QQ 官方 Bot API（WebSocket / Webhook） |
-| 工具 | Lombok、Jackson、java.net.http |
+璇玑（XuanJi）是基于 **Java 21 + Spring Boot** 的机器人开发框架，参考 AstrBot / OneBot 的设计理念：
 
----
-
-## 当前能力
-
-- **双连接模式**：支持 WebSocket 长连接与 Webhook 回调两种方式接入 QQ 官方 Bot API。
-- **事件分发**：基于 Spring 依赖注入自动扫描 `@EventMapping` 注解的事件处理器。
-- **消息发送**：封装单聊 / 群聊的文本、Markdown、键盘按钮、Ark 模板、图片、语音、视频消息发送。
-- **AccessToken 管理**：自动获取、缓存、刷新 QQ 开放平台 AccessToken，支持 401 自动重试。
-- **多机器人配置**：通过 `xuanji-robots.yml` 配置多个机器人实例。
-- **Ed25519 签名验证**：Webhook 模式下支持回调地址验证与事件签名验证。
+- **多平台**：QQ 官方 Bot API（WebSocket / Webhook 双模式）+ OneBot（NapCat / Lagrange 等）
+- **多机器人**：一个框架同时管理 N 个机器人，互相独立、各自落库
+- **插件化**：PF4J 插件体系，`@Command` 注解一行注册命令，支持**热加载**（改插件不重启）
+- **可视化控制台**：内置 Web 管理后台 —— 机器人管理、消息监控、健康指标、插件管理、权限管理、数据库浏览、运行日志，全中文界面
+- **三级配置**：全局 / 机器人 / 群 三个粒度，改完即时生效
 
 ---
 
-## 快速开始
+## 🚀 快速开始（小白向）
 
-### 环境要求
+### 方式一：直接使用（无需 Java 环境）
 
-- JDK 17+
-- Maven 3.8+
-- 一个已注册的 QQ 官方机器人（获取 `app-id` 与 `client-secret`）
+1. 下载发布包（自带运行环境，解压即用，无需安装 JDK）
+2. 双击 `启动.bat`（Windows）或运行 `./start.sh`（Linux/macOS）
+3. 浏览器打开 **http://localhost:8668/xuanji/console/**
+4. 首启引导 → 填入你的 QQ 机器人 AppID / AppSecret / Token → 保存
+5. 完成！机器人自动上线，群里就能聊了
 
-### 1. 配置机器人
+> 需要插件？把插件 `xxx.jar` 放进 `plugins/` 目录，控制台点「热加载」即可，**不用重启框架**。
 
-编辑 `src/main/resources/xuanji-robots.yml`：
-
-```yaml
-xuanji:
-  webhook-url: "your-domain.com"
-  is-new-openbot: true
-  ignore-bot-messages: false
-
-  robots:
-    bot1:
-      app-id: "你的 AppID"
-      client-secret: "你的 AppSecret"
-      is-sandbox: false
-      connection-method: websocket
-```
-
-- `connection-method: websocket`：框架主动连接 QQ 网关。
-- `connection-method: webhook`：QQ 平台向 `https://{webhook-url}/webhook/{app-id}` 推送事件。
-
-### 2. 编译运行
+### 方式二：源码运行（开发者）
 
 ```bash
-./mvnw clean package -DskipTests
-java -jar target/xuanji-bot-1.0.0.jar
+# 环境：JDK 21+、Maven 3.9+
+mvn clean package -DskipTests
+cd xuanji-starter
+java -jar target/xuanji-starter-1.0.0-SNAPSHOT.jar
 ```
 
-### 3. 测试命令
+IDEA 直接运行 `dev.xuanji.starter.XuanjiApplication` 主类。
 
-启动后，在 QQ 群中 @ 机器人或给机器人发私信，发送以下命令测试：
+### 控制台
 
-```
-文本 | markdown | 按钮 | ark23 | ark24 | ark37 | 图片 | 语音 | 视频
-```
+| 页面 | 功能 |
+|---|---|
+| 仪表盘 | 机器人概览 / 消息趋势 / 平台状态 |
+| 机器人 | 添加 / 删除机器人（WebSocket / Webhook） |
+| 消息 | 群消息 / 私聊消息监控（收/发方向） |
+| 事件 | 群事件 / 系统事件流 |
+| 插件 | 插件列表 / 启停 / 绑定机器人 / **热加载** |
+| 权限 | 主人管理 / 黑名单（群级+用户级） |
+| 运行健康 | 熔断状态 / WebSocket 连接 / 慢阶段指标 |
+| 运行设置 | 全局 / 机器人 / 群 三级配置 |
+| 数据库 | 浏览框架库表 |
+| 运行日志 | 实时日志查看 |
 
 ---
 
-## 项目结构
+## 🧩 插件开发（开发者）
 
-```
-xuanji/
-├── src/main/java/com/qunxing/qq_bot_xuanji/
-│   ├── QqBotXuanjiApplication.java      # 启动类
-│   ├── common/                          # 公共工具与配置
-│   │   ├── config/                      # 配置类
-│   │   ├── dto/                         # 事件 DTO
-│   │   ├── enums/                       # 枚举
-│   │   ├── exception/                   # 异常处理
-│   │   └── result/                      # 统一响应
-│   ├── core/                            # QQ 平台连接与 API 层
-│   │   ├── api/                         # QQ OpenAPI 调用、消息发送
-│   │   ├── model/                       # 机器人与环境模型
-│   │   ├── websocket/                   # WebSocket 连接管理
-│   │   └── webhook/                     # Webhook 回调处理
-│   ├── event/                           # 事件系统
-│   │   ├── EventDispatcher.java         # 事件分发器
-│   │   ├── EventHandler.java            # 处理器接口
-│   │   ├── EventMapping.java            # 事件映射注解
-│   │   └── handler/                     # 具体事件处理器
-│   │       ├── c2c/                     # 单聊消息
-│   │       ├── group/                   # 群聊消息
-│   │       └── guild/                   # 频道事件
-│   ├── registry/                        # 机器人注册表与 Token 管理
-│   └── utils/                           # 消息构建器与工具类
-├── src/main/resources/
-│   ├── application.yml                  # 应用配置
-│   └── xuanji-robots.yml                # 机器人配置
-├── docs/
-│   └── xuanji-framework-full-design.md  # 框架总体设计文档（未来架构）
-├── pom.xml
-└── README.md
-```
-
----
-
-## 核心模块说明
-
-### 事件处理
-
-事件处理器实现 `EventHandler` 接口，并通过 `@EventMapping` 声明处理的事件类型：
+### 最小插件
 
 ```java
-@Component
-@EventMapping({"GROUP_MESSAGE_CREATE", "GROUP_AT_MESSAGE_CREATE"})
-public class MyGroupHandler implements EventHandler {
-    @Override
-    public String getEventType() { return "GROUP_MESSAGE_EVENT"; }
+package my.plugin;
 
-    @Override
-    public void handle(Long robotId, String envType, JSONObject data) {
-        // 处理事件
+import dev.xuanji.api.annotation.*;
+import dev.xuanji.api.plugin.XuanjiPluginBase;
+import org.pf4j.PluginWrapper;
+
+public class MyPlugin extends XuanjiPluginBase {
+
+    public MyPlugin(PluginWrapper wrapper) { super(wrapper); }
+
+    @XuanjiPlugin(id = "my-plugin", name = "我的插件", version = "1.0.0",
+            author = "我", description = "示例插件", rateLimit = 0)
+    public static class Commands {
+
+        @Command("ping")
+        public String ping() {
+            return "pong!";
+        }
+
+        @Command(value = "hello", startWith = "hello")
+        public String hello(@Arg("名字") String name) {
+            return "你好, " + name + "!";
+        }
     }
 }
 ```
 
-### 消息发送
+### @Command 语法糖
 
-通过注入 `MessageSender` 发送消息，当前事件上下文（robotId / envType）会自动从 `ThreadLocal` 获取：
+| 用法 | 说明 |
+|---|---|
+| `@Command("ping")` | 群聊 + 私聊都注册（BOTH） |
+| `@Command(value="签到", scope=GROUP, at=AtMode.NEED)` | 仅群聊 + 必须 @机器人 触发 |
+| `@Command(scope=GROUP, startWith="!")` | 感叹号前缀命令 |
+| `@Command(scope=GROUP, roles={"owner","admin"})` | 权限过滤（群主/管理员） |
+| `@Command(value="媒体", media=NEED, mediaTypes={IMAGE,VOICE,VIDEO})` | **媒体订阅**：纯图片/语音/视频消息无需命令词直接命中 |
+| `@Arg("名字") String name` | 参数注入（自动剥掉命令词） |
+
+### 事件 / 回复 API
 
 ```java
-messageSender.sendGroupText(groupOpenid, "你好！", msgId);
-messageSender.sendC2cMarkdown(openid, markdown, keyboard, msgId);
+// 方法可注入：Bot、GroupMessageEvent、PrivateMessageEvent
+@Command(value = "信息", scope = Command.Scope.GROUP)
+public void botInfo(Bot bot) {
+    bot.reply("群数量: " + bot.getGroupCount() + " 好友: " + bot.getUserCount());
+}
+
+// 富媒体回复
+bot.replyMarkdown(Markdown.create().h2("标题").text("**加粗**").build());
+bot.replyImage("https://example.com/pic.jpg");
+bot.replyMarkdown(Markdown.create().text("带按钮").build(),
+    Keyboard.create().row().btn("sign", "签到", "签到").endRow().build());
+
+// 读取收到的媒体（框架已自动下载 → FILE_PATH 形态）
+@Command(scope = Command.Scope.GROUP, media = MediaMode.NEED, mediaTypes = {MediaType.IMAGE})
+public void onImage(GroupMessageEvent e, Bot bot) {
+    for (MessageElement.Media m : e.getChain().medias()) {
+        var ref = m.resolve(e.getPlatform());   // form: FILE_PATH / URL / ...
+        bot.reply("媒体: " + ref.form() + " → " + ref.raw());
+    }
+}
 ```
 
-### 多机器人管理
+### 打包与热加载
 
-`RobotRegistry` 在内存中维护机器人配置，`QqBotWsManager` 负责 WebSocket 连接的启动、停止、健康检查和自动重连。
+```bash
+mvn package -pl xuanji-plugin-demo -am -DskipTests   # 打包（-am 必加：连带构建依赖）
+Copy-Item xuanji-plugin-demo\target\*.jar plugins\   # 放入插件目录
+```
 
----
-
-## 配置说明
-
-| 配置项 | 说明 |
-|--------|------|
-| `xuanji.webhook-url` | Webhook 模式下的回调域名 |
-| `xuanji.is-new-openbot` | 是否使用新版 QQ 开放平台（`api.bot.qq.com`） |
-| `xuanji.ignore-bot-messages` | 是否忽略机器人自己发送的消息 |
-| `xuanji.robots.{id}.app-id` | QQ 开放平台 AppID |
-| `xuanji.robots.{id}.client-secret` | QQ 开放平台 AppSecret |
-| `xuanji.robots.{id}.is-sandbox` | 是否沙箱环境 |
-| `xuanji.robots.{id}.connection-method` | `websocket` 或 `webhook` |
-
----
----
-
-## 开源协议
-
-本项目采用 [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)。
+控制台「插件」页 → **热加载** → 新代码生效，**无需重启框架**。
 
 ---
 
-*当前版本：v0.1（早期开发中）*
+## 🗂 目录结构
+
+```
+xuanji/
+├── xuanji-api/              # 插件 API（注解、消息元素、媒体五态）
+├── xuanji-sdk/              # SDK 抽象（Bot / 事件）
+├── xuanji-core/             # 核心内核（事件分发 / 插件管理 / 权限 / 存储）
+├── xuanji-adapter-qqbot/    # QQ 官方适配器（WS + Webhook）
+├── xuanji-adapter-onebot/   # OneBot 适配器
+├── xuanji-console-server/   # 控制台后端 API
+├── xuanji-console/          # 控制台前端（Vue3 + Naive UI）
+├── xuanji-starter/          # 启动器（主类）
+├── xuanji-plugin-demo/      # 演示插件
+├── plugins/                 # 插件目录（.jar 放这里）
+└── data/                    # 运行数据（数据库 / 媒体 / 配置，勿删）
+```
+
+---
+
+## 📚 文档
+
+| 文档 | 说明 |
+|---|---|
+| `docs/数据库升级兼容指南.md` | 升级不丢数据的机制与开发铁律 |
+| `docs/acceptance-test-guide.md` | 验收测试指南 |
+| `docs/permission-system.md` | 权限系统（主人/黑名单/等级矩阵） |
+| `docs/onebot-napcat-guide.md` | OneBot + NapCat 接入指南 |
+| `docs/xuanji-framework-full-design.md` | 框架完整设计 |
+| `docs/qqbot-message-examples.md` | QQ 消息报文示例 |
+| `docs/open/` | QQ 官方 API 文档（采集） |
+
+---
+
+## 📄 开源协议
+
+[Apache License 2.0](LICENSE)

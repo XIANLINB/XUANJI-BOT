@@ -166,10 +166,10 @@ public class GroupMessageHandler implements EventHandler {
                     appId, groupOpenid, memberOpenid,
                     "text", content, data.toString());
 
-            // 事件注解指令调度
+            // 事件注解指令调度（传入 appId 让框架在消息链解析时按需下载媒体）
             var xjBot = botFactory.group(groupOpenid, msgId, appId);
                 CommandRegistry.setContext(botKey, groupOpenid, msgId, memberOpenid,
-                        sdkEvent(event, data), xjBot, "qq");
+                        sdkEvent(event, data, appId), xjBot, "qq");
             try {
                 // 权限已在 Pipeline 的 WhitelistStage(20) 统一裁决，此处不再内联检查
                 String cmdResult = commandRegistry.executeGroupMessage(content);
@@ -230,10 +230,11 @@ public class GroupMessageHandler implements EventHandler {
         } catch (Exception ex) { return null; }
     }
 
-    /** 构建 SDK 事件（消息链直塞：QQ 报文经 QqMessageConverter 解析后直塞 chain/hasAttachments，媒体订阅可命中）。 */
-    private static dev.xuanji.sdk.event.GroupMessageEvent sdkEvent(GroupMessageEvent raw, ObjectNode data) {
+    /** 构建 SDK 事件（消息链直塞：QQ 报文经 QqMessageConverter 解析后直塞 chain/hasAttachments，媒体订阅可命中）。
+     *  框架层按需下载：传入 appId，URL 形态的 media 在解析时自动下载落盘（开关在 xuanji_config/bot_setting）。 */
+    private static dev.xuanji.sdk.event.GroupMessageEvent sdkEvent(GroupMessageEvent raw, ObjectNode data, String appId) {
         dev.xuanji.api.message.MessageChain chain =
-                dev.xuanji.adapter.qqbot.converter.QqMessageConverter.fromQqPayload(data.toString());
+                dev.xuanji.adapter.qqbot.converter.QqMessageConverter.fromQqPayload(data.toString(), appId);
         return new dev.xuanji.sdk.event.GroupMessageEvent.Builder()
                 .messageId(raw.getId())
                 .content(raw.getContent())

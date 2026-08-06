@@ -37,7 +37,7 @@ public final class OneBotEventConverter {
         EventType type = OneBotEventConverter.mapEventType(raw, postType);
         XuanjiUser sender = OneBotEventConverter.extractUser(raw);
         XuanjiGroup group = OneBotEventConverter.extractGroup(raw);
-        MessageChain message = "message".equals(postType) || "message_sent".equals(postType) ? OneBotMessageConverter.toChain(raw.path("message")) : null;
+        MessageChain message = "message".equals(postType) || "message_sent".equals(postType) ? OneBotMessageConverter.toChain(raw.path("message"), bot.selfId()) : null;
         String msgId = raw.hasNonNull("message_id") ? raw.get("message_id").asText() : null;
         return new BotEvent(OneBotEventConverter.buildEventId(raw), type, bot, sender, group, message != null && !message.elements().isEmpty() ? message : null, msgId, raw, rawEventType, "PRODUCTION");
     }

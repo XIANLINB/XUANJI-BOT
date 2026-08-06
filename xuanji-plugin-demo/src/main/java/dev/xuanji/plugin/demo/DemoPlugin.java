@@ -36,12 +36,12 @@ public class DemoPlugin extends XuanjiPluginBase {
     }
 
     @XuanjiPlugin(id = "demo-plugin", name = "演示插件", version = "1.1.0",
-        author = "XuanJi Team", description = "展示璇玑 SDK 全部能力（@Command 语法糖）", rateLimit = 5)
+        author = "XuanJi Team", description = "展示璇玑 SDK 全部能力（@Command 语法糖）", rateLimit = 0)
     public static class Commands {
 
         // ===== G2: BOTH 纯文本命令（无事件参数，群聊+私聊都注册）=====
         @Command("ping")
-        public String ping() { return "pong! (scope=BOTH)"; }
+        public String ping() { return "修改pong! (scope=BOTH)!"; }
 
         // ===== G5: @Arg 注入（hello 后的剩余文本作为「名字」）=====
         @Command(value = "hello", startWith = "hello")
@@ -68,8 +68,8 @@ public class DemoPlugin extends XuanjiPluginBase {
         }
 
         // ===== G4+G7: 媒体订阅（纯图片/语音/视频消息，content 为空也能命中）=====
-        // 注意：媒体订阅命令不能设 cmd——纯图片消息 content="" 时 cmd 匹配必然 miss；
-        // 只靠 media=NEED + mediaTypes 订阅（懒解析：NEED 只判 hasAttachments，声明 mediaTypes 才解析链）
+        // 媒体下载由框架层自动完成（开关在运行设置 → 全局/机器人配置），插件无需关心。
+        // m.resolve(platform) 拿到的 form 直接是 FILE_PATH（下载成功）或 URL（失败/未启用）。
         @Command(scope = Command.Scope.GROUP,
                 media = MediaMode.NEED, mediaTypes = {MediaType.IMAGE, MediaType.VOICE, MediaType.VIDEO})
         public void onMedia(GroupMessageEvent e, Bot bot) {

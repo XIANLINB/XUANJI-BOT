@@ -8,8 +8,14 @@ import dev.xuanji.api.message.MessageElement;
 
 /**
  * QQ 消息转换器 — 统一 MessageChain → QQ 平台可发送报文。
+ * <p>v2（2026-08-06 14:29）：框架层媒体自动下载——{@link #fromQqPayload(String, String)} 在构造
+ * chain 时对 URL 形态 media 自动落盘（开关在运行设置，bot 级 &gt; 全局）。
  */
 public final class QqMessageConverter {
+
+    static {
+        System.out.println("[媒体转换] QqMessageConverter v2 已加载（框架层自动下载）");
+    }
 
     private QqMessageConverter() {}
 
@@ -90,6 +96,19 @@ public final class QqMessageConverter {
      * 保证 {@code mediaTypes=IMAGE} 过滤器与日志口径一致（P1-D 铁律）。
      */
     public static MessageChain fromQqPayload(String raw) {
+        return fromQqPayload(raw, null);
+    }
+
+    /**
+     * 解析 QQ 原始报文 → 消息链。下载/落盘按需在框架层完成（<b>无需插件调 resolveFile</b>）：
+     * 若 {@code appId} 非空且媒体下载开关已开（全局 / 该 bot），URL 形态的 media 会<b>自动</b>
+     * 下载到本地，构造时直接用 FILE_PATH（form 由字符串前缀自动识别）。
+     * 下载失败/未启用/非法 URL → 保持 URL 形态兜底，绝不影响消息处理。
+     *
+     * @param raw   QQ 原始报文 JSON
+     * @param appId 机器人 appId（用于 bot 级下载开关；null = 不做下载）
+     */
+    public static MessageChain fromQqPayload(String raw, String appId) {
         if (raw == null || raw.isBlank()) return MessageChain.EMPTY;
         try {
             ObjectNode node = (ObjectNode) Json.parse(raw);
@@ -102,7 +121,7 @@ public final class QqMessageConverter {
                     if (!content.asText().isEmpty()) b.text(content.asText());
                 } else if (content.isArray()) {
                     for (var seg : content) {
-                        if (seg instanceof ObjectNode so) parseSegment(b, so);
+                        if (seg instanceof ObjectNode so) parseSegment(b, so, appId);
                     }
                 }
             }
@@ -116,11 +135,13 @@ public final class QqMessageConverter {
                     String filename = ao.path("filename").asText(null);
                     long size = ao.path("size").asLong(0);
                     var kind = dev.xuanji.adapter.qqbot.util.MediaKind.resolve(null, filename != null ? filename : url);
+                    // 框架层按需下载：URL → 尝试落盘，成功就改用 FILE_PATH 形态构造
+                    String rawRef = autoDownload(url, kind.toMediaType(), appId);
                     switch (kind) {
-                        case IMAGE -> b.add(new MessageElement.Image(url, null, 0, 0, size));
-                        case VOICE -> b.add(new MessageElement.Voice(url, 0));
-                        case VIDEO -> b.add(new MessageElement.Video(url));
-                        default -> b.add(new MessageElement.File(url, filename, size));
+                        case IMAGE -> b.add(new MessageElement.Image(rawRef, null, 0, 0, size));
+                        case VOICE -> b.add(new MessageElement.Voice(rawRef, 0));
+                        case VIDEO -> b.add(new MessageElement.Video(rawRef));
+                        default -> b.add(new MessageElement.File(rawRef, filename, size));
                     }
                 }
             }
@@ -131,7 +152,7 @@ public final class QqMessageConverter {
     }
 
     /** QQ 段数组（{type, data}）解析 — 防御式，未知段忽略。 */
-    private static void parseSegment(MessageChain.Builder b, ObjectNode seg) {
+    private static void parseSegment(MessageChain.Builder b, ObjectNode seg, String appId) {
         String type = seg.path("type").asText("");
         var data = seg.path("data");
         switch (type) {
@@ -141,13 +162,36 @@ public final class QqMessageConverter {
             }
             case "image" -> {
                 String url = data.path("url").asText(null);
-                if (url != null && !url.isBlank()) b.add(new MessageElement.Image(url, null, 0, 0, 0));
+                if (url != null && !url.isBlank()) {
+                    String rawRef = autoDownload(url, dev.xuanji.api.annotation.MediaType.IMAGE, appId);
+                    b.add(new MessageElement.Image(rawRef, null, 0, 0, 0));
+                }
             }
             case "at" -> {
                 String userId = data.path("user_openid").asText(data.path("id").asText(""));
                 if (!userId.isBlank()) b.at(userId);
             }
             default -> { /* 未知段忽略，不崩 */ }
+        }
+    }
+
+    /**
+     * 框架层按需下载：URL → 尝试落盘，成功返回 FILE_PATH；失败/未启用/非 URL 返回原 URL。
+     * 失败/异常静默吞掉（不影响消息处理，下载失败 = 拿 URL 形态，不阻断命令链）。
+     */
+    private static String autoDownload(String url, dev.xuanji.api.annotation.MediaType type, String appId) {
+        if (appId == null || appId.isBlank() || type == null) {
+            if (appId == null || appId.isBlank()) {
+                System.out.println("[媒体转换] autoDownload 跳过: appId 为空（调用方未传？）url=" + (url != null && url.length() > 60 ? url.substring(0, 60) + "…" : url));
+            }
+            return url;
+        }
+        if (!url.startsWith("http://") && !url.startsWith("https://")) return url;
+        try {
+            var path = dev.xuanji.api.media.MediaFileDownloader.download(url, type, appId);
+            return path != null ? path.toString() : url;
+        } catch (Exception e) {
+            return url;
         }
     }
 }

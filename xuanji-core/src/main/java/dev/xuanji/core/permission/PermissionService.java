@@ -167,12 +167,21 @@ public class PermissionService {
     }
 
     public void removeBlacklist(String botKey, String groupId, String userId) {
-        jdbc.update("DELETE FROM xuanji_blacklist WHERE bot_key=? AND group_id=? AND user_id=?",
-                botKey, groupId, userId);
+        int n;
+        if (groupId == null || groupId.isBlank()) {
+            // 空群黑名单（group_id=''）用普通 WHERE 匹配不到（SQL NULL 三值逻辑），通配删除
+            n = jdbc.update("DELETE FROM xuanji_blacklist WHERE bot_key=? AND user_id=? AND (group_id='' OR group_id IS NULL)",
+                    botKey, userId);
+        } else {
+            n = jdbc.update("DELETE FROM xuanji_blacklist WHERE bot_key=? AND group_id=? AND user_id=?",
+                    botKey, groupId, userId);
+        }
+        log.info("[权限] 移除黑名单: bot={}, group={}, user={}, 删除{}行", botKey, groupId, userId, n);
     }
 
     public void removeBlacklistById(long id) {
-        jdbc.update("DELETE FROM xuanji_blacklist WHERE id=?", id);
+        int n = jdbc.update("DELETE FROM xuanji_blacklist WHERE id=?", id);
+        log.info("[权限] 按ID移除黑名单: id={}, 删除{}行", id, n);
     }
 
     // ==================== 群超管（兼容旧接口，v3.3 不再使用） ====================

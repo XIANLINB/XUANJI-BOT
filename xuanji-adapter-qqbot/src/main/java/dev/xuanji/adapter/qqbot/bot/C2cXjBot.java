@@ -14,6 +14,8 @@ import dev.xuanji.sdk.bot.Bot;
  */
 public class C2cXjBot extends Bot {
 
+    @Override public String selfId() { return appId; }
+
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private final MessageSender sender;
     private final String openid;

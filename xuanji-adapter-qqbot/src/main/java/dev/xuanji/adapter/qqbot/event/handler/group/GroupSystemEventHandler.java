@@ -19,7 +19,8 @@ import org.springframework.stereotype.Component;
 @EventMapping({
         "GROUP_ADD_ROBOT", "GROUP_DEL_ROBOT",
         "GROUP_MSG_REJECT", "GROUP_MSG_RECEIVE",
-        "GROUP_MEMBER_ADD", "GROUP_MEMBER_REMOVE"
+        "GROUP_MEMBER_ADD", "GROUP_MEMBER_REMOVE",
+        "GROUP_JOIN_REQUEST"
 })
 public class GroupSystemEventHandler implements EventHandler {
 
@@ -82,6 +83,15 @@ public class GroupSystemEventHandler implements EventHandler {
                 }
                 case "GROUP_MSG_REJECT", "GROUP_MSG_RECEIVE" -> {
                     MessageLogger.event("IN", appId, eventType, groupOpenid, data.toString());
+                }
+                case "GROUP_JOIN_REQUEST" -> {
+                    // 用户入群申请 → 防御式解析 + 记录（自动同意/拒绝待接入 QQ API）
+                    JoinRequestInfo jr = parseJoinRequest(data);
+                    log.info("[群事件] 入群申请: group={}, user={}({}), source={}, 验证信息={}, 申请id={}",
+                            jr.groupOpenid(), jr.username(), jr.memberOpenid(),
+                            jr.applySource(), jr.verifyMessage(),jr.requestId());
+                    MessageLogger.event("IN", appId, eventType,
+                            jr.groupOpenid() != null ? jr.groupOpenid() : groupOpenid, data.toString());
                 }
                 default -> MessageLogger.event("IN", appId, eventType, groupOpenid, data.toString());
             }

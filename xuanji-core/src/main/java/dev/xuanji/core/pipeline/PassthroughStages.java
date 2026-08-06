@@ -32,15 +32,43 @@ class WhitelistStage implements PipelineStage {
 
     @Override
     public Result handle(BotEvent e, PipelineChain c) {
-        if (e.sender() == null) return c.proceed();
         String botKey = resolveBotKey(e);
         String groupId = e.group() != null ? e.group().id() : null;
-        String memberId = e.sender().platformUserId();
+        // sender 缺失（webhook 事件可能解析不出）时从平台数据兜底提取 member_openid，避免黑名单/权限静默失效
+        String memberId = e.sender() != null ? e.sender().platformUserId() : null;
+        if (memberId == null || memberId.isBlank()) {
+            memberId = fallbackMemberId(e);
+        }
+        if (memberId == null || memberId.isBlank()) {
+            log.warn("[whitelist] 无法提取用户身份（sender 与 platformData 均无），权限检查跳过: bot={}, type={}",
+                    botKey, e.rawEventType());
+            return c.proceed();
+        }
         if (!permission.check(botKey, groupId, memberId, null)) {
             log.debug("[whitelist] 拦截: bot={}, user={}", botKey, memberId);
             return Result.ABORT;
         }
         return c.proceed();
+    }
+
+    /** sender 缺失时的用户身份兜底：优先 data.author.member_openid，其次顶层 member_openid。 */
+    private static String fallbackMemberId(BotEvent e) {
+        try {
+            var data = e.platformData();
+            if (data == null || !(data instanceof com.fasterxml.jackson.databind.node.ObjectNode obj)) return null;
+            var author = obj.get("author");
+            if (author instanceof com.fasterxml.jackson.databind.node.ObjectNode ao) {
+                var m = ao.get("member_openid");
+                if (m != null && !m.isNull() && !m.asText().isEmpty()) return m.asText();
+                var uid = ao.get("id");
+                if (uid != null && !uid.isNull() && !uid.asText().isEmpty()) return uid.asText();
+            }
+            var top = obj.get("member_openid");
+            if (top != null && !top.isNull() && !top.asText().isEmpty()) return top.asText();
+            return null;
+        } catch (Exception ex) {
+            return null;
+        }
     }
 
     private String resolveBotKey(BotEvent e) {
@@ -54,24 +82,55 @@ class WhitelistStage implements PipelineStage {
 }
 
 /**
- * 限流阶段（order=30）— 每用户简单冷却（全局 2 秒）。
+ * 限流阶段（order=30）— 每用户冷却。配置驱动：framework.rate_limit.enabled=true 才启用
+ * （默认不限制），窗口 framework.rate_limit.window_ms（默认 2000ms）。
  */
 @Slf4j
 @Component
 class RateLimitStage implements PipelineStage {
 
     private final java.util.Map<String, Long> lastAccess = new java.util.concurrent.ConcurrentHashMap<>();
+    private final dev.xuanji.core.config.ConfigService configService;
+
+    RateLimitStage(dev.xuanji.core.config.ConfigService configService) {
+        this.configService = configService;
+    }
 
     @Override public String name() { return "rate-limit"; }
     @Override public int order() { return 30; }
 
     @Override
     public Result handle(BotEvent e, PipelineChain c) {
-        String key = e.sender() != null ? e.sender().platformUserId() : String.valueOf(e.hashCode());
+        String botKey = e.bot() != null ? e.bot().selfId() : null;
+        // 配置驱动：bot 级 rate_limit_enabled（设置页机器人开关）优先，全局 framework.rate_limit.enabled 兜底；
+        // 任一为 true 才启用（默认不限制）。
+        String enabled = botKey != null ? configService.getBotConfig(botKey, "rate_limit_enabled") : null;
+        if (enabled == null || enabled.isBlank()) {
+            enabled = configService.getGlobalConfig().get("framework.rate_limit.enabled");
+        }
+        if (!"true".equalsIgnoreCase(enabled)) return c.proceed();
+
+        // 窗口：bot 级 rate_limit_window_ms > 全局 framework.rate_limit.window_ms > 默认 2000ms
+        long windowMs = 2000;
+        try {
+            String w = botKey != null ? configService.getBotConfig(botKey, "rate_limit_window_ms") : null;
+            if (w == null || w.isBlank()) {
+                w = configService.getGlobalConfig().get("framework.rate_limit.window_ms");
+            }
+            long wl = Long.parseLong(w);
+            if (wl > 0) windowMs = wl;
+        } catch (Exception ignored) { /* 非法窗口用默认 */ }
+
+        // 稳定 key：sender 缺失（webhook 事件可能解析不出）时用 bot + 群兜底，避免退化为每次不同的 hashCode 导致限频失效
+        String key = e.sender() != null ? e.sender().platformUserId() : null;
+        if (key == null || key.isBlank()) {
+            String gid = e.group() != null ? e.group().id() : "?";
+            key = "bot:" + (botKey != null ? botKey : "?") + ":group:" + gid;
+        }
         long now = System.currentTimeMillis();
         Long last = lastAccess.get(key);
-        if (last != null && (now - last) < 2000) {
-            log.debug("[rate-limit] 用户过频: {}", key);
+        if (last != null && (now - last) < windowMs) {
+            log.debug("[rate-limit] 用户过频: key={}, sender={}", key, e.sender() != null ? e.sender().platformUserId() : "null");
             return Result.ABORT;
         }
         lastAccess.put(key, now);

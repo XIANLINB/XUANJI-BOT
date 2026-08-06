@@ -13,3 +13,6 @@ data/
 # 运行时机器人密钥配置：含 client-secret，禁止提交进仓库
 # 运行期配置位于 data/xuanji-robots.yml（已被 data/ 忽略），切勿放回 src/main/resources
 xuanji-starter/src/main/resources/xuanji-robots.yml
+
+# 清理回收站（确认后手动删除）
+/_trash_*/

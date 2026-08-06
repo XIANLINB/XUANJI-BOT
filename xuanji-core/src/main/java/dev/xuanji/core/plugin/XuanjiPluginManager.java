@@ -58,8 +58,71 @@ public class XuanjiPluginManager extends DefaultPluginManager {
     protected PluginLoader createPluginLoader() {
         return new CompoundPluginLoader()
                 .add(new DevelopmentPluginLoader(this), this::isDevelopment)
-                .add(new JarPluginLoader(this), this::isNotDevelopment)
+                .add(new CopyingJarPluginLoader(this), this::isNotDevelopment)
                 .add(new DefaultPluginLoader(this), this::isNotDevelopment);
+    }
+
+    /**
+     * 委托 pf4j 默认插件仓库做路径探测，仅过滤结果：只保留 *.jar 文件、排除 copy- 副本
+     * （防 .work 目录/副本被当插件扫描）。
+     */
+    @Override
+    protected PluginRepository createPluginRepository() {
+        PluginRepository delegate = super.createPluginRepository();
+        return new PluginRepository() {
+            @Override
+            public List<Path> getPluginPaths() {
+                try {
+                    return delegate.getPluginPaths().stream()
+                            .filter(p -> p.toString().endsWith(".jar")
+                                    && !p.getFileName().toString().startsWith("copy-"))
+                            .toList();
+                } catch (Exception e) {
+                    return List.of();
+                }
+            }
+
+            @Override
+            public boolean deletePluginPath(Path pluginPath) {
+                return delegate.deletePluginPath(pluginPath);
+            }
+        };
+    }
+
+    /**
+     * P3-G 关键：复制式 Jar 加载器 — 先把插件 jar 复制到 {@code plugins/.work/} 再加载副本。
+     *
+     * <p>Windows 下 pf4j 的 JarPluginLoader 打开 jar 后不释放文件锁，框架运行时（IDEA）用户
+     * 无法覆盖 plugins/ 下的 jar。复制加载后，<b>原 jar 永不被 JVM 打开</b>，用户可随时覆盖；
+     * 热加载时重新复制新 jar（REPLACE）即加载新内容，不重启框架。
+     * pf4j 扫描根目录 *.jar 不递归子目录，.work 副本不会被重复加载。
+     */
+    static final class CopyingJarPluginLoader extends JarPluginLoader {
+
+        private final Path workDir;
+
+        CopyingJarPluginLoader(PluginManager pm) {
+            super(pm);
+            workDir = pm.getPluginsRoot().resolve(".work");
+            try {
+                java.nio.file.Files.createDirectories(workDir);
+            } catch (Exception ignored) { /* 目录创建失败由复制时处理 */ }
+        }
+
+        @Override
+        public ClassLoader loadPlugin(Path pluginPath, PluginDescriptor descriptor) {
+            // 规范化：无论传入原 jar 还是已复制的副本，都落到固定 copy-{原名}.jar（避免 copy-copy- 叠加）
+            String name = pluginPath.getFileName().toString();
+            if (name.startsWith("copy-")) name = name.substring("copy-".length());
+            Path copy = workDir.resolve("copy-" + name);
+            try {
+                java.nio.file.Files.copy(pluginPath, copy, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            } catch (Exception e) {
+                log.warn("[Plugin] 复制插件到工作目录失败，回退直载原 jar: {}", e.getMessage());
+                return super.loadPlugin(pluginPath, descriptor);
+            }
+            return super.loadPlugin(copy, descriptor);
+        }
     }
 
     @Override
@@ -76,6 +139,8 @@ public class XuanjiPluginManager extends DefaultPluginManager {
             pluginsDir.toFile().mkdirs();
             log.info("[Plugin] 插件目录已创建: {}", pluginsDir.toAbsolutePath());
         }
+        // 启动清理 .work 工作目录的旧副本（热加载副本每次 REPLACE，正常无累积；此处兜底清残留）
+        cleanupWorkDir(pluginsDir);
 
         loadPlugins();
         startPlugins();
@@ -94,6 +159,27 @@ public class XuanjiPluginManager extends DefaultPluginManager {
         }
 
         log.info("[Plugin] 插件加载完成: {} 个运行中", pluginContexts.size());
+    }
+
+    /** 启动时清空 .work 工作目录的 copy 副本（CopyingJarPluginLoader 加载时会重新复制）。 */
+    private void cleanupWorkDir(Path pluginsDir) {
+        Path work = pluginsDir.resolve(".work");
+        try {
+            if (!java.nio.file.Files.isDirectory(work)) return;
+            try (var s = java.nio.file.Files.list(work)) {
+                long removed = s.filter(p -> p.getFileName().toString().startsWith("copy-"))
+                        .map(p -> {
+                            try { java.nio.file.Files.deleteIfExists(p); return 1L; }
+                            catch (Exception e) { return 0L; }
+                        })
+                        .reduce(0L, Long::sum);
+                if (removed > 0) {
+                    log.info("[Plugin] 启动清理 .work 旧副本 {} 个", removed);
+                }
+            }
+        } catch (Exception e) {
+            log.debug("[Plugin] 清理 .work 失败（可忽略）: {}", e.getMessage());
+        }
     }
 
     /** 按持久态应用启用/停用 */
@@ -223,6 +309,58 @@ public class XuanjiPluginManager extends DefaultPluginManager {
         if (s == null) return false;
         if (s == XuanjiPluginState.ENABLED) disablePlugin(id);
         return enablePlugin(id);
+    }
+
+    /**
+     * P3-G：<b>jar 热加载</b> — 重新加载插件 jar（改插件后不重启框架）。
+     *
+     * <p>流程：卸载旧实例（关 Spring 子容器 + 反注册指令 + pf4j stop）→
+     * 重新 loadPlugin(jarPath) → 新建子容器 → 恢复原启用状态。
+     * 持久态保留（不因热加载丢失启用/停用设置）。
+     *
+     * @return true 表示重载成功
+     */
+    public synchronized boolean reloadJar(String id) {
+        PluginWrapper old = getPlugin(id);
+        if (old == null) return false;
+        Path jarPath = old.getPluginPath();
+        XuanjiPluginState prev = states.getOrDefault(id, XuanjiPluginState.LOADED);
+        boolean wasEnabled = prev == XuanjiPluginState.ENABLED;
+
+        // 1. 卸载旧实例（容器 / 指令 / pf4j），保留持久态
+        AnnotationConfigApplicationContext ctx = pluginContexts.remove(id);
+        if (ctx != null) {
+            try { ctx.close(); } catch (Exception e) { log.debug("[Plugin] 子容器关闭异常: {}", e.getMessage()); }
+        }
+        unregisterCommands(id);
+        pluginCommands.remove(id);
+        states.remove(id);
+        // pf4j 原生卸载：停插件 + 从 plugins map 移除路径条目（stopPlugin 不移除，同路径二次加载会报 already loaded）；
+        // 不走本类覆写的 unloadPlugin（那会删 stateStore 持久态）
+        super.unloadPlugin(id);
+        log.info("[Plugin] 热加载: 已卸载旧实例 {}", id);
+
+        // 2. 重新加载新 jar
+        try {
+            loadPlugin(jarPath);
+        } catch (Exception e) {
+            log.error("[Plugin] 热加载: 加载新 jar 失败: {}, error={}", id, e.getMessage());
+            return false;
+        }
+        startPlugin(id);
+        PluginWrapper w = getPlugin(id);
+        if (w == null) {
+            log.error("[Plugin] 热加载: 重新加载后插件不可见: {}", id);
+            return false;
+        }
+
+        // 3. 新建子容器 + 恢复原启用状态
+        createPluginContext(w);
+        stateStore.setEnabled(id, wasEnabled);
+        applyPersistedState(w);
+        log.info("[Plugin] 热加载完成: {} v{} (state={})",
+                id, w.getDescriptor().getVersion(), states.get(id));
+        return true;
     }
 
     private void registerCommands(String id) {
