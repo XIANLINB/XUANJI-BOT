@@ -1,253 +1,255 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  jakarta.annotation.PreDestroy
+ *  lombok.Generated
+ *  org.slf4j.Logger
+ *  org.slf4j.LoggerFactory
+ *  org.springframework.context.event.ContextRefreshedEvent
+ *  org.springframework.context.event.EventListener
+ */
 package dev.xuanji.adapter.onebot.websocket;
 
 import dev.xuanji.adapter.onebot.api.OneBotApiService;
 import dev.xuanji.adapter.onebot.config.OneBotProperties;
 import dev.xuanji.adapter.onebot.session.OneBotSession;
 import dev.xuanji.adapter.onebot.session.OneBotSessionRegistry;
+import dev.xuanji.adapter.onebot.websocket.OneBotEventDispatcher;
 import jakarta.annotation.PreDestroy;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.event.ContextRefreshedEvent;
-import org.springframework.context.event.EventListener;
-
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.time.Duration;
+import java.util.Objects;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import lombok.Generated;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.context.event.ContextRefreshedEvent;
+import org.springframework.context.event.EventListener;
 
-/**
- * OneBot 正向 WebSocket 客户端 — 框架作客户端，主动连 OneBot 实现暴露的 WS 端口。
- *
- * <p>适用场景：Napcat 部署在框架可达的位置且已开放正向 WS 端口（默认 3001）；
- * 或框架跑在无法对外暴露端口的环境（容器/内网机）时的唯一选择。
- *
- * <h3>配置</h3>
- * <pre>
- * xuanji:
- *   onebot:
- *     enabled: true
- *     forward:
- *       enabled: true
- *       url: ws://127.0.0.1:3001
- *       access-token: ${ONEBOT_TOKEN:}
- * </pre>
- *
- * <p>实现用 JDK 内置 {@link java.net.http.WebSocket}（无需额外依赖），
- * 分片消息由 {@link ClientListener} 累积拼接后再交分发器。
- * 断线后按固定间隔重连，重连线程为虚拟线程。
- */
-@Slf4j
 public class OneBotWsClient {
-
+    @Generated
+    private static final Logger log = LoggerFactory.getLogger(OneBotWsClient.class);
     private final OneBotProperties props;
     private final OneBotEventDispatcher dispatcher;
     private final OneBotSessionRegistry registry;
     private final OneBotApiService api;
-
-    private final AtomicReference<WebSocket> wsRef = new AtomicReference<>();
-    private final AtomicReference<ClientSideSession> sessionRef = new AtomicReference<>();
+    private final AtomicReference<WebSocket> wsRef = new AtomicReference();
+    private final AtomicReference<ClientSideSession> sessionRef = new AtomicReference();
     private final AtomicBoolean running = new AtomicBoolean(false);
     private volatile Thread reconnectThread;
 
-    public OneBotWsClient(OneBotProperties props,
-                          OneBotEventDispatcher dispatcher,
-                          OneBotSessionRegistry registry,
-                          OneBotApiService api) {
+    public OneBotWsClient(OneBotProperties props, OneBotEventDispatcher dispatcher, OneBotSessionRegistry registry, OneBotApiService api) {
         this.props = props;
         this.dispatcher = dispatcher;
         this.registry = registry;
         this.api = api;
     }
 
-    /** 上下文就绪后启动连接（不阻塞启动流程，失败进重连循环） */
-    @EventListener(ContextRefreshedEvent.class)
+    @EventListener(value={ContextRefreshedEvent.class})
     public void start() {
-        if (!running.compareAndSet(false, true)) {
+        if (!this.running.compareAndSet(false, true)) {
             return;
         }
-        String url = props.getForward().getUrl();
+        String url = this.props.getForward().getUrl();
         if (url == null || url.isBlank()) {
-            log.warn("[OneBot-正向WS] 已启用但未配置 url，跳过连接");
-            running.set(false);
+            log.warn("[OneBot-\u6b63\u5411WS] \u5df2\u542f\u7528\u4f46\u672a\u914d\u7f6e url\uff0c\u8df3\u8fc7\u8fde\u63a5");
+            this.running.set(false);
             return;
         }
-        reconnectThread = Thread.ofVirtual()
-                .name("onebot-ws-client")
-                .start(this::connectLoop);
-        log.info("[OneBot-正向WS] 启动，目标: {}", url);
+        this.reconnectThread = Thread.ofVirtual().name("onebot-ws-client").start(this::connectLoop);
+        log.info("[OneBot-\u6b63\u5411WS] \u542f\u52a8\uff0c\u76ee\u6807: {}", (Object)url);
     }
 
     private void connectLoop() {
-        long interval = props.getForward().getReconnectIntervalMs();
-        while (running.get()) {
+        long interval = this.props.getForward().getReconnectIntervalMs();
+        while (this.running.get()) {
             try {
-                doConnectAndWait();
-            } catch (Exception e) {
-                log.warn("[OneBot-正向WS] 连接异常: {}", e.getMessage());
+                this.doConnectAndWait();
             }
-            if (!running.get() || interval <= 0) {
-                break;
+            catch (Exception e) {
+                log.warn("[OneBot-\u6b63\u5411WS] \u8fde\u63a5\u5f02\u5e38: {}", (Object)e.getMessage());
             }
+            if (!this.running.get() || interval <= 0L) break;
             try {
                 Thread.sleep(interval);
-            } catch (InterruptedException e) {
+            }
+            catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;
             }
-            log.info("[OneBot-正向WS] 尝试重连 {}", props.getForward().getUrl());
+            log.info("[OneBot-\u6b63\u5411WS] \u5c1d\u8bd5\u91cd\u8fde {}", (Object)this.props.getForward().getUrl());
         }
     }
 
-    /** 建连并阻塞到断开 */
     private void doConnectAndWait() throws Exception {
-        String token = props.getForward().getAccessToken();
-        HttpClient http = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .build();
-
-        WebSocket.Builder builder = http.newWebSocketBuilder()
-                .connectTimeout(Duration.ofSeconds(10));
+        String token = this.props.getForward().getAccessToken();
+        HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10L)).build();
+        WebSocket.Builder builder = http.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(10L));
         if (token != null && !token.isBlank()) {
             builder.header("Authorization", "Bearer " + token);
         }
-
-        ClientListener listener = new ClientListener();
-        WebSocket ws = builder.buildAsync(URI.create(props.getForward().getUrl()), listener).join();
-        wsRef.set(ws);
-
-        ClientSideSession session = new ClientSideSession(ws);
-        sessionRef.set(session);
-        registry.register(session);
-        log.info("[OneBot-正向WS] 连接成功: {}", props.getForward().getUrl());
-
-        // 阻塞直到监听器标记关闭
+        ClientListener listener = new ClientListener(this);
+        WebSocket ws = builder.buildAsync(URI.create(this.props.getForward().getUrl()), listener).join();
+        this.wsRef.set(ws);
+        ClientSideSession session = new ClientSideSession(this, ws);
+        this.sessionRef.set(session);
+        this.registry.register(session);
+        log.info("[OneBot-\u6b63\u5411WS] \u8fde\u63a5\u6210\u529f: {}", (Object)this.props.getForward().getUrl());
         listener.awaitClosed();
-
-        registry.unregister(session);
-        api.failAllPending("正向WS连接关闭");
-        sessionRef.set(null);
-        wsRef.set(null);
+        this.registry.unregister(session);
+        this.api.failAllPending("\u6b63\u5411WS\u8fde\u63a5\u5173\u95ed");
+        this.sessionRef.set(null);
+        this.wsRef.set(null);
     }
 
     @PreDestroy
     public void stop() {
-        if (!running.compareAndSet(true, false)) {
+        Thread t;
+        if (!this.running.compareAndSet(true, false)) {
             return;
         }
-        ClientSideSession s = sessionRef.get();
+        ClientSideSession s = this.sessionRef.get();
         if (s != null) {
             s.close();
         }
-        Thread t = reconnectThread;
-        if (t != null) {
+        if ((t = this.reconnectThread) != null) {
             t.interrupt();
         }
-        log.info("[OneBot-正向WS] 已停止");
+        log.info("[OneBot-\u6b63\u5411WS] \u5df2\u505c\u6b62");
     }
 
-    // ==================== 监听器 ====================
+    private class ClientListener
+    implements WebSocket.Listener {
+        private final StringBuilder buffer;
+        private final Object closedLock;
+        private volatile boolean closed;
+        final /* synthetic */ OneBotWsClient this$0;
 
-    /**
-     * JDK WebSocket 监听器。
-     *
-     * <p>注意：{@code onText} 可能收到分片（last=false），必须自行累积；
-     * 每次回调后需 {@code request(1)} 才会继续投递下一条。
-     */
-    private class ClientListener implements WebSocket.Listener {
-
-        private final StringBuilder buffer = new StringBuilder();
-        private final Object closedLock = new Object();
-        private volatile boolean closed = false;
+        private ClientListener(OneBotWsClient oneBotWsClient) {
+            OneBotWsClient oneBotWsClient2 = oneBotWsClient;
+            Objects.requireNonNull(oneBotWsClient2);
+            this.this$0 = oneBotWsClient2;
+            this.buffer = new StringBuilder();
+            this.closedLock = new Object();
+            this.closed = false;
+        }
 
         @Override
         public void onOpen(WebSocket webSocket) {
-            webSocket.request(1);
+            webSocket.request(1L);
         }
 
         @Override
         public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
-            buffer.append(data);
+            this.buffer.append(data);
             if (last) {
-                String payload = buffer.toString();
-                buffer.setLength(0);
-                // 事件处理放到独立虚拟线程，避免阻塞 WS 读取线程
+                String payload = this.buffer.toString();
+                this.buffer.setLength(0);
                 Thread.ofVirtual().start(() -> {
-                    ClientSideSession s = sessionRef.get();
-                    dispatcher.onMessage(payload, s == null ? "unknown" : s.selfId());
+                    ClientSideSession s = this.this$0.sessionRef.get();
+                    this.this$0.dispatcher.onMessage(payload, s == null ? "unknown" : s.selfId(), s);
                 });
             }
-            webSocket.request(1);
+            webSocket.request(1L);
             return null;
         }
 
         @Override
         public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
-            log.info("[OneBot-正向WS] 对端关闭: code={}, reason={}", statusCode, reason);
-            markClosed();
+            log.info("[OneBot-\u6b63\u5411WS] \u5bf9\u7aef\u5173\u95ed: code={}, reason={}", (Object)statusCode, (Object)reason);
+            this.markClosed();
             return null;
         }
 
         @Override
         public void onError(WebSocket webSocket, Throwable error) {
-            log.warn("[OneBot-正向WS] 连接错误: {}", error.getMessage());
-            markClosed();
+            log.warn("[OneBot-\u6b63\u5411WS] \u8fde\u63a5\u9519\u8bef: {}", (Object)error.getMessage());
+            this.markClosed();
         }
 
+        /*
+         * WARNING - Removed try catching itself - possible behaviour change.
+         */
         void markClosed() {
-            synchronized (closedLock) {
-                closed = true;
-                closedLock.notifyAll();
+            Object object = this.closedLock;
+            synchronized (object) {
+                this.closed = true;
+                this.closedLock.notifyAll();
             }
         }
 
+        /*
+         * WARNING - Removed try catching itself - possible behaviour change.
+         */
         void awaitClosed() throws InterruptedException {
-            synchronized (closedLock) {
-                while (!closed) {
-                    closedLock.wait();
+            Object object = this.closedLock;
+            synchronized (object) {
+                while (!this.closed) {
+                    this.closedLock.wait();
                 }
             }
         }
     }
 
-    // ==================== 客户端会话包装 ====================
-
-    /**
-     * 正向 WS 会话。
-     *
-     * <p>selfId 由事件报文的 self_id 决定；连接刚建立时未知，
-     * 首条事件到达后 {@link OneBotEventDispatcher} 会用报文里的 self_id 兜底路由，
-     * 这里的 selfId 主要用于会话注册表的 key。
-     */
-    private class ClientSideSession implements OneBotSession {
-
+    private class ClientSideSession
+    implements OneBotSession {
         private final WebSocket ws;
-        private final Object writeLock = new Object();
-        private volatile String selfId = "forward";
+        private final Object writeLock;
+        private volatile String selfId;
 
-        ClientSideSession(WebSocket ws) {
+        ClientSideSession(OneBotWsClient oneBotWsClient, WebSocket ws) {
+            Objects.requireNonNull(oneBotWsClient);
+            this.writeLock = new Object();
+            this.selfId = "forward";
             this.ws = ws;
         }
 
-        @Override public String selfId()    { return selfId; }
-        @Override public String direction() { return "forward"; }
-        @Override public boolean isOpen()   { return !ws.isOutputClosed(); }
+        @Override
+        public String selfId() {
+            return this.selfId;
+        }
 
         @Override
+        public String direction() {
+            return "forward";
+        }
+
+        @Override
+        public boolean isOpen() {
+            return !this.ws.isOutputClosed();
+        }
+
+        @Override
+        public boolean rebindSelfId(String realSelfId) {
+            this.selfId = realSelfId;
+            return true;
+        }
+
+        /*
+         * WARNING - Removed try catching itself - possible behaviour change.
+         */
+        @Override
         public void sendText(String text) {
-            synchronized (writeLock) {
-                ws.sendText(text, true).join();
+            Object object = this.writeLock;
+            synchronized (object) {
+                this.ws.sendText(text, true).join();
             }
         }
 
         @Override
         public void close() {
             try {
-                ws.sendClose(WebSocket.NORMAL_CLOSURE, "shutdown");
-            } catch (Exception ignored) {
-                // 连接可能已断，忽略
+                this.ws.sendClose(1000, "shutdown");
+            }
+            catch (Exception exception) {
+                // empty catch block
             }
         }
     }
 }
+

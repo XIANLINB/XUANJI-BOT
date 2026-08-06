@@ -35,6 +35,50 @@ public record MessageChain(List<MessageElement> elements) {
         return elements.stream().anyMatch(e -> e instanceof MessageElement.At);
     }
 
+    /** 提取链中所有媒体元素（P1-D：Image/Voice/Video/File）。 */
+    public List<MessageElement.Media> medias() {
+        return elements.stream()
+                .filter(e -> e instanceof MessageElement.Media)
+                .map(e -> (MessageElement.Media) e)
+                .collect(Collectors.toList());
+    }
+
+    /** 是否包含媒体元素（懒判定，不触发解析）。 */
+    public boolean hasMedia() {
+        return elements.stream().anyMatch(e -> e instanceof MessageElement.Media);
+    }
+
+    /** 是否包含指定类型的元素（懒判定，不触发解析）。 */
+    public boolean has(Class<? extends MessageElement> type) {
+        return elements.stream().anyMatch(type::isInstance);
+    }
+
+    /**
+     * 元素摘要（日志用）— 如 {@code [图片]}、{@code [图片x2][文件x1]}。
+     * 与 {@code MediaSummary} 同口径：按元素类别聚合计数。
+     */
+    public String summary() {
+        java.util.LinkedHashMap<String, Integer> counts = new java.util.LinkedHashMap<>();
+        for (MessageElement e : elements) {
+            String label = switch (e) {
+                case MessageElement.Image ignored -> "图片";
+                case MessageElement.Voice ignored -> "语音";
+                case MessageElement.Video ignored -> "视频";
+                case MessageElement.File ignored -> "文件";
+                case MessageElement.Face ignored -> "表情";
+                case MessageElement.Markdown ignored -> "Markdown";
+                case MessageElement.Keyboard ignored -> "键盘";
+                case MessageElement.Ark ignored -> "Ark";
+                case MessageElement.At ignored -> "@";
+                default -> null;
+            };
+            if (label != null) counts.merge(label, 1, Integer::sum);
+        }
+        StringBuilder sb = new StringBuilder();
+        counts.forEach((label, count) -> sb.append('[').append(label).append(count > 1 ? "x" + count : "").append(']'));
+        return sb.toString();
+    }
+
     // ==================== 建造器 ====================
 
     public static Builder builder() {

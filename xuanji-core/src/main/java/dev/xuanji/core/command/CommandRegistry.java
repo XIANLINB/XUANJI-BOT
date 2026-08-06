@@ -3,6 +3,7 @@ package dev.xuanji.core.command;
 import dev.xuanji.api.annotation.*;
 import dev.xuanji.sdk.bot.Bot;
 import dev.xuanji.sdk.event.GroupMessageEvent;
+import dev.xuanji.sdk.event.MessageEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -25,12 +26,31 @@ public class CommandRegistry {
     private final List<HandlerEntry> privateEventHandlers = new CopyOnWriteArrayList<>();
     private final Map<String, Long> rateLimitMap = new ConcurrentHashMap<>();
     private final java.util.Set<String> disabledPlugins = ConcurrentHashMap.newKeySet();
+    private final java.util.concurrent.atomic.AtomicLong rateLimitHits = new java.util.concurrent.atomic.AtomicLong();
+    private final dev.xuanji.core.plugin.PluginBotBindingService bindingService;
+
+    public CommandRegistry(dev.xuanji.core.plugin.PluginBotBindingService bindingService) {
+        this.bindingService = bindingService;
+    }
 
     public void setPluginEnabled(String pluginId, boolean enabled) {
         if (enabled) disabledPlugins.remove(pluginId);
         else disabledPlugins.add(pluginId);
+        log.info("[Handler] 插件{}: {}", enabled ? "启用" : "停用", pluginId);
     }
     public boolean isPluginEnabled(String pluginId) { return !disabledPlugins.contains(pluginId); }
+
+    /** 运行统计（控制台 /console/health 的 plugins 键）。 */
+    public Map<String, Object> getStats() {
+        Map<String, Object> m = new java.util.LinkedHashMap<>();
+        m.put("groupMsgHandlers", groupMsgHandlers.size());
+        m.put("privateMsgHandlers", privateMsgHandlers.size());
+        m.put("groupEventHandlers", groupEventHandlers.size());
+        m.put("privateEventHandlers", privateEventHandlers.size());
+        m.put("disabledPlugins", disabledPlugins.size());
+        m.put("pluginTimeoutCount", rateLimitHits.get());
+        return m;
+    }
 
     public void register(Object pluginInstance, String pluginId) {
         int rateLimit = 0;
@@ -42,6 +62,24 @@ public class CommandRegistry {
         }
 
         for (Method m : pluginInstance.getClass().getDeclaredMethods()) {
+            // P2-F：@Command 语法糖优先——同一方法标了 @Command 则跳过原生注解注册，避免重复
+            Command command = m.getAnnotation(Command.class);
+            if (command != null) {
+                MessageFilter cf = new CommandFilter(command);
+                int order = command.order();
+                HandlerEntry entry = new HandlerEntry(m, pluginInstance, cf,
+                        order, rateLimit, roles(m), pluginId, methodPlatforms(m, pluginPlatforms));
+                switch (command.scope()) {
+                    case GROUP -> groupMsgHandlers.add(entry);
+                    case PRIVATE -> privateMsgHandlers.add(entry);
+                    case BOTH -> { groupMsgHandlers.add(entry); privateMsgHandlers.add(entry); }
+                }
+                log.info("[Handler] 注册@Command: {}.{} scope={} order={} media={}",
+                        pluginInstance.getClass().getSimpleName(), m.getName(),
+                        command.scope(), order, cf.media());
+                continue;
+            }
+
             MessageFilter filter = m.getAnnotation(MessageFilter.class);
             // 平台白名单：handler 级注解优先，插件级 @XuanjiPlugin(platforms=) 兜底；两者皆空 = 全平台。
             java.util.Set<String> methodPlatforms = resolvePlatforms(m, pluginPlatforms);
@@ -66,6 +104,14 @@ public class CommandRegistry {
         }
         groupMsgHandlers.sort(Comparator.comparingInt(e -> e.order));
         privateMsgHandlers.sort(Comparator.comparingInt(e -> e.order));
+    }
+
+    /** @Command 方法的平台白名单（与原生注解共用解析逻辑）。 */
+    private static java.util.Set<String> methodPlatforms(Method m, java.util.Set<String> pluginPlatforms) {
+        var c = m.getAnnotation(Command.class);
+        java.util.Set<String> ps = new java.util.LinkedHashSet<>();
+        if (c != null) for (String p : c.platforms()) ps.add(p);
+        return ps.isEmpty() ? pluginPlatforms : ps;
     }
 
     /** 解析方法的平台白名单：合并各事件注解与 @MessageFilter 的 platforms，handler 级优先于插件级默认。 */
@@ -95,12 +141,12 @@ public class CommandRegistry {
     private static final ThreadLocal<String> botKeyTL = new ThreadLocal<>();
     private static final ThreadLocal<String> groupIdTL = new ThreadLocal<>();
     private static final ThreadLocal<String> msgIdTL = new ThreadLocal<>();
-    private static final ThreadLocal<GroupMessageEvent> groupEventDtoTL = new ThreadLocal<>();
+    private static final ThreadLocal<MessageEvent> groupEventDtoTL = new ThreadLocal<>();
     private static final ThreadLocal<Bot> botTL = new ThreadLocal<>();
     private static final ThreadLocal<String> currentPlatformTL = new ThreadLocal<>();
 
     public static void setContext(String botKey, String groupId, String msgId, String userId,
-                                  GroupMessageEvent eventDto, Bot bot, String platform) {
+                                  MessageEvent eventDto, Bot bot, String platform) {
         botKeyTL.set(botKey); groupIdTL.set(groupId);
         msgIdTL.set(msgId); userIdTL.set(userId);
         groupEventDtoTL.set(eventDto); botTL.set(bot);
@@ -155,9 +201,15 @@ public class CommandRegistry {
                 if (!e.platforms.isEmpty() && !e.platforms.contains(currentPlatform)) continue;
                 if (!matchFilter(e.filter, trimmed, isGroup)) continue;
                 if (!isPluginEnabled(e.pluginId)) continue;
+                // 插件-机器人绑定：绑定非空时仅对绑定 bot 生效（空绑定 = 全局）
+                if (bindingService != null) {
+                    String curBotKey = getCurrentBotKey();
+                    if (curBotKey != null && !bindingService.isAllowedForBot(e.pluginId, currentPlatform, curBotKey)) continue;
+                }
                 if (!checkRateLimit(e)) continue;
                 if (!checkRole(e)) continue;  // @RequireRole
-                Object[] ma = resolveArgs(e.method, trimmed, groupEventDtoTL.get());
+                String argsAfter = argsAfterCommand(trimmed, e.filter);
+                Object[] ma = resolveArgs(e.method, argsAfter, groupEventDtoTL.get());
                 Object result = e.method.invoke(e.instance, ma);
                 if (result != null) return result.toString();
             } catch (Exception ex) {
@@ -185,21 +237,41 @@ public class CommandRegistry {
         if (!f.startWith().isEmpty() && !text.startsWith(f.startWith())) match = false;
         if (!f.endWith().isEmpty() && !text.endsWith(f.endWith())) match = false;
 
-        if (isGroup && f.at() != AtMode.IGNORE && groupEventDtoTL.get() != null) {
-            boolean atBot = groupEventDtoTL.get().isAtBot();
+        if (isGroup && f.at() != AtMode.IGNORE && groupEventDtoTL.get() instanceof GroupMessageEvent groupEvt) {
+            boolean atBot = groupEvt.isAtBot();
             if (f.at() == AtMode.NEED && !atBot) match = false;
             if (f.at() == AtMode.NOT && atBot) match = false;
         }
 
-        if (f.groups().length > 0 && groupEventDtoTL.get() != null) {
-            if (!Arrays.asList(f.groups()).contains(groupEventDtoTL.get().getGroupId())) match = false;
+        if (f.groups().length > 0 && groupEventDtoTL.get() instanceof GroupMessageEvent groupEvt2) {
+            if (!Arrays.asList(f.groups()).contains(groupEvt2.getGroupId())) match = false;
         }
         if (f.senders().length > 0) {
             if (!Arrays.asList(f.senders()).contains(userIdTL.get())) match = false;
         }
-        if (f.roles().length > 0 && groupEventDtoTL.get() != null) {
-            String role = groupEventDtoTL.get().getSenderRole();
+        if (f.roles().length > 0 && groupEventDtoTL.get() instanceof GroupMessageEvent groupEvt3) {
+            String role = groupEvt3.getSenderRole();
             if (role == null || !Arrays.asList(f.roles()).contains(role)) match = false;
+        }
+
+        // 富媒体过滤（懒解析纪律：NEED/NOT 只读 hasAttachments 标记；声明 mediaTypes 才解析消息链）
+        if (f.media() != MediaMode.IGNORE && groupEventDtoTL.get() instanceof GroupMessageEvent groupEvtM) {
+            boolean has = groupEvtM.hasAttachments();
+            if (f.media() == MediaMode.NEED && !has) match = false;
+            if (f.media() == MediaMode.NOT && has) match = false;
+            if (match && f.media() == MediaMode.NEED && has && f.mediaTypes().length > 0) {
+                boolean any = false;
+                var chain = groupEvtM.getChain();
+                if (chain != null) {
+                    for (var md : chain.medias()) {
+                        if (md.mediaType() != null && Arrays.asList(f.mediaTypes()).contains(md.mediaType())) {
+                            any = true;
+                            break;
+                        }
+                    }
+                }
+                if (!any) match = false;
+            }
         }
 
         return f.invert() != match;
@@ -207,14 +279,36 @@ public class CommandRegistry {
 
     // ==================== 参数注入 ====================
 
-    private Object[] resolveArgs(Method method, String args, dev.xuanji.sdk.event.GroupMessageEvent event) {
+    /**
+     * 剥掉命令词/前缀，返回 @Arg 可用的剩余参数文本。
+     * 优先 startWith（前缀整体剥除），其次 cmd（按正则从开头剥离命令词）。
+     */
+    private static String argsAfterCommand(String text, MessageFilter f) {
+        if (f == null || text == null || text.isEmpty()) return text;
+        if (!f.startWith().isEmpty() && text.startsWith(f.startWith())) {
+            return text.substring(f.startWith().length()).trim();
+        }
+        if (!f.cmd().isEmpty()) {
+            try {
+                var p = java.util.regex.Pattern.compile("^\\s*(" + f.cmd() + ")(\\s|$)");
+                var m = p.matcher(text);
+                if (m.find()) return text.substring(m.end()).trim();
+            } catch (Exception ignored) { /* 正则不合法则原样返回 */ }
+        }
+        return text;
+    }
+
+    private Object[] resolveArgs(Method method, String args, dev.xuanji.sdk.event.MessageEvent event) {
         Parameter[] params = method.getParameters();
         Object[] values = new Object[params.length];
-        String[] argParts = args != null ? args.split("\\s+") : new String[0];
+        // @Arg 独立游标：从 args（已剥掉命令词）按顺序取 token，不按参数下标错位
+        String[] argParts = args != null && !args.isBlank() ? args.trim().split("\\s+") : new String[0];
+        int argCursor = 0;
 
         for (int i = 0; i < params.length; i++) {
             Class<?> type = params[i].getType();
-            if (dev.xuanji.sdk.event.GroupMessageEvent.class.isAssignableFrom(type)) {
+            if (dev.xuanji.sdk.event.GroupMessageEvent.class.isAssignableFrom(type)
+                    || dev.xuanji.sdk.event.MessageEvent.class.isAssignableFrom(type)) {
                 values[i] = event; continue;
             }
             if (Bot.class.isAssignableFrom(type)) {
@@ -222,7 +316,7 @@ public class CommandRegistry {
             }
             Arg arg = params[i].getAnnotation(Arg.class);
             if (arg != null) {
-                String raw = i < argParts.length ? argParts[i] : null;
+                String raw = argCursor < argParts.length ? argParts[argCursor++] : null;
                 if (raw == null || raw.isEmpty()) {
                     if (arg.required()) return new Object[]{"缺少参数: " + arg.value()};
                     values[i] = null;
@@ -246,7 +340,10 @@ public class CommandRegistry {
         String key = e.method.getName() + ":" + userIdTL.get();
         long now = System.currentTimeMillis();
         Long last = rateLimitMap.get(key);
-        if (last != null && (now - last) < e.rateLimit * 1000L) return false;
+        if (last != null && (now - last) < e.rateLimit * 1000L) {
+            rateLimitHits.incrementAndGet();
+            return false;
+        }
         rateLimitMap.put(key, now);
         return true;
     }
@@ -255,8 +352,8 @@ public class CommandRegistry {
     private boolean checkRole(HandlerEntry e) {
         if (e.requiredRole == null || e.requiredRole.isEmpty()) return true;
         var evt = groupEventDtoTL.get();
-        if (evt == null) return false;
-        String senderRole = evt.getSenderRole();
+        if (!(evt instanceof GroupMessageEvent g)) return false;
+        String senderRole = g.getSenderRole();
         if (senderRole == null) senderRole = "member";
         return e.requiredRole.contains(senderRole);
     }

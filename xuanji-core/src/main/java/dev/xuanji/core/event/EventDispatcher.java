@@ -1,12 +1,16 @@
 package dev.xuanji.core.event;
 
-import dev.xuanji.core.bot.BotContextManager;
 import dev.xuanji.api.event.BotEvent;
-import lombok.extern.slf4j.Slf4j;
+import dev.xuanji.core.bot.BotContextManager;
+import dev.xuanji.core.bot.DefaultBotContextManager;
+import dev.xuanji.core.storage.MessageEventRecorder;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
-import java.util.*;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Slf4j
@@ -14,10 +18,14 @@ import java.util.Map;
 public class EventDispatcher {
 
     private final Map<String, EventHandler> handlerMap = new HashMap<>();
-    private final BotContextManager botContext;
+    private final ObjectProvider<BotContextManager> botContextProvider;
+    private final MessageEventRecorder eventRecorder;
 
-    public EventDispatcher(List<EventHandler> handlers, BotContextManager botContext) {
-        this.botContext = botContext;
+    public EventDispatcher(List<EventHandler> handlers,
+                           ObjectProvider<BotContextManager> botContextProvider,
+                           MessageEventRecorder eventRecorder) {
+        this.botContextProvider = botContextProvider;
+        this.eventRecorder = eventRecorder;
         for (EventHandler handler : handlers) {
             EventMapping mapping = handler.getClass().getAnnotation(EventMapping.class);
             if (mapping != null) {
@@ -45,7 +53,7 @@ public class EventDispatcher {
             return;
         }
         log.info("[事件分发] 收到事件: type={}, robotId={}, eventId={}", eventType, robotId, event.eventId());
-        dev.xuanji.core.storage.ConsoleApiController.recordEvent(
+        eventRecorder.record(
                 "LOG", "事件分发", "收到事件", robotId,
                 eventType, "eventId=" + (event.eventId() != null ? event.eventId().substring(0, Math.min(20, event.eventId().length())) : ""));
 
@@ -53,19 +61,21 @@ public class EventDispatcher {
         data.put("_eventType", eventType);
         if (event.eventId() != null && !event.eventId().isEmpty()) data.put("_eventId", event.eventId());
 
+        // 适配器可插拔：QQ 未启用时无 BotContextManager Bean，用无操作兜底
+        BotContextManager botContext = botContextProvider.getIfAvailable(DefaultBotContextManager::new);
         botContext.setCurrentBot(robotId, envType);
 
         try {
             EventHandler handler = handlerMap.get(eventType);
             if (handler != null) {
                 log.info("[事件分发] 找到处理器: type={}, handler={}", eventType, handler.getClass().getSimpleName());
-                dev.xuanji.core.storage.ConsoleApiController.recordEvent(
+                eventRecorder.record(
                         "LOG", "匹配处理器", handler.getClass().getSimpleName(),
                         robotId, eventType, "");
                 try {
                     handler.handle(event);
                     log.info("[事件分发] 处理完成: type={}", eventType);
-                    dev.xuanji.core.storage.ConsoleApiController.recordEvent(
+                    eventRecorder.record(
                             "LOG", "处理完成", eventType, robotId, "", "");
                 } catch (Exception e) {
                     log.error("[事件分发] 处理异常: type={}, robotId={}, error={}", eventType, robotId, e.getMessage(), e);

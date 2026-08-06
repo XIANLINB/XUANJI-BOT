@@ -1,63 +1,88 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  com.fasterxml.jackson.databind.JsonNode
+ *  com.fasterxml.jackson.databind.node.ObjectNode
+ *  dev.xuanji.api.event.BotEvent
+ *  dev.xuanji.api.event.XuanjiGroup
+ *  dev.xuanji.api.event.XuanjiUser
+ *  dev.xuanji.api.message.MessageChain
+ *  dev.xuanji.api.message.MessageElement$At
+ *  dev.xuanji.core.command.CommandRegistry
+ *  dev.xuanji.core.concurrent.BotOutboundExecutor
+ *  dev.xuanji.core.event.EventHandler
+ *  dev.xuanji.core.event.EventMapping
+ *  dev.xuanji.core.storage.MessageEventRecorder
+ *  dev.xuanji.core.util.TimeUtils
+ *  dev.xuanji.sdk.bot.Bot
+ *  dev.xuanji.sdk.event.GroupMessageEvent
+ *  dev.xuanji.sdk.event.GroupMessageEvent$Builder
+ *  dev.xuanji.sdk.event.MessageEvent
+ *  dev.xuanji.sdk.event.PrivateMessageEvent
+ *  dev.xuanji.sdk.event.PrivateMessageEvent$Builder
+ *  lombok.Generated
+ *  org.slf4j.Logger
+ *  org.slf4j.LoggerFactory
+ */
 package dev.xuanji.adapter.onebot.event.handler;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.xuanji.adapter.onebot.api.OneBotApiService;
 import dev.xuanji.adapter.onebot.bot.OneBotXjBot;
 import dev.xuanji.adapter.onebot.sender.OneBotMessageSenderImpl;
+import dev.xuanji.adapter.onebot.storage.OneBotRepository;
 import dev.xuanji.api.event.BotEvent;
 import dev.xuanji.api.event.XuanjiGroup;
 import dev.xuanji.api.event.XuanjiUser;
 import dev.xuanji.api.message.MessageChain;
 import dev.xuanji.api.message.MessageElement;
 import dev.xuanji.core.command.CommandRegistry;
+import dev.xuanji.core.concurrent.BotOutboundExecutor;
 import dev.xuanji.core.event.EventHandler;
 import dev.xuanji.core.event.EventMapping;
-import dev.xuanji.core.storage.ConsoleApiController;
-import dev.xuanji.core.storage.log.MessageLogger;
+import dev.xuanji.core.storage.MessageEventRecorder;
+import dev.xuanji.core.util.TimeUtils;
+import dev.xuanji.sdk.bot.Bot;
 import dev.xuanji.sdk.event.GroupMessageEvent;
+import dev.xuanji.sdk.event.MessageEvent;
 import dev.xuanji.sdk.event.PrivateMessageEvent;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.JdbcTemplate;
+import lombok.Generated;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-/**
- * OneBot 消息事件处理器 —— 把 OneBot 的群聊 / 私聊消息接入统一的 CommandRegistry 插件指令系统。
- *
- * <p>与 QQ 的 GroupMessageHandler/C2cMessageHandler 完全镜像：把平台报文转换为平台无关的
- * GroupMessageEvent/PrivateMessageEvent，设置线程上下文后调用 CommandRegistry。
- * 因此同一个 @GroupMessage 插件方法既能响应 QQ 官方消息，也能响应 Napcat(OneBot) 消息。
- *
- * <p>事件类型路由键（rawEventType）取自 OneBotEventConverter：
- * 群消息 message.group、私聊 message.private、频道 message.guild。
- */
-@Slf4j
-@EventMapping({"message.group", "message.group.normal", "message.group.anonymous", "message.group.notice",
-               "message.private", "message.private.friend", "message.private.group", "message.private.other",
-               "message.guild", "message.guild.normal"})
-public class OneBotMessageHandler implements EventHandler {
-
+@EventMapping(value={"message.group", "message.group.normal", "message.group.anonymous", "message.group.notice", "message.private", "message.private.friend", "message.private.group", "message.private.other", "message.guild", "message.guild.normal"})
+public class OneBotMessageHandler
+implements EventHandler {
+    @Generated
+    private static final Logger log = LoggerFactory.getLogger(OneBotMessageHandler.class);
     private final CommandRegistry commandRegistry;
     private final OneBotApiService api;
     private final OneBotMessageSenderImpl sender;
-    private final JdbcTemplate jdbc;
+    private final OneBotRepository repository;
+    private final MessageEventRecorder eventRecorder;
+    private final BotOutboundExecutor outbound;
 
-    public OneBotMessageHandler(CommandRegistry commandRegistry, OneBotApiService api,
-                                OneBotMessageSenderImpl sender, JdbcTemplate jdbc) {
+    public OneBotMessageHandler(CommandRegistry commandRegistry, OneBotApiService api, OneBotMessageSenderImpl sender, OneBotRepository repository, MessageEventRecorder eventRecorder, BotOutboundExecutor outbound) {
         this.commandRegistry = commandRegistry;
         this.api = api;
         this.sender = sender;
-        this.jdbc = jdbc;
+        this.repository = repository;
+        this.eventRecorder = eventRecorder;
+        this.outbound = outbound;
     }
 
-    @Override
     public String getEventType() {
         return "ONEBOT_MESSAGE";
     }
 
-    @Override
     public void handle(BotEvent botEvent) {
-        if (!(botEvent.platformData() instanceof ObjectNode data)) {
+        JsonNode jsonNode = botEvent.platformData();
+        if (!(jsonNode instanceof ObjectNode)) {
             return;
         }
+        ObjectNode data = (ObjectNode)jsonNode;
         String robotId = botEvent.bot() != null ? botEvent.bot().selfId() : "";
         String raw = botEvent.rawEventType();
         String msgId = botEvent.replyToMsgId() != null ? botEvent.replyToMsgId() : "";
@@ -66,86 +91,93 @@ public class OneBotMessageHandler implements EventHandler {
         XuanjiUser senderU = botEvent.sender();
         XuanjiGroup group = botEvent.group();
         String senderId = senderU != null ? senderU.id() : "";
-        String senderName = (senderU != null && senderU.nickname() != null) ? senderU.nickname() : senderId;
+        String senderName = senderU != null && senderU.nickname() != null ? senderU.nickname() : senderId;
         String groupId = group != null ? group.groupId() : "";
-
         try {
-            // rawEventType = post_type.detail.sub_type（如 message.group.normal / message.private.friend）
-            // 用前缀匹配，兼容「带 sub_type」与「不带 sub_type」两种报文。
             if (raw != null && (raw.startsWith("message.group") || raw.startsWith("message.guild"))) {
-                handleGroup(robotId, raw, msgId, chain, plain, senderId, senderName, groupId, data);
+                this.handleGroup(robotId, raw, msgId, chain, plain, senderId, senderName, groupId, data);
             } else if (raw != null && raw.startsWith("message.private")) {
-                handlePrivate(robotId, msgId, plain, senderId, senderName);
+                this.handlePrivate(robotId, msgId, chain, plain, senderId, senderName);
             } else {
-                log.debug("[OneBot消息] 未识别的消息路由键: raw={}", raw);
+                log.debug("[OneBot\u6d88\u606f] \u672a\u8bc6\u522b\u7684\u6d88\u606f\u8def\u7531\u952e: raw={}", (Object)raw);
             }
-        } catch (Exception e) {
-            log.error("[OneBot消息] 处理异常: robotId={}, error={}", robotId, e.getMessage(), e);
+        }
+        catch (Exception e) {
+            log.error("[OneBot\u6d88\u606f] \u5904\u7406\u5f02\u5e38: robotId={}, error={}", new Object[]{robotId, e.getMessage(), e});
         }
     }
 
-    private void handleGroup(String robotId, String raw, String msgId, MessageChain chain,
-                             String plain, String senderId, String senderName, String groupId, ObjectNode data) {
+    /*
+     * WARNING - Removed try catching itself - possible behaviour change.
+     */
+    private void handleGroup(String robotId, String raw, String msgId, MessageChain chain, String plain, String senderId, String senderName, String groupId, ObjectNode data) {
         String role = data.path("sender").path("role").asText("member");
-        boolean atBot = chain != null && chain.elements().stream()
-                .anyMatch(e -> e instanceof MessageElement.At a && robotId.equals(a.userId()));
-
-        GroupMessageEvent sdk = new GroupMessageEvent.Builder()
-                .messageId(msgId).content(plain).plainText(plain)
-                .messageType(0).groupId(groupId).senderId(senderId)
-                .senderName(senderName).senderRole(role).atBot(atBot).platform("onebot").build();
-
-        // 自动同步：群 + 成员（与 QQ 适配器 autoSyncGroup 同构，落 XUANJI_ONEBOT_* 表）
-        autoSyncGroup(robotId, groupId, senderId, role);
-        // 群消息流水（日志库 xuanji_onebot_group_message）
-        MessageLogger.onebotGroupMessage("IN", robotId, groupId, senderId, "text", plain, data.toString());
-
-        OneBotXjBot bot = new OneBotXjBot(api, sender, robotId, groupId, senderId, msgId);
-        CommandRegistry.setContext(robotId, groupId, msgId, senderId, sdk, bot, "onebot");
+        boolean atBot = chain != null && chain.elements().stream().anyMatch(e -> {
+            MessageElement.At a;
+            return e instanceof MessageElement.At && robotId.equals((a = (MessageElement.At)e).userId());
+        });
+        GroupMessageEvent sdk = new GroupMessageEvent.Builder().messageId(msgId).content(plain).plainText(plain).messageType(0).groupId(groupId).senderId(senderId).senderName(senderName).senderRole(role).atBot(atBot).platform("onebot").chain(chain).hasAttachments(chain != null && chain.hasMedia()).build();
+        if (this.repository != null) {
+            this.autoSyncGroup(robotId, groupId, senderId, role, senderName);
+            this.repository.insertMessage(robotId, "GROUP", groupId, senderId, "IN", "text", plain, msgId, null, null, data.toString(), TimeUtils.nowEpochSeconds());
+        }
+        OneBotXjBot bot = new OneBotXjBot(this.api, this.sender, this.outbound, robotId, groupId, senderId, msgId);
+        CommandRegistry.setContext((String)robotId, (String)groupId, (String)msgId, (String)senderId, (MessageEvent)sdk, (Bot)bot, (String)"onebot");
         try {
-            ConsoleApiController.recordEvent("IN", "text", senderName, groupId, plain,
-                    "onebot:" + raw + ":msgId=" + msgId);
-            String result = commandRegistry.executeGroupMessage(plain.trim());
+            if (this.eventRecorder != null) {
+                this.eventRecorder.record("IN", "text", senderName, groupId, plain, "onebot:" + raw + ":msgId=" + msgId);
+            }
+            String result = this.commandRegistry.executeGroupMessage(plain.trim());
             if (result != null) {
                 bot.reply(result);
-                ConsoleApiController.recordEvent("OUT", "text", "bot", groupId, result, "onebot");
+                if (this.eventRecorder != null) {
+                    this.eventRecorder.record("OUT", "text", "bot", groupId, result, "onebot");
+                }
             } else if (atBot) {
-                bot.reply("发送 \"帮助\" 查看可用命令");
+                bot.reply("\u53d1\u9001 \"\u5e2e\u52a9\" \u67e5\u770b\u53ef\u7528\u547d\u4ee4");
             }
-        } finally {
+        }
+        finally {
             CommandRegistry.clearContext();
         }
     }
 
-    private void handlePrivate(String robotId, String msgId, String plain,
-                               String senderId, String senderName) {
-        PrivateMessageEvent sdk = new PrivateMessageEvent(msgId, plain, senderId, senderName, 0, "onebot");
-        OneBotXjBot bot = new OneBotXjBot(api, sender, robotId, null, senderId, msgId);
-        CommandRegistry.setContext(robotId, null, msgId, senderId, null, bot, "onebot");
+    /*
+     * WARNING - Removed try catching itself - possible behaviour change.
+     */
+    private void handlePrivate(String robotId, String msgId, MessageChain chain, String plain, String senderId, String senderName) {
+        PrivateMessageEvent sdk = new PrivateMessageEvent.Builder().messageId(msgId).content(plain).senderId(senderId).senderName(senderName).messageType(0).platform("onebot").chain(chain).hasAttachments(chain != null && chain.hasMedia()).build();
+        if (this.repository != null) {
+            this.repository.ensureUser(robotId, senderId);
+            this.repository.upsertUser(robotId, senderId, senderName, null);
+            this.repository.insertMessage(robotId, "C2C", null, senderId, "IN", "text", plain, msgId, null, null, null, TimeUtils.nowEpochSeconds());
+        }
+        OneBotXjBot bot = new OneBotXjBot(this.api, this.sender, this.outbound, robotId, null, senderId, msgId);
+        CommandRegistry.setContext((String)robotId, null, (String)msgId, (String)senderId, null, (Bot)bot, (String)"onebot");
         try {
-            ConsoleApiController.recordEvent("IN", "text", senderName, "", plain,
-                    "onebot:message.private:msgId=" + msgId);
-            MessageLogger.onebotEvent("IN", robotId, "message.private", null, "私聊消息");
-            String result = commandRegistry.executePrivateMessage(plain.trim());
+            if (this.eventRecorder != null) {
+                this.eventRecorder.record("IN", "text", senderName, "", plain, "onebot:message.private:msgId=" + msgId);
+            }
+            String result = this.commandRegistry.executePrivateMessage(plain.trim());
             if (result != null) {
                 bot.reply(result);
-                ConsoleApiController.recordEvent("OUT", "text", "bot", "", result, "onebot");
+                if (this.eventRecorder != null) {
+                    this.eventRecorder.record("OUT", "text", "bot", "", result, "onebot");
+                }
             }
-        } finally {
+        }
+        finally {
             CommandRegistry.clearContext();
         }
     }
 
-    /** 把 OneBot 群与成员同步进 xuanji_onebot_group / xuanji_onebot_group_member（与 QQ autoSyncGroup 同构）。 */
-    private void autoSyncGroup(String botId, String groupId, String memberId, String role) {
-        if (groupId == null || groupId.isEmpty()) return;
-        try {
-            jdbc.update("MERGE INTO xuanji_onebot_group (bot_id, group_id, is_deleted) KEY(bot_id,group_id) VALUES (?,?,0)",
-                    botId, groupId);
-        } catch (Exception ignored) {}
-        try {
-            jdbc.update("MERGE INTO xuanji_onebot_group_member (bot_id, group_id, member_id, role) KEY(bot_id,group_id,member_id) VALUES (?,?,?,?)",
-                    botId, groupId, memberId, role != null ? role : "member");
-        } catch (Exception ignored) {}
+    private void autoSyncGroup(String selfId, String groupId, String memberId, String role, String nickname) {
+        if (groupId == null || groupId.isEmpty() || this.repository == null) {
+            return;
+        }
+        this.repository.ensureGroup(selfId, groupId);
+        this.repository.ensureGroupMember(selfId, groupId, memberId, role);
+        this.repository.upsertGroupMember(selfId, groupId, memberId, role, nickname, null);
     }
 }
+

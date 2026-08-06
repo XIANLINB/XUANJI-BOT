@@ -1,25 +1,40 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  dev.xuanji.core.plugin.XuanjiPluginManager
+ *  lombok.Generated
+ *  org.slf4j.Logger
+ *  org.slf4j.LoggerFactory
+ *  org.springframework.boot.context.event.ApplicationReadyEvent
+ *  org.springframework.context.event.EventListener
+ *  org.springframework.stereotype.Component
+ */
 package dev.xuanji.starter;
 
 import dev.xuanji.core.plugin.XuanjiPluginManager;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import lombok.Generated;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
-/**
- * 插件自动加载器 —— ApplicationReady 后扫描 plugins/ 目录并加载所有 PF4J 插件。
- */
-@Slf4j
 @Component
-@RequiredArgsConstructor
 public class PluginAutoLoader {
-
+    @Generated
+    private static final Logger log = LoggerFactory.getLogger(PluginAutoLoader.class);
     private final XuanjiPluginManager pluginManager;
 
-    @EventListener(ApplicationReadyEvent.class)
+    @EventListener(value={ApplicationReadyEvent.class})
     public void onReady() {
-        log.info("[Plugin] 开始扫描插件目录...");
-        pluginManager.loadAndStartAll();
+        log.info("[Plugin] \u5f00\u59cb\u626b\u63cf\u63d2\u4ef6\u76ee\u5f55...");
+        this.pluginManager.loadAndStartAll();
+    }
+
+    @Generated
+    public PluginAutoLoader(XuanjiPluginManager pluginManager) {
+        this.pluginManager = pluginManager;
     }
 }
+

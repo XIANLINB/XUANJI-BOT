@@ -20,7 +20,7 @@ import java.nio.file.Path;
  *   xuanji_bot              — Bot 实例注册表
  *   xuanji_user_binding     — 跨平台账号绑定
  *   xuanji_plugin_kv        — 插件 KV 存储
- *   xuanji_event_dedup      — 事件幂等去重（TTL 24h 定时清理）
+ *   xuanji_dedup      — 事件幂等去重（TTL 24h 定时清理）
  *   xuanji_blacklist        — 黑名单（framework / bot / group 三级 scope）
  *   xuanji_super_admin      — 群超管
  *
@@ -94,32 +94,72 @@ public class DatabaseInitializer {
 
         log.info("[DB] {}建表...", firstRun ? "首次" : "");
 
-        // ==================== 框架域 ====================
+        // ==================== 框架域（v3.3 收敛） ====================
 
-        // 1. Bot 实例注册表
+        // 1. Bot 实例注册表（instance_id = 真实 appId / selfId，跨平台唯一索引）
         jdbc.execute("""
             CREATE TABLE IF NOT EXISTS xuanji_bot (
-                id              BIGINT AUTO_INCREMENT PRIMARY KEY,
-                platform        VARCHAR(16)  NOT NULL,
-                bot_identifier  VARCHAR(64)  NOT NULL,
-                bot_key         VARCHAR(64),
-                status          VARCHAR(16)  DEFAULT 'OFFLINE',
-                create_time     TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+                id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+                platform    VARCHAR(16)  NOT NULL,
+                instance_id VARCHAR(128) NOT NULL,
+                bot_key     VARCHAR(128),
+                status      VARCHAR(16)  DEFAULT 'OFFLINE',
+                create_time TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
             )
         """);
+        jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_bot_platform_id ON xuanji_bot (platform, instance_id)");
 
-        // 2. 跨平台账号绑定（同一真人在不同平台的 ID 归一）
+        // 2. 全局 KV 配置（唯一真相源之一）
         jdbc.execute("""
-            CREATE TABLE IF NOT EXISTS xuanji_user_binding (
-                internal_id      VARCHAR(64) NOT NULL,
-                platform         VARCHAR(16) NOT NULL,
-                platform_user_id VARCHAR(64) NOT NULL,
-                create_time      TIMESTAMP   DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (platform, platform_user_id)
+            CREATE TABLE IF NOT EXISTS xuanji_config (
+                config_key   VARCHAR(128) PRIMARY KEY,
+                config_value TEXT,
+                updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """);
 
-        // 3. 插件 KV 存储
+        // 3. 每机器人配置（EAV：bot_key / config_key / config_value）
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS xuanji_bot_setting (
+                bot_key      VARCHAR(128) NOT NULL,
+                config_key   VARCHAR(128) NOT NULL,
+                config_value TEXT,
+                updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (bot_key, config_key)
+            )
+        """);
+
+        // 3.5 群级配置（EAV：bot_key / group_id / config_key / config_value，三级配置的最小粒度）
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS xuanji_group_setting (
+                bot_key      VARCHAR(128) NOT NULL,
+                group_id     VARCHAR(128) NOT NULL,
+                config_key   VARCHAR(128) NOT NULL,
+                config_value TEXT,
+                updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (bot_key, group_id, config_key)
+            )
+        """);
+
+        // 4. 事件幂等去重（event_id 512，适配长 ID）
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS xuanji_dedup (
+                event_id    VARCHAR(512) PRIMARY KEY,
+                platform    VARCHAR(16)  NOT NULL,
+                create_time TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+            )
+        """);
+
+        // 5. 插件注册表
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS xuanji_plugin (
+                plugin_id   VARCHAR(128) PRIMARY KEY,
+                enabled     TINYINT DEFAULT 1,
+                create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """);
+
+        // 6. 插件 KV 存储（兼容旧 xuanji_plugin_kv 用法）
         jdbc.execute("""
             CREATE TABLE IF NOT EXISTS xuanji_plugin_kv (
                 plugin_id   VARCHAR(128) NOT NULL,
@@ -131,181 +171,99 @@ public class DatabaseInitializer {
             )
         """);
 
-        // 4. 事件幂等去重（Pipeline 接入后才有数据；定时清理 24h 前记录）
+        // 7. 机器人主人（每 bot 唯一）
         jdbc.execute("""
-            CREATE TABLE IF NOT EXISTS xuanji_event_dedup (
-                event_id    VARCHAR(128) PRIMARY KEY,
-                platform    VARCHAR(16)  NOT NULL,
-                create_time TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+            CREATE TABLE IF NOT EXISTS xuanji_bot_owner (
+                bot_key      VARCHAR(128) PRIMARY KEY,
+                owner_openid VARCHAR(128) NOT NULL,
+                create_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """);
 
-        // 5. 黑名单
+        // 8. 黑名单（bot_key / group_id / user_id 唯一）
         jdbc.execute("""
             CREATE TABLE IF NOT EXISTS xuanji_blacklist (
                 id          BIGINT AUTO_INCREMENT PRIMARY KEY,
-                scope       VARCHAR(64)  NOT NULL,
-                target_type VARCHAR(16)  NOT NULL,
-                target_id   VARCHAR(128) NOT NULL,
+                bot_key     VARCHAR(128) NOT NULL,
+                group_id    VARCHAR(128) NOT NULL,
+                user_id     VARCHAR(128) NOT NULL,
                 reason      VARCHAR(512),
-                expires_at  TIMESTAMP,
-                created_by  VARCHAR(64),
-                create_time TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+                create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """);
+        jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_blacklist ON xuanji_blacklist (bot_key, group_id, user_id)");
 
-        // 6. 群超管
+        // 9. 插件-机器人绑定
         jdbc.execute("""
-            CREATE TABLE IF NOT EXISTS xuanji_super_admin (
-                id            BIGINT AUTO_INCREMENT PRIMARY KEY,
-                bot_key       VARCHAR(64)  NOT NULL,
-                group_id      VARCHAR(128) NOT NULL,
-                member_openid VARCHAR(128) NOT NULL,
-                create_time   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+            CREATE TABLE IF NOT EXISTS xuanji_plugin_binding (
+                plugin_id  VARCHAR(128) NOT NULL,
+                platform   VARCHAR(32)  NOT NULL,
+                bot_key    VARCHAR(128) NOT NULL,
+                created_at BIGINT       DEFAULT 0,
+                PRIMARY KEY (plugin_id, platform, bot_key)
             )
         """);
 
-        // ==================== 平台域 ====================
+        // ==================== 向导进度（SetupController 自建表） ====================
 
-        // 7. QQ 机器人用户档案
         jdbc.execute("""
-            CREATE TABLE IF NOT EXISTS xuanji_qqbot_user (
-                id               BIGINT AUTO_INCREMENT PRIMARY KEY,
-                bot_id           VARCHAR(64)  NOT NULL,
-                platform_user_id VARCHAR(64)  NOT NULL,
-                internal_id      VARCHAR(64),
-                nickname         VARCHAR(128),
-                framework_role   VARCHAR(32),
-                authority        INT          DEFAULT 0,
-                is_deleted       TINYINT      DEFAULT 0,
-                create_time      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+            CREATE TABLE IF NOT EXISTS xuanji_setup (
+                id   INT PRIMARY KEY,
+                step INT DEFAULT 0
             )
         """);
 
-        // 8. OneBot 用户档案（预留）
-        jdbc.execute("""
-            CREATE TABLE IF NOT EXISTS xuanji_onebot_user (
-                id               BIGINT AUTO_INCREMENT PRIMARY KEY,
-                bot_id           VARCHAR(64)  NOT NULL,
-                platform_user_id VARCHAR(64)  NOT NULL,
-                internal_id      VARCHAR(64),
-                nickname         VARCHAR(128),
-                framework_role   VARCHAR(32),
-                authority        INT          DEFAULT 0,
-                is_deleted       TINYINT      DEFAULT 0,
-                create_time      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
-            )
-        """);
+        // ==================== 旧结构演进（幂等补列，v3.3 收敛） ====================
 
-        // 9. QQ 机器人群档案
-        jdbc.execute("""
-            CREATE TABLE IF NOT EXISTS xuanji_qqbot_group (
-                id          BIGINT AUTO_INCREMENT PRIMARY KEY,
-                bot_id      VARCHAR(64)  NOT NULL,
-                group_id    VARCHAR(128) NOT NULL,
-                group_name  VARCHAR(256),
-                join_time   TIMESTAMP,
-                inviter_id  VARCHAR(64),
-                owner_id    VARCHAR(64),
-                member_count INT         DEFAULT 0,
-                status      VARCHAR(16)  DEFAULT 'active',
-                is_deleted  TINYINT      DEFAULT 0,
-                create_time TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
-            )
-        """);
+        // 旧 xuanji_bot 用 bot_identifier，新库用 instance_id —— 迁移旧表数据
+        migrateLegacyTables();
 
-        // 10. QQ 机器人群成员
-        jdbc.execute("""
-            CREATE TABLE IF NOT EXISTS xuanji_qqbot_group_member (
-                id          BIGINT AUTO_INCREMENT PRIMARY KEY,
-                bot_id      VARCHAR(64)  NOT NULL,
-                group_id    VARCHAR(128) NOT NULL,
-                member_id   VARCHAR(128) NOT NULL,
-                role        VARCHAR(32),
-                card        VARCHAR(128),
-                join_time   TIMESTAMP,
-                is_deleted  TINYINT      DEFAULT 0,
-                create_time TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
-            )
-        """);
+        log.info("[DB] {}", firstRun ? "框架初始化建表完成（v3.3 收敛）" : "建表已完成（已存在）");
+    }
 
-        // 11. OneBot 机器人群档案（与 QQ 同构，按平台分表）
-        jdbc.execute("""
-            CREATE TABLE IF NOT EXISTS xuanji_onebot_group (
-                id          BIGINT AUTO_INCREMENT PRIMARY KEY,
-                bot_id      VARCHAR(64)  NOT NULL,
-                group_id    VARCHAR(128) NOT NULL,
-                group_name  VARCHAR(256),
-                join_time   TIMESTAMP,
-                inviter_id  VARCHAR(64),
-                owner_id    VARCHAR(64),
-                member_count INT         DEFAULT 0,
-                status      VARCHAR(16)  DEFAULT 'active',
-                is_deleted  TINYINT      DEFAULT 0,
-                create_time TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
-            )
-        """);
-
-        // 12. OneBot 机器人群成员
-        jdbc.execute("""
-            CREATE TABLE IF NOT EXISTS xuanji_onebot_group_member (
-                id          BIGINT AUTO_INCREMENT PRIMARY KEY,
-                bot_id      VARCHAR(64)  NOT NULL,
-                group_id    VARCHAR(128) NOT NULL,
-                member_id   VARCHAR(128) NOT NULL,
-                role        VARCHAR(32),
-                card        VARCHAR(128),
-                join_time   TIMESTAMP,
-                is_deleted  TINYINT      DEFAULT 0,
-                create_time TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
-            )
-        """);
-
-        // 13. QQ Bot 信息表（启动时从 /users/@me 接口同步）
-        jdbc.execute("""
-            CREATE TABLE IF NOT EXISTS xuanji_qqbot_info (
-                id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
-                bot_id             VARCHAR(64)  NOT NULL,
-                bot_key            VARCHAR(64)  NOT NULL,
-                username           VARCHAR(128),
-                avatar             VARCHAR(512),
-                bot                BOOLEAN,
-                union_openid       VARCHAR(128),
-                union_user_account VARCHAR(128),
-                share_url          VARCHAR(512),
-                welcome_msg        VARCHAR(1024),
-                raw_json           TEXT,
-                updated_at         TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE (bot_id)
-            )
-        """);
-
-        // ==================== 已存在库的结构演进（新增列，幂等） ====================
-        // 群表补强字段
-        jdbc.execute("ALTER TABLE xuanji_qqbot_group ADD COLUMN IF NOT EXISTS join_time TIMESTAMP");
-        jdbc.execute("ALTER TABLE xuanji_qqbot_group ADD COLUMN IF NOT EXISTS inviter_id VARCHAR(64)");
-        jdbc.execute("ALTER TABLE xuanji_qqbot_group ADD COLUMN IF NOT EXISTS owner_id VARCHAR(64)");
-        jdbc.execute("ALTER TABLE xuanji_qqbot_group ADD COLUMN IF NOT EXISTS member_count INT DEFAULT 0");
-        jdbc.execute("ALTER TABLE xuanji_onebot_group ADD COLUMN IF NOT EXISTS join_time TIMESTAMP");
-        jdbc.execute("ALTER TABLE xuanji_onebot_group ADD COLUMN IF NOT EXISTS inviter_id VARCHAR(64)");
-        jdbc.execute("ALTER TABLE xuanji_onebot_group ADD COLUMN IF NOT EXISTS owner_id VARCHAR(64)");
-        jdbc.execute("ALTER TABLE xuanji_onebot_group ADD COLUMN IF NOT EXISTS member_count INT DEFAULT 0");
-        // 成员表补强字段
-        jdbc.execute("ALTER TABLE xuanji_qqbot_group_member ADD COLUMN IF NOT EXISTS card VARCHAR(128)");
-        jdbc.execute("ALTER TABLE xuanji_qqbot_group_member ADD COLUMN IF NOT EXISTS join_time TIMESTAMP");
-        jdbc.execute("ALTER TABLE xuanji_qqbot_group_member ADD COLUMN IF NOT EXISTS is_deleted TINYINT DEFAULT 0");
-        jdbc.execute("ALTER TABLE xuanji_onebot_group_member ADD COLUMN IF NOT EXISTS card VARCHAR(128)");
-        jdbc.execute("ALTER TABLE xuanji_onebot_group_member ADD COLUMN IF NOT EXISTS join_time TIMESTAMP");
-        jdbc.execute("ALTER TABLE xuanji_onebot_group_member ADD COLUMN IF NOT EXISTS is_deleted TINYINT DEFAULT 0");
-
-        // ==================== 唯一索引（保障 MERGE KEY 幂等，防止重复行） ====================
-        jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_bot_platform_id ON xuanji_bot (platform, bot_identifier)");
-        jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_qqbot_group ON xuanji_qqbot_group (bot_id, group_id)");
-        jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_onebot_group ON xuanji_onebot_group (bot_id, group_id)");
-        jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_qqbot_member ON xuanji_qqbot_group_member (bot_id, group_id, member_id)");
-        jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_onebot_member ON xuanji_onebot_group_member (bot_id, group_id, member_id)");
-
-        log.info("[DB] {}", firstRun ? "框架初始化建表完成（13 张 + 5 唯一索引）" : "建表已完成（已存在）");
+    /**
+     * 旧版框架表迁移：v3.3 之前 xuanji_bot 使用 bot_identifier 列、xuanji_setting/xuanji_bot_config
+     * 已被 xuanji_config / xuanji_bot_setting 取代 —— 仅对旧库执行，新库无操作。
+     */
+    private void migrateLegacyTables() {
+        try {
+            // 旧 xuanji_bot 补 instance_id 并回填
+            jdbc.execute("ALTER TABLE xuanji_bot ADD COLUMN IF NOT EXISTS instance_id VARCHAR(128)");
+            jdbc.execute("UPDATE xuanji_bot SET instance_id = bot_identifier WHERE instance_id IS NULL OR instance_id = ''");
+            // 旧列兜底：新库没有 bot_identifier 列，此语句仅对旧库生效（列不存在时 H2 抛错被忽略）
+            try {
+                jdbc.execute("ALTER TABLE xuanji_bot DROP COLUMN IF EXISTS bot_identifier");
+            } catch (Exception ignored) {
+            }
+            // 旧 xuanji_setting → xuanji_config（只迁移仍存在的旧表）
+            try {
+                jdbc.execute("""
+                    INSERT INTO xuanji_config (config_key, config_value)
+                    SELECT setting_key, setting_value FROM xuanji_setting
+                    WHERE NOT EXISTS (SELECT 1 FROM xuanji_config WHERE xuanji_config.config_key = xuanji_setting.setting_key)
+                """);
+            } catch (Exception ignored) {
+            }
+            // 旧 xuanji_bot_config（固定列）→ xuanji_bot_setting（EAV）
+            try {
+                jdbc.execute("""
+                    INSERT INTO xuanji_bot_setting (bot_key, config_key, config_value)
+                    SELECT bot_key, 'client_secret', client_secret FROM xuanji_bot_config
+                    WHERE client_secret IS NOT NULL
+                      AND NOT EXISTS (SELECT 1 FROM xuanji_bot_setting WHERE xuanji_bot_setting.bot_key = xuanji_bot_config.bot_key AND config_key='client_secret')
+                """);
+            } catch (Exception ignored) {
+            }
+            // 迁移完成后删除旧表
+            for (String t : new String[]{"xuanji_setting", "xuanji_bot_config"}) {
+                try {
+                    jdbc.execute("DROP TABLE IF EXISTS " + t);
+                } catch (Exception ignored) {
+                }
+            }
+        } catch (Exception e) {
+            log.debug("[DB] 旧表迁移跳过（新库）: {}", e.getMessage());
+        }
     }
 
     /** 从 YAML 配置中注册 Bot 实例到 xuanji_bot 表 */
@@ -332,8 +290,8 @@ public class DatabaseInitializer {
 
             try {
                 jdbc.update("""
-                    MERGE INTO xuanji_bot (platform, bot_identifier, bot_key, status)
-                    KEY (platform, bot_identifier) VALUES (?, ?, ?, ?)
+                    MERGE INTO xuanji_bot (platform, instance_id, bot_key, status)
+                    KEY (platform, instance_id) VALUES (?, ?, ?, ?)
                 """, platform, appId, botKey, "ONLINE");
                 log.info("[DB] Bot 已注册: platform={}, id={}, key={}", platform, appId, botKey);
             } catch (Exception e) {

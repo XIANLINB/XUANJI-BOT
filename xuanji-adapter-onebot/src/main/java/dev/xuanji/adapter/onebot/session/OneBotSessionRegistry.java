@@ -1,90 +1,120 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  dev.xuanji.core.storage.FrameworkBotRepository
+ *  lombok.Generated
+ *  org.slf4j.Logger
+ *  org.slf4j.LoggerFactory
+ */
 package dev.xuanji.adapter.onebot.session;
 
-import org.springframework.jdbc.core.JdbcTemplate;
-
-import lombok.extern.slf4j.Slf4j;
-
+import dev.xuanji.adapter.onebot.session.OneBotSession;
+import dev.xuanji.core.storage.FrameworkBotRepository;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import lombok.Generated;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-/**
- * OneBot 会话注册表 — selfId → 活跃会话。
- *
- * <p>同一个 selfId 只保留最新一条连接（OneBot 实现重连时覆盖旧连接）。
- * 发送消息时按 selfId 定位会话；未指定 selfId 时取任意在线会话（单 bot 场景常见）。
- *
- * <p>连接建立时把 OneBot 实例登记进 {@code xuanji_bot}（platform=onebot），
- * 让控制台 Bot 列表 / 群数统计能看见 OneBot 实例；连接断开时置为 OFFLINE。
- */
-@Slf4j
 public class OneBotSessionRegistry {
+    @Generated
+    private static final Logger log = LoggerFactory.getLogger(OneBotSessionRegistry.class);
+    private final Map<String, OneBotSession> sessions = new ConcurrentHashMap<String, OneBotSession>();
+    private final FrameworkBotRepository frameworkBotRepository;
 
-    private final Map<String, OneBotSession> sessions = new ConcurrentHashMap<>();
-    private final JdbcTemplate jdbc;
-
-    public OneBotSessionRegistry(JdbcTemplate jdbc) {
-        this.jdbc = jdbc;
+    public OneBotSessionRegistry(FrameworkBotRepository frameworkBotRepository) {
+        this.frameworkBotRepository = frameworkBotRepository;
     }
 
     public void register(OneBotSession session) {
-        OneBotSession old = sessions.put(session.selfId(), session);
+        OneBotSession old = this.sessions.put(session.selfId(), session);
         if (old != null && old != session && old.isOpen()) {
-            log.info("[OneBot] selfId={} 出现新连接，关闭旧会话({})", session.selfId(), old.direction());
+            log.info("[OneBot] selfId={} \u51fa\u73b0\u65b0\u8fde\u63a5\uff0c\u5173\u95ed\u65e7\u4f1a\u8bdd({})", (Object)session.selfId(), (Object)old.direction());
             try {
                 old.close();
-            } catch (Exception ignored) {
-                // 旧连接可能已半死，忽略关闭异常
+            }
+            catch (Exception exception) {
+                // empty catch block
             }
         }
-        // 登记/刷新 OneBot 实例到 xuanji_bot 表
-        try {
-            jdbc.update("MERGE INTO xuanji_bot (platform, bot_identifier, bot_key, status) " +
-                            "KEY (platform, bot_identifier) VALUES (?, ?, ?, ?)",
-                    "onebot", session.selfId(), session.selfId(), "ONLINE");
-        } catch (Exception e) {
-            log.warn("[OneBot] 注册 xuanji_bot 失败: selfId={}, {}", session.selfId(), e.getMessage());
+        if (!OneBotSession.isPlaceholderId(session.selfId())) {
+            try {
+                this.frameworkBotRepository.upsert("onebot", session.selfId(), "onebot", "ONLINE");
+            }
+            catch (Exception e) {
+                log.warn("[OneBot] \u6ce8\u518c xuanji_bot \u5931\u8d25: selfId={}, {}", (Object)session.selfId(), (Object)e.getMessage());
+            }
         }
-        log.info("[OneBot] 会话已注册: selfId={}, direction={}, 当前在线={}",
-                session.selfId(), session.direction(), sessions.size());
+        log.info("[OneBot] \u4f1a\u8bdd\u5df2\u6ce8\u518c: selfId={}, direction={}, \u5f53\u524d\u5728\u7ebf={}", new Object[]{session.selfId(), session.direction(), this.sessions.size()});
     }
 
-    /** 仅当注册的就是这条会话时才移除，避免重连竞态误删新连接 */
-    public void unregister(OneBotSession session) {
-        boolean removed = sessions.remove(session.selfId(), session);
-        if (removed) {
-            try {
-                jdbc.update("UPDATE xuanji_bot SET status='OFFLINE' " +
-                                "WHERE platform='onebot' AND bot_identifier=?",
-                        session.selfId());
-            } catch (Exception ignored) {
-                // 离线状态非关键，忽略
+    /*
+     * WARNING - Removed try catching itself - possible behaviour change.
+     */
+    public void rebind(OneBotSession session, String realSelfId) {
+        if (session == null || realSelfId == null || realSelfId.isBlank()) {
+            return;
+        }
+        if (realSelfId.equals(session.selfId())) {
+            return;
+        }
+        OneBotSessionRegistry oneBotSessionRegistry = this;
+        synchronized (oneBotSessionRegistry) {
+            String current = session.selfId();
+            if (realSelfId.equals(current)) {
+                return;
             }
-            log.info("[OneBot] 会话已注销: selfId={}, direction={}, 剩余在线={}",
-                    session.selfId(), session.direction(), sessions.size());
+            if (!OneBotSession.isPlaceholderId(current)) {
+                log.warn("[OneBot] \u4f1a\u8bdd selfId \u51b2\u7a81: \u5df2\u7ed1\u5b9a={}, \u62a5\u6587={}\uff0c\u5ffd\u7565\u56de\u7ed1", (Object)current, (Object)realSelfId);
+                return;
+            }
+            if (!session.rebindSelfId(realSelfId)) {
+                log.warn("[OneBot] \u4f1a\u8bdd\u4e0d\u652f\u6301 selfId \u56de\u7ed1: direction={}", (Object)session.direction());
+                return;
+            }
+            this.sessions.remove(current, session);
+            log.info("[OneBot] selfId \u56de\u7ed1: {} \u2192 {} ({})", new Object[]{current, realSelfId, session.direction()});
+            this.register(session);
+        }
+    }
+
+    public void unregister(OneBotSession session) {
+        boolean removed = this.sessions.remove(session.selfId(), session);
+        if (removed) {
+            if (!OneBotSession.isPlaceholderId(session.selfId())) {
+                try {
+                    this.frameworkBotRepository.setStatus("onebot", session.selfId(), "OFFLINE");
+                }
+                catch (Exception exception) {
+                    // empty catch block
+                }
+            }
+            log.info("[OneBot] \u4f1a\u8bdd\u5df2\u6ce8\u9500: selfId={}, direction={}, \u5269\u4f59\u5728\u7ebf={}", new Object[]{session.selfId(), session.direction(), this.sessions.size()});
         }
     }
 
     public Optional<OneBotSession> find(String selfId) {
         if (selfId == null || selfId.isBlank()) {
-            return any();
+            return this.any();
         }
-        OneBotSession s = sessions.get(selfId);
+        OneBotSession s = this.sessions.get(selfId);
         return s != null && s.isOpen() ? Optional.of(s) : Optional.empty();
     }
 
-    /** 任取一条在线会话（单 bot 部署时的便捷入口） */
     public Optional<OneBotSession> any() {
-        return sessions.values().stream().filter(OneBotSession::isOpen).findFirst();
+        return this.sessions.values().stream().filter(OneBotSession::isOpen).findFirst();
     }
 
     public Collection<OneBotSession> all() {
-        return List.copyOf(sessions.values());
+        return List.copyOf(this.sessions.values());
     }
 
     public int onlineCount() {
-        return (int) sessions.values().stream().filter(OneBotSession::isOpen).count();
+        return (int)this.sessions.values().stream().filter(OneBotSession::isOpen).count();
     }
 }
+

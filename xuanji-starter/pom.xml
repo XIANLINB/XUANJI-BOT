@@ -20,7 +20,11 @@
         </dependency>
         <dependency>
             <groupId>dev.xuanji</groupId>
-            <artifactId>xuanji-adapter-qq</artifactId>
+            <artifactId>xuanji-console-server</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.xuanji</groupId>
+            <artifactId>xuanji-adapter-qqbot</artifactId>
         </dependency>
         <dependency>
             <groupId>dev.xuanji</groupId>

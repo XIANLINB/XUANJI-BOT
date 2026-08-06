@@ -13,6 +13,8 @@ import dev.xuanji.api.event.XuanjiUser;
 import dev.xuanji.api.json.Json;
 import dev.xuanji.api.message.MessageChain;
 import dev.xuanji.core.command.CommandRegistry;
+import dev.xuanji.core.concurrent.BotOutboundExecutor;
+import dev.xuanji.core.storage.MessageEventRecorder;
 import dev.xuanji.sdk.event.GroupMessageEvent;
 import dev.xuanji.api.adapter.Bot;
 import org.junit.jupiter.api.Test;
@@ -39,9 +41,10 @@ public class OneBotMessageHandlerTest {
         props.setApiTimeoutMs(500);
         OneBotApiService api = new OneBotApiService(registry, props);
         OneBotMessageSenderImpl sender = new OneBotMessageSenderImpl(api);
-        CommandRegistry cr = new CommandRegistry();
+        CommandRegistry cr = new CommandRegistry(null);
         cr.register(this, "test");
-        OneBotMessageHandler handler = new OneBotMessageHandler(cr, api, sender, null);
+        OneBotMessageHandler handler = new OneBotMessageHandler(cr, api, sender, null,
+                new MessageEventRecorder(), new BotOutboundExecutor());
 
         ObjectNode data = Json.obj();
         data.set("sender", Json.obj().put("role", "member"));

@@ -56,6 +56,31 @@ public class XuanjiRobotProperties {
     /** 机器人主人 member_openid（按 botKey 配置） */
     private Map<String, String> master = new HashMap<>();
 
+    /** 是否已登记该 appId（供启动时从库合并去重）。 */
+    public boolean containsAppId(String appId) {
+        if (robots == null || appId == null) return false;
+        for (RobotProperties r : robots.values()) {
+            if (appId.equals(r.getAppId())) return true;
+        }
+        return false;
+    }
+
+    /** 运行时注入一个机器人配置（botKey 缺省用 appId；不覆盖已有同 botKey 项）。 */
+    public void registerRobot(String botKey, String appId, String clientSecret,
+                              boolean sandbox, String connectionMethod, String status) {
+        if (robots == null) robots = new HashMap<>();
+        String key = botKey != null && !botKey.isBlank() ? botKey : appId;
+        if (robots.containsKey(key)) return;
+        RobotProperties rp = new RobotProperties();
+        rp.setAdapter("qqbot");
+        rp.setAppId(appId);
+        rp.setClientSecret(clientSecret);
+        rp.setSandbox(sandbox);
+        rp.setConnectionMethod(connectionMethod);
+        rp.setStatus(status);
+        robots.put(key, rp);
+    }
+
     /**
      * 单个机器人的配置属性
      */
@@ -75,6 +100,12 @@ public class XuanjiRobotProperties {
 
         /** 连接方式：websocket 或 webhook */
         private String connectionMethod;
+
+        /** 启停状态（ONLINE / OFFLINE），控制台可写，启动器据此决定是否拉起 */
+        private String status;
+
+        /** Webhook 回调地址（connectionMethod=webhook 时使用） */
+        private String webhookUrl;
     }
 
     /**
@@ -87,9 +118,13 @@ public class XuanjiRobotProperties {
      *
      * <p>路径必须与 {@code RobotsFile.PATH} 一致（{@code data/xuanji-robots.yml}）。
      */
+    /** 重载配置（starter 控制台保存后调用；历史方法名 reload）。 */
+    public void reload() {
+        reloadFromYaml();
+    }
+
     public void reloadFromYaml() {
-        Path path = Paths.get("data", "xuanji-robots.yml");
-        if (!Files.exists(path)) {
+        Path path = Paths.get("data", "xuanji-robots.yml");        if (!Files.exists(path)) {
             // 与 @PropertySource(ignoreResourceNotFound=true) 行为一致：文件缺失时清空
             this.robots.clear();
             this.master.clear();

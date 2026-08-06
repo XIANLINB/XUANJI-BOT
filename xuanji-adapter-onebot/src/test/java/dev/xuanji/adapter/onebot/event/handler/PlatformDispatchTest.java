@@ -48,7 +48,7 @@ public class PlatformDispatchTest {
 
     @Test
     void handlerLevelQqOnlyFiresOnQq() {
-        CommandRegistry cr = new CommandRegistry();
+        CommandRegistry cr = new CommandRegistry(null);
         cr.register(new HandlerLevelPlugin(), "t1");
         ctx("qq");
         assertEquals("QQ", cr.executeGroupMessage("go"));
@@ -57,7 +57,7 @@ public class PlatformDispatchTest {
 
     @Test
     void handlerLevelOnebotOnlyFiresOnOnebot() {
-        CommandRegistry cr = new CommandRegistry();
+        CommandRegistry cr = new CommandRegistry(null);
         cr.register(new HandlerLevelPlugin(), "t1");
         ctx("onebot");
         assertEquals("ONEBOT", cr.executeGroupMessage("go"));
@@ -66,7 +66,7 @@ public class PlatformDispatchTest {
 
     @Test
     void defaultHandlerFiresOnUnknownPlatform() {
-        CommandRegistry cr = new CommandRegistry();
+        CommandRegistry cr = new CommandRegistry(null);
         cr.register(new HandlerLevelPlugin(), "t1");
         ctx("discord");
         assertEquals("BOTH", cr.executeGroupMessage("go"));
@@ -75,7 +75,7 @@ public class PlatformDispatchTest {
 
     @Test
     void pluginLevelDefaultRestrictsToDeclaredPlatform() {
-        CommandRegistry cr = new CommandRegistry();
+        CommandRegistry cr = new CommandRegistry(null);
         cr.register(new PluginLevelPlugin(), "t2");
         // onebot 平台：pluginDefault 继承插件 qq → 被拦截；handlerOverride 显式 onebot → 命中
         ctx("onebot");
@@ -85,7 +85,7 @@ public class PlatformDispatchTest {
 
     @Test
     void pluginLevelDefaultFiresOnDeclaredPlatform() {
-        CommandRegistry cr = new CommandRegistry();
+        CommandRegistry cr = new CommandRegistry(null);
         cr.register(new PluginLevelPlugin(), "t2");
         // qq 平台：pluginDefault(qq) 命中，且早于 handlerOverride(onebot) → 返回 PDEF
         ctx("qq");

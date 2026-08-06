@@ -29,9 +29,10 @@
     <modules>
         <module>xuanji-sdk</module>
         <module>xuanji-api</module>
-        <module>xuanji-adapter-qq</module>
+        <module>xuanji-adapter-qqbot</module>
         <module>xuanji-adapter-onebot</module>
         <module>xuanji-core</module>
+        <module>xuanji-console-server</module>
         <module>xuanji-plugin-demo</module>
         <module>xuanji-starter</module>
     </modules>
@@ -56,7 +57,7 @@
             </dependency>
             <dependency>
                 <groupId>dev.xuanji</groupId>
-                <artifactId>xuanji-adapter-qq</artifactId>
+                <artifactId>xuanji-adapter-qqbot</artifactId>
                 <version>1.0.0-SNAPSHOT</version>
             </dependency>
             <dependency>
@@ -67,6 +68,11 @@
             <dependency>
                 <groupId>dev.xuanji</groupId>
                 <artifactId>xuanji-core</artifactId>
+                <version>1.0.0-SNAPSHOT</version>
+            </dependency>
+            <dependency>
+                <groupId>dev.xuanji</groupId>
+                <artifactId>xuanji-console-server</artifactId>
                 <version>1.0.0-SNAPSHOT</version>
             </dependency>
         </dependencies>

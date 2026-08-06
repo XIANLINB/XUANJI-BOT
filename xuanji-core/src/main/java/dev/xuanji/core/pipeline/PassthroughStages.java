@@ -97,10 +97,22 @@ class DedupStage implements PipelineStage {
     private final Map<String, Long> seen = new ConcurrentHashMap<>();
     private static final long TTL_MS = 5 * 60 * 1000L;
 
+    // 统计（控制台 /health 的 dedup 键）：DB 命中（跨实例重复） / 降级本地（DB 不可用）
+    private final java.util.concurrent.atomic.AtomicLong dbDedupSuccess = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong localFallbackCount = new java.util.concurrent.atomic.AtomicLong();
+
     DedupStage(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
     @Override public String name() { return "dedup"; }
     @Override public int order() { return 25; }
+
+    /** 去重统计（供 BotPipeline.getDedupStats 聚合）。 */
+    public Map<String, Object> stats() {
+        Map<String, Object> m = new java.util.LinkedHashMap<>();
+        m.put("dbDedupSuccess", dbDedupSuccess.get());
+        m.put("localFallbackCount", localFallbackCount.get());
+        return m;
+    }
 
     @Override
     public Result handle(BotEvent e, PipelineChain c) {
@@ -116,17 +128,19 @@ class DedupStage implements PipelineStage {
             log.debug("[dedup] 丢弃重复事件(本地): {}", key);
             return Result.ABORT;
         }
-        // 跨实例幂等：事件 ID 写入 xuanji_event_dedup（event_id 为主键）。
+        // 跨实例幂等：事件 ID 写入 xuanji_dedup（event_id 为主键）。
         // 主键冲突即代表另一实例已处理过该事件，丢弃；DB 不可用时降级为仅本地去重。
         String platform = e.bot() != null ? e.bot().platform() : "?";
         try {
-            jdbc.update("INSERT INTO xuanji_event_dedup (event_id, platform) VALUES (?, ?)", key, platform);
+            jdbc.update("INSERT INTO xuanji_dedup (event_id, platform) VALUES (?, ?)", key, platform);
         } catch (DuplicateKeyException dke) {
+            dbDedupSuccess.incrementAndGet();
             seen.put(key, now);
             log.debug("[dedup] 丢弃重复事件(跨实例): {}", key);
             return Result.ABORT;
         } catch (Exception ex) {
-            log.warn("[dedup] 写 xuanji_event_dedup 失败，降级本地去重: {}", ex.getMessage());
+            localFallbackCount.incrementAndGet();
+            log.warn("[dedup] 写 xuanji_dedup 失败，降级本地去重: {}", ex.getMessage());
         }
         return c.proceed();
     }

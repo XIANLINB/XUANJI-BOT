@@ -1,50 +1,77 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  dev.xuanji.api.message.DefaultMediaRefResolver
+ *  dev.xuanji.api.message.MediaRefResolver
+ *  dev.xuanji.api.message.MediaRefResolverHolder
+ *  dev.xuanji.core.command.CommandRegistry
+ *  dev.xuanji.core.concurrent.BotOutboundExecutor
+ *  dev.xuanji.core.pipeline.BotPipeline
+ *  dev.xuanji.core.storage.BotDataSourceRegistry
+ *  dev.xuanji.core.storage.FrameworkBotRepository
+ *  dev.xuanji.core.storage.MessageEventRecorder
+ *  jakarta.annotation.PostConstruct
+ *  lombok.Generated
+ *  org.slf4j.Logger
+ *  org.slf4j.LoggerFactory
+ *  org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
+ *  org.springframework.boot.context.properties.EnableConfigurationProperties
+ *  org.springframework.context.annotation.Bean
+ *  org.springframework.context.annotation.Configuration
+ */
 package dev.xuanji.adapter.onebot.config;
 
 import dev.xuanji.adapter.onebot.adapter.OneBotAdapter;
 import dev.xuanji.adapter.onebot.adapter.OneBotBotManager;
 import dev.xuanji.adapter.onebot.api.OneBotApiService;
+import dev.xuanji.adapter.onebot.config.OneBotProperties;
+import dev.xuanji.adapter.onebot.event.handler.OneBotMessageHandler;
 import dev.xuanji.adapter.onebot.sender.OneBotMessageSenderImpl;
 import dev.xuanji.adapter.onebot.session.OneBotSessionRegistry;
+import dev.xuanji.adapter.onebot.storage.OneBotPlatformDataProvider;
+import dev.xuanji.adapter.onebot.storage.OneBotRepository;
+import dev.xuanji.adapter.onebot.storage.OneBotSchemaProvider;
 import dev.xuanji.adapter.onebot.websocket.OneBotEventDispatcher;
 import dev.xuanji.adapter.onebot.websocket.OneBotWsClient;
-import dev.xuanji.core.pipeline.BotPipeline;
-import dev.xuanji.adapter.onebot.event.handler.OneBotMessageHandler;
+import dev.xuanji.api.message.DefaultMediaRefResolver;
+import dev.xuanji.api.message.MediaRefResolver;
+import dev.xuanji.api.message.MediaRefResolverHolder;
 import dev.xuanji.core.command.CommandRegistry;
-import org.springframework.jdbc.core.JdbcTemplate;
-import lombok.extern.slf4j.Slf4j;
+import dev.xuanji.core.concurrent.BotOutboundExecutor;
+import dev.xuanji.core.pipeline.BotPipeline;
+import dev.xuanji.core.storage.BotDataSourceRegistry;
+import dev.xuanji.core.storage.FrameworkBotRepository;
+import dev.xuanji.core.storage.MessageEventRecorder;
+import jakarta.annotation.PostConstruct;
+import lombok.Generated;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-/**
- * OneBot 适配器装配入口 — 整个模块的唯一开关。
- *
- * <p>设计原则：<b>用户加依赖即可，不配置就完全不装配</b>。
- * 所有 OneBot 组件都在本类以 {@code @Bean} 声明（而非 {@code @Component} 被扫描），
- * 因此 {@code xuanji.onebot.enabled=false}（默认）时，容器里一个 OneBot Bean 都不会出现，
- * 不占内存、不开端口、不影响 QQ 适配器。
- *
- * <p>启用方式：
- * <pre>
- * xuanji:
- *   onebot:
- *     enabled: true
- * </pre>
- */
-@Slf4j
 @Configuration
-@EnableConfigurationProperties(OneBotProperties.class)
-@ConditionalOnProperty(prefix = "xuanji.onebot", name = "enabled", havingValue = "true")
+@EnableConfigurationProperties(value={OneBotProperties.class})
+@ConditionalOnProperty(prefix="xuanji.onebot", name={"enabled"}, havingValue="true")
 public class OneBotAutoConfiguration {
+    @Generated
+    private static final Logger log = LoggerFactory.getLogger(OneBotAutoConfiguration.class);
 
     public OneBotAutoConfiguration() {
-        log.info("[OneBot] 适配器已启用（OneBot v11 标准协议，兼容 Napcat / Lagrange / go-cqhttp 等实现）");
+        log.info("[OneBot] \u9002\u914d\u5668\u5df2\u542f\u7528\uff08OneBot v11 \u6807\u51c6\u534f\u8bae\uff0c\u517c\u5bb9 Napcat / Lagrange / go-cqhttp \u7b49\u5b9e\u73b0\uff09");
+    }
+
+    @PostConstruct
+    public void registerMediaResolver() {
+        MediaRefResolverHolder.register((String)"onebot", (MediaRefResolver)new DefaultMediaRefResolver());
+        log.info("[OneBot] \u5df2\u6ce8\u518c\u5a92\u4f53\u89e3\u6790\u5668");
     }
 
     @Bean
-    public OneBotSessionRegistry oneBotSessionRegistry(JdbcTemplate jdbc) {
-        return new OneBotSessionRegistry(jdbc);
+    public OneBotSessionRegistry oneBotSessionRegistry(FrameworkBotRepository frameworkBotRepository) {
+        return new OneBotSessionRegistry(frameworkBotRepository);
     }
 
     @Bean
@@ -68,36 +95,34 @@ public class OneBotAutoConfiguration {
     }
 
     @Bean
-    public OneBotEventDispatcher oneBotEventDispatcher(OneBotApiService api,
-                                                       OneBotBotManager botManager,
-                                                       BotPipeline pipeline,
-                                                       OneBotProperties props) {
-        return new OneBotEventDispatcher(api, botManager, pipeline, props);
+    public OneBotEventDispatcher oneBotEventDispatcher(OneBotApiService api, OneBotBotManager botManager, BotPipeline pipeline, OneBotProperties props, OneBotSessionRegistry registry) {
+        return new OneBotEventDispatcher(api, botManager, pipeline, props, registry);
     }
 
     @Bean
-    public OneBotMessageHandler oneBotMessageHandler(CommandRegistry commandRegistry,
-                                                     OneBotApiService api,
-                                                     OneBotMessageSenderImpl sender,
-                                                     JdbcTemplate jdbc) {
-        return new OneBotMessageHandler(commandRegistry, api, sender, jdbc);
+    public OneBotSchemaProvider oneBotSchemaProvider() {
+        return new OneBotSchemaProvider();
     }
 
-    /**
-     * 注意：OneBotController 自身带 {@code @ConditionalOnProperty(enabled=true)} 且为
-     * {@code @RestController}，由 Spring 组件扫描在启用时直接创建并自动装配依赖，
-     * 此处<b>不再</b>以 {@code @Bean} 重复声明，避免启用时两个同名 Bean 冲突。
-     */
-    /**
-     * 正向 WS 客户端 —— 双重开关：模块启用 + {@code forward.enabled=true}。
-     * 反向 WS 服务端在 {@code OneBotWsServer} 中自行声明（需要 WebSocketConfigurer 身份）。
-     */
-    @Bean(destroyMethod = "stop")
-    @ConditionalOnProperty(prefix = "xuanji.onebot.forward", name = "enabled", havingValue = "true")
-    public OneBotWsClient oneBotWsClient(OneBotProperties props,
-                                         OneBotEventDispatcher dispatcher,
-                                         OneBotSessionRegistry registry,
-                                         OneBotApiService api) {
+    @Bean
+    public OneBotRepository oneBotRepository(BotDataSourceRegistry dataSourceRegistry, OneBotSchemaProvider oneBotSchemaProvider) {
+        return new OneBotRepository(dataSourceRegistry, oneBotSchemaProvider);
+    }
+
+    @Bean
+    public OneBotPlatformDataProvider oneBotPlatformDataProvider(OneBotRepository repository, OneBotSessionRegistry sessionRegistry, FrameworkBotRepository frameworkBotRepository) {
+        return new OneBotPlatformDataProvider(repository, sessionRegistry, frameworkBotRepository);
+    }
+
+    @Bean
+    public OneBotMessageHandler oneBotMessageHandler(CommandRegistry commandRegistry, OneBotApiService api, OneBotMessageSenderImpl sender, OneBotRepository repository, MessageEventRecorder eventRecorder, BotOutboundExecutor outbound) {
+        return new OneBotMessageHandler(commandRegistry, api, sender, repository, eventRecorder, outbound);
+    }
+
+    @Bean(destroyMethod="stop")
+    @ConditionalOnProperty(prefix="xuanji.onebot.forward", name={"enabled"}, havingValue="true")
+    public OneBotWsClient oneBotWsClient(OneBotProperties props, OneBotEventDispatcher dispatcher, OneBotSessionRegistry registry, OneBotApiService api) {
         return new OneBotWsClient(props, dispatcher, registry, api);
     }
 }
+
