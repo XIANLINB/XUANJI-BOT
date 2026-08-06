@@ -1,0 +1,129 @@
+package dev.xuanji.core.concurrent;
+
+import dev.xuanji.core.config.ConfigService;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.DisposableBean;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.LongSupplier;
+import java.util.function.ToLongFunction;
+
+/**
+ * 每 bot 出站执行器 — 串行队列 + 节奏控制（P2-E）。
+ *
+ * <h3>两种用法（共享同一条 per-bot 时间线）</h3>
+ * <ul>
+ *   <li>{@link #submit(String, Runnable)} — 异步 fire-and-forget：进入 per-bot 单线程队列，出队执行前补亏空睡眠，保证相邻出站间隔 ≥ 配置值</li>
+ *   <li>{@link #awaitPace(String)} — 同步等待：当前调用线程补亏空睡眠后立即返回（用于群管/请求处理等有返回值、不能入队的动作）</li>
+ * </ul>
+ *
+ * <p>节奏开关：{@code paceResolver} 按 key 返回节奏毫秒数，≤0 表示不节流（快速路径零开销）。
+ * key 为空/空白统一归一为 {@code _default}，仍参与节流。
+ *
+ * <p>线程安全：异步队列与同步等待被不同线程调用，故 {@code lastSendNanos} 的读改写按 key 加锁互斥，
+ * 否则并发下多线程读到同一 last 一起放行、节奏失效。
+ */
+@Slf4j
+@Component
+public class BotOutboundExecutor implements DisposableBean {
+
+    private static final String DEFAULT_KEY = "_default";
+
+    private final ToLongFunction<String> paceResolver;
+    private final LongSupplier clock;
+    private final Sleeper sleeper;
+
+    /** 每 key 上次发送时刻（nano）。异步与同步调用共用此时间线。 */
+    private final Map<String, Long> lastSendNanos = new ConcurrentHashMap<>();
+    /** 每 key 节奏锁：让异步队列线程与任意同步调用线程互斥地读改写 lastSendNanos。 */
+    private final Map<String, Object> paceLocks = new ConcurrentHashMap<>();
+    /** 每 key 单线程串行队列（虚拟线程）。 */
+    private final Map<String, ExecutorService> executors = new ConcurrentHashMap<>();
+    private final AtomicInteger seq = new AtomicInteger();
+
+    /** 测试/裸用路径：默认不节流。 */
+    public BotOutboundExecutor() {
+        this(key -> 0L, System::nanoTime, Thread::sleep);
+    }
+
+    /** Spring 注入路径：paceResolver 由 ConfigService.getOutboundPaceMs(key) 派生。 */
+    @Autowired
+    public BotOutboundExecutor(ConfigService configService) {
+        this(configService == null ? (key -> 0L) : (key -> configService.getOutboundPaceMs(key)),
+                System::nanoTime, Thread::sleep);
+    }
+
+    /** 测试注入路径：假 Sleeper 睡眠时推进时钟，实现毫秒级确定性节奏验证。 */
+    public BotOutboundExecutor(ToLongFunction<String> paceResolver, LongSupplier clock, Sleeper sleeper) {
+        this.paceResolver = paceResolver != null ? paceResolver : key -> 0L;
+        this.clock = clock != null ? clock : System::nanoTime;
+        this.sleeper = sleeper != null ? sleeper : Thread::sleep;
+    }
+
+    /** 异步提交：入 per-bot 单线程队列，出队执行前按 key 补亏空睡眠。 */
+    public void submit(String botId, Runnable task) {
+        String key = normalizeKey(botId);
+        ExecutorService pool = executors.computeIfAbsent(key, this::newPool);
+        pool.execute(() -> {
+            try {
+                pace(key);
+                task.run();
+            } catch (Exception e) {
+                log.warn("[Outbound] 出站任务执行异常: key={}, err={}", key, e.getMessage());
+            }
+        });
+    }
+
+    /** 同步等待节奏：当前线程补亏空睡眠后返回；pace 未开启时零开销。 */
+    public void awaitPace(String botId) {
+        pace(normalizeKey(botId));
+    }
+
+    private ExecutorService newPool(String key) {
+        return Executors.newSingleThreadExecutor(r -> {
+            Thread t = Thread.ofVirtual().name("xuanji-out-" + key + "-" + seq.incrementAndGet())
+                    .factory().newThread(r);
+            t.setDaemon(true);
+            return t;
+        });
+    }
+
+    private void pace(String key) {
+        long paceMs = paceResolver.applyAsLong(key);
+        if (paceMs <= 0) return;                       // 未开启节奏：零开销快速路径
+        Object lock = paceLocks.computeIfAbsent(key, k -> new Object());
+        synchronized (lock) {
+            long now = clock.getAsLong();
+            Long last = lastSendNanos.get(key);
+            if (last == null) { lastSendNanos.put(key, now); return; }
+            long deficitNanos = paceMs * 1_000_000L - (now - last);
+            if (deficitNanos > 0) {
+                try { sleeper.sleep(deficitNanos / 1_000_000L); }
+                catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+            }
+            lastSendNanos.put(key, clock.getAsLong());
+        }
+    }
+
+    private static String normalizeKey(String botId) {
+        return (botId == null || botId.isBlank()) ? DEFAULT_KEY : botId;
+    }
+
+    @Override
+    public void destroy() {
+        paceLocks.clear();
+        executors.values().forEach(ExecutorService::shutdownNow);
+        executors.clear();
+    }
+
+    /** 显式关闭（测试用）：等价 destroy。 */
+    public void shutdown() {
+        destroy();
+    }
+}
