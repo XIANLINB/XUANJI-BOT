@@ -1,1 +1,0 @@
-import{X as n,V as s}from"./index-CniGiLyP.js";function c(){const a=s([]),t=s(!1);async function e(){t.value=!0;try{const l=await n.getBots();a.value=l.map(o=>({label:"Bot #"+o.appId,value:o.appId}))}catch{a.value=[]}finally{t.value=!1}}return{bots:a,loading:t,loadBots:e}}export{c as u};

@@ -18,8 +18,10 @@ import ConsoleLayout from './components/ConsoleLayout.vue'
 // ⚠️ Vue 3 陷阱：模板中直接使用 () => import() 工厂会被当函数式组件调用，
 // 返回的 Promise 被渲染成 [object Promise]（Vue 2 旧写法失效），必须 defineAsyncComponent 包裹。
 const Setup = defineAsyncComponent(() => import('./views/Setup.vue'))
+const Login = defineAsyncComponent(() => import('./views/Login.vue'))
 const route = useRoute()
 const isSetup = computed(() => route.name === 'setup')
+const isLogin = computed(() => route.name === 'login')
 
 // 用户要求：控制台默认亮色。
 const isDark = ref(false)
@@ -38,6 +40,7 @@ function toggleTheme() {
         <NDialogProvider>
           <NNotificationProvider>
             <Setup v-if="isSetup" />
+            <Login v-else-if="isLogin" />
             <ConsoleLayout v-else :is-dark="isDark" @toggle-theme="toggleTheme" />
           </NNotificationProvider>
         </NDialogProvider>
@@ -45,3 +48,9 @@ function toggleTheme() {
     </NLoadingBarProvider>
   </NConfigProvider>
 </template>
+
+<style>
+/* 全局锁定：html/body 高度 100% + overflow hidden，强制各页面在可视区内布局，
+   防止 .chat-page 等内部容器被内容撑大后导致 body 出现滚动条。 */
+html, body, #app { height: 100%; margin: 0; padding: 0; overflow: hidden; }
+</style>

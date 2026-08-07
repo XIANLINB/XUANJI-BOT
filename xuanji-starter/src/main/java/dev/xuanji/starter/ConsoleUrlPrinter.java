@@ -1,5 +1,6 @@
 package dev.xuanji.starter;
 
+import dev.xuanji.console.config.XuanjiApiRoutes;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationListener;
@@ -33,7 +34,8 @@ public class ConsoleUrlPrinter implements ApplicationListener<ApplicationReadyEv
                 System.out.println("    控制台: http://localhost:<实际端口>/xuanji/console/");
             } else {
                 System.out.println("    🖥 控制台:   http://localhost:" + port + "/xuanji/console/");
-                System.out.println("    🩺 健康检查: http://localhost:" + port + "/xuanji/api/console/health");
+                System.out.println("    🩺 健康检查: http://localhost:" + port
+                        + XuanjiApiRoutes.API_PREFIX + "/console/health");
             }
             System.out.println(line + "\n");
             log.info("[璇玑] 控制台地址: http://localhost:{}/xuanji/console/", port);

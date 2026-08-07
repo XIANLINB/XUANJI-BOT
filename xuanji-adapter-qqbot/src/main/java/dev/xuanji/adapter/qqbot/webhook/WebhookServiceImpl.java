@@ -6,6 +6,7 @@ import dev.xuanji.adapter.qqbot.registry.RobotRegistry;
 import dev.xuanji.adapter.qqbot.webhook.WebhookPayload;
 import dev.xuanji.adapter.qqbot.webhook.WebhookService;
 import dev.xuanji.adapter.qqbot.webhook.SignatureVerifier;
+import dev.xuanji.core.concurrent.ThreadPoolRegistry;
 import dev.xuanji.core.pipeline.BotPipeline;
 import dev.xuanji.api.adapter.Bot;
 import dev.xuanji.api.event.BotEvent;
@@ -14,10 +15,15 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.xuanji.api.json.Json;
+import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Service;
 
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Webhook 服务实现
@@ -77,6 +83,34 @@ public class WebhookServiceImpl implements WebhookService {
      * 重启期间的短暂重复处理是可接受的。
      */
     private final Set<String> dedupSet = ConcurrentHashMap.newKeySet();
+
+    /**
+     * 去重记录延迟清理调度器：单线程守护调度线程，替代原先「每事件 new Thread + sleep」。
+     * 高并发 Webhook 下线程数从「随事件数无限增长」降为恒 1，消除线程泄漏风险。
+     */
+    private static final ScheduledExecutorService DEDUP_CLEANER =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "dedup-cleaner");
+                t.setDaemon(true);
+                return t;
+            });
+
+    static {
+        // 注册到监控：Webhook 去重清理调度池实时状态
+        ThreadPoolRegistry.register("Webhook去重清理池", () -> {
+            ScheduledThreadPoolExecutor e = (ScheduledThreadPoolExecutor) DEDUP_CLEANER;
+            return new ThreadPoolRegistry.PoolInfo(
+                    "Webhook去重清理池", "ScheduledThreadPool(单线程)",
+                    e.getCorePoolSize(), e.getCorePoolSize(),
+                    e.getActiveCount(), e.getPoolSize(), e.getQueue().size(),
+                    e.getCompletedTaskCount(), "事件去重记录延迟 5 分钟清理，恒 1 线程");
+        });
+    }
+
+    @PreDestroy
+    void shutdown() {
+        DEDUP_CLEANER.shutdownNow();
+    }
 
     @Override
     public String handleWebhook(String robotId, String envType, String body,
@@ -173,19 +207,12 @@ public class WebhookServiceImpl implements WebhookService {
     /**
      * 延迟清理去重记录
      *
-     * <p>启动一个守护线程，在 5 分钟后从去重集合中移除指定的事件 ID。
-     * 使用守护线程而非定时任务，因为去重清理是低优先级的后台操作。
+     * <p>提交到共享 {@link ScheduledExecutorService}，5 分钟后从去重集合移除事件 ID。
+     * 共用单线程守护调度器，不再为每个事件创建独立线程。
      *
      * @param eventId 要清理的事件 ID
      */
     private void cleanDedupLater(String eventId) {
-        Thread thread = new Thread(() -> {
-            try {
-                Thread.sleep(5 * 60 * 1000); // 5 分钟后清理
-                dedupSet.remove(eventId);
-            } catch (InterruptedException ignored) {}
-        }, "dedup-cleaner");
-        thread.setDaemon(true); // 守护线程，不阻止 JVM 退出
-        thread.start();
+        DEDUP_CLEANER.schedule(() -> dedupSet.remove(eventId), 5, TimeUnit.MINUTES);
     }
 }

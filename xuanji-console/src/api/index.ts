@@ -11,6 +11,13 @@ import { onebotApi } from './onebot'
 import { dbApi } from './db'
 import { logsApi } from './logs'
 import { setupApi } from './setup'
+import { authApi } from './auth'
+import { securityApi } from './security'
+import { backupApi } from './backup'
+import { schedulerApi } from './scheduler'
+import { dataApi } from './data'
+import { alertApi } from './alert'
+import { riskApi } from './risk'
 import { getActuatorMetric } from './http'
 
 export default {
@@ -24,5 +31,12 @@ export default {
   ...dbApi,
   ...logsApi,
   ...setupApi,
+  ...authApi,
+  ...securityApi,
+  ...backupApi,
+  ...schedulerApi,
+  ...dataApi,
+  ...alertApi,
+  ...riskApi,
   getActuatorMetric
 }

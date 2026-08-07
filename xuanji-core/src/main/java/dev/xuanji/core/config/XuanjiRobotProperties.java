@@ -81,6 +81,15 @@ public class XuanjiRobotProperties {
         robots.put(key, rp);
     }
 
+    /** 运行时更新连接方式（websocket ↔ webhook），用于控制台切换按钮。 */
+    public void updateConnectionMethod(String botKey, String connectionMethod) {
+        if (robots == null) return;
+        String key = botKey != null && !botKey.isBlank() ? botKey : null;
+        if (key == null) return;
+        RobotProperties rp = robots.get(key);
+        if (rp != null) rp.setConnectionMethod(connectionMethod);
+    }
+
     /**
      * 单个机器人的配置属性
      */

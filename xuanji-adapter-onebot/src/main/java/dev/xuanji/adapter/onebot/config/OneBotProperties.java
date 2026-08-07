@@ -1,10 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  lombok.Generated
- *  org.springframework.boot.context.properties.ConfigurationProperties
- */
 package dev.xuanji.adapter.onebot.config;
 
 import lombok.Generated;

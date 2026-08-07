@@ -2,6 +2,7 @@ package dev.xuanji.adapter.qqbot.websocket;
 
 import dev.xuanji.adapter.qqbot.config.QqPlatformConfig;
 import dev.xuanji.adapter.qqbot.registry.AccessTokenService;
+import dev.xuanji.core.concurrent.ThreadPoolRegistry;
 import dev.xuanji.core.pipeline.BotPipeline;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -55,6 +56,12 @@ public class QqBotWsManager {
     /** AccessToken 管理服务，注入到每个新建的客户端中 */
     private final AccessTokenService accessTokenService;
 
+    /** API 服务（注入到客户端，启动后调 /users/@me 同步机器人信息） */
+    private final dev.xuanji.adapter.qqbot.api.QqApiService qqApiService;
+
+    /** 平台库 Repository（注入到客户端，upsertBotInfo 写入 qqbot_botinfo） */
+    private final dev.xuanji.adapter.qqbot.storage.QqBotRepository qqBotRepository;
+
     /**
      * 默认的事件订阅意图位掩码
      *
@@ -99,10 +106,14 @@ public class QqBotWsManager {
      */
     public QqBotWsManager(BotPipeline botPipeline,
                            GatewayService gatewayService,
-                           AccessTokenService accessTokenService) {
+                           AccessTokenService accessTokenService,
+                           dev.xuanji.adapter.qqbot.api.QqApiService qqApiService,
+                           dev.xuanji.adapter.qqbot.storage.QqBotRepository qqBotRepository) {
         this.botPipeline = botPipeline;
         this.gatewayService = gatewayService;
         this.accessTokenService = accessTokenService;
+        this.qqApiService = qqApiService;
+        this.qqBotRepository = qqBotRepository;
     }
 
     /**
@@ -134,6 +145,24 @@ public class QqBotWsManager {
         );
 
         log.info("[BotWS Manager] 初始化完成，线程池就绪");
+
+        // 注册到监控：连接/重连线程池 + 心跳调度池实时状态
+        ThreadPoolRegistry.register("QQ-WS连接池(共享)", () -> {
+            ThreadPoolExecutor e = (ThreadPoolExecutor) connectExecutor;
+            return new ThreadPoolRegistry.PoolInfo(
+                    "QQ-WS连接池(共享)", "ThreadPoolExecutor",
+                    e.getCorePoolSize(), e.getMaximumPoolSize(),
+                    e.getActiveCount(), e.getPoolSize(), e.getQueue().size(),
+                    e.getCompletedTaskCount(), "WS 连接/重连任务，队列满 CallerRuns");
+        });
+        ThreadPoolRegistry.register("QQ-WS心跳池(共享)", () -> {
+            ScheduledThreadPoolExecutor e = (ScheduledThreadPoolExecutor) heartbeatScheduler;
+            return new ThreadPoolRegistry.PoolInfo(
+                    "QQ-WS心跳池(共享)", "ScheduledThreadPool",
+                    e.getCorePoolSize(), e.getCorePoolSize(),
+                    e.getActiveCount(), e.getPoolSize(), e.getQueue().size(),
+                    e.getCompletedTaskCount(), "心跳/鉴权定时任务，核心=max(2,CPU核数)");
+        });
     }
 
     /**
@@ -412,6 +441,7 @@ public class QqBotWsManager {
                 config.robotId, config.envType,
                 config.appId, config.appSecret,
                 gatewayUrl, botPipeline, gatewayService, accessTokenService,
+                qqApiService, qqBotRepository,
                 config.intents, isNewOpenBot,
                 heartbeatScheduler,
                 connectExecutor);

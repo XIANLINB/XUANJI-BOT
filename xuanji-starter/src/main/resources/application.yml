@@ -7,6 +7,13 @@ spring:
   application:
     name: xuanji-bot
 
+  # 定时任务调度线程池（@Scheduled 任务并行执行，避免单个任务卡住阻塞其它任务）
+  task:
+    scheduling:
+      pool:
+        size: 4
+      thread-name-prefix: xuanji-sched-
+
   # 业务库（零配置，data/xuanji/data/xuanji.mv.db）
   datasource:
     url: jdbc:h2:file:./data/xuanji/data/xuanji;AUTO_SERVER=TRUE;DB_CLOSE_DELAY=-1
@@ -66,7 +73,7 @@ xuanji:
       enabled: true
       path: /onebot/ws
       # 强烈建议配置，留空则任何人可连；用环境变量注入，勿写死在文件里
-      access-token: almHduWEJMC~JveO   #${ONEBOT_TOKEN:}
+      access-token: ${ONEBOT_TOKEN:}
 
     # 正向 WS：框架作客户端，主动连 OneBot 实现的 WS 端口
     forward:

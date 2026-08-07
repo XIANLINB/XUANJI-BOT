@@ -10,8 +10,6 @@ import dev.xuanji.api.message.MessageChain;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
-import java.util.Set;
-
 /**
  * QQ 官方 Bot API 适配器 — 实现 {@link BotAdapter}。
  *
@@ -24,15 +22,15 @@ public class QqAdapter implements BotAdapter {
 
     @Override
     public String platform() {
-        return "qq";
+        return QqBotManager.PLATFORM;
     }
 
     @Override
     public Bot connect(BotConfig config) {
-        String botId = "qq:" + config.appId();
-        Bot bot = new Bot(botId, "qq", config.appId(),
+        String botId = QqBotManager.botId(config.appId());
+        Bot bot = new Bot(botId, QqBotManager.PLATFORM, config.appId(),
                 Bot.Status.CONNECTING,
-                Set.of("can_recall", "can_ban", "can_set_card"));
+                QqBotManager.QQ_CAPABILITIES);
         log.info("[QQ适配器] {} 配置已加载", botId);
         return bot;
     }

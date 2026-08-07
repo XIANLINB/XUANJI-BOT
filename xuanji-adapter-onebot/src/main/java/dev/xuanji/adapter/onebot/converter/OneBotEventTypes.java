@@ -1,9 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  dev.xuanji.api.event.EventType
- */
 package dev.xuanji.adapter.onebot.converter;
 
 import dev.xuanji.api.event.EventType;

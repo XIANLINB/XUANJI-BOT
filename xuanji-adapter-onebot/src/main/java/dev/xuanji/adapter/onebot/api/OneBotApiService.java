@@ -1,14 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  com.fasterxml.jackson.databind.JsonNode
- *  com.fasterxml.jackson.databind.node.ObjectNode
- *  dev.xuanji.api.json.Json
- *  lombok.Generated
- *  org.slf4j.Logger
- *  org.slf4j.LoggerFactory
- */
 package dev.xuanji.adapter.onebot.api;
 
 import com.fasterxml.jackson.databind.JsonNode;

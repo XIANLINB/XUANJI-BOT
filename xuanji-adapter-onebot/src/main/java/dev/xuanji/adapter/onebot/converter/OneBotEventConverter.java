@@ -1,15 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  com.fasterxml.jackson.databind.JsonNode
- *  dev.xuanji.api.adapter.Bot
- *  dev.xuanji.api.event.BotEvent
- *  dev.xuanji.api.event.EventType
- *  dev.xuanji.api.event.XuanjiGroup
- *  dev.xuanji.api.event.XuanjiUser
- *  dev.xuanji.api.message.MessageChain
- */
 package dev.xuanji.adapter.onebot.converter;
 
 import com.fasterxml.jackson.databind.JsonNode;

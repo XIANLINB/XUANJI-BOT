@@ -1,10 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  dev.xuanji.core.storage.BotSchemaProvider
- *  org.springframework.jdbc.core.JdbcTemplate
- */
 package dev.xuanji.adapter.onebot.storage;
 
 import dev.xuanji.core.storage.BotSchemaProvider;

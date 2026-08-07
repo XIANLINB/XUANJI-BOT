@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import dev.xuanji.core.config.XuanjiRobotProperties;
 import dev.xuanji.adapter.qqbot.dto.GroupMessageEvent;
 import dev.xuanji.adapter.qqbot.api.MessageSender;
+import dev.xuanji.adapter.qqbot.storage.QqBotRepository;
 import dev.xuanji.core.event.EventHandler;
 import dev.xuanji.core.event.EventMapping;
 import dev.xuanji.adapter.qqbot.util.KeyboardBuilder;
@@ -123,13 +124,21 @@ public class GroupMessageHandler implements EventHandler {
                 autoSyncGroup(appId, groupOpenid, memberOpenid, role(event), senderName);
             }
 
-            // 消息落库（per-bot 实例库 qqbot_message，控制台消息监控数据源；机器人自消息也记录）
-            try {
-                qqBotRepository.insertMessage(appId, "group", groupOpenid, memberOpenid,
-                        "IN", "text", content, msgId, null, null, data.toString(),
-                        dev.xuanji.core.util.TimeUtils.nowEpochSeconds());
-            } catch (Exception ex) {
-                log.debug("[消息落库] 失败: {}", ex.getMessage());
+            // 消息落库（per-bot 实例库 qqbot_message，控制台消息监控数据源）
+            // 机器人自消息（author.bot=true）已在发送侧由 MessageSender 落 OUT（方向=发送），
+            // 回调不再重复记 IN，避免「机器人回复在监控里显示成收到」。
+            String inType = QqBotRepository.msgTypeLabel(
+                    event.getMessageType(), firstAttachmentContentType(event), firstAttachmentFilename(event));
+            // 纯文本但内容像 Markdown（QQ 可能以 text 段送达 markdown 文本）→ 归为 markdown
+            if ("text".equals(inType)) inType = outboundType(content);
+            if (!isBotAuthor) {
+                try {
+                    qqBotRepository.insertMessage(appId, "group", groupOpenid, memberOpenid,
+                            "IN", inType, content, msgId, null, null, data.toString(),
+                            dev.xuanji.core.util.TimeUtils.nowEpochSeconds());
+                } catch (Exception ex) {
+                    log.debug("[消息落库] 失败: {}", ex.getMessage());
+                }
             }
 
             // 机器人自消息：三级配置判定「忽略其他机器人消息」→ 只记录不做任何处理
@@ -156,15 +165,17 @@ public class GroupMessageHandler implements EventHandler {
                 log.debug("[事件落库] 失败: {}", ex.getMessage());
             }
 
-            // 记录到控制台消息流水
-            eventRecorder.record(
-                    "IN", "text", event.getAuthor().getUsername(),
-                    groupOpenid, content, "msgId=" + msgId);
+            // 记录到控制台消息流水（自消息已由发送侧记 OUT，回调不再重复记 IN）
+            if (!isBotAuthor) {
+                eventRecorder.record(
+                        "IN", inType, event.getAuthor().getUsername(),
+                        groupOpenid, content, "msgId=" + msgId);
 
-            // 记录到日志库（用真实 appId 而非 hashCode）
-            dev.xuanji.core.storage.log.MessageLogger.groupMessage("IN",
-                    appId, groupOpenid, memberOpenid,
-                    "text", content, data.toString());
+                // 记录到日志库（用真实 appId 而非 hashCode）
+                dev.xuanji.core.storage.log.MessageLogger.groupMessage("IN",
+                        appId, groupOpenid, memberOpenid,
+                        inType, content, data.toString());
+            }
 
             // 事件注解指令调度（传入 appId 让框架在消息链解析时按需下载媒体）
             var xjBot = botFactory.group(groupOpenid, msgId, appId);
@@ -174,36 +185,22 @@ public class GroupMessageHandler implements EventHandler {
                 // 权限已在 Pipeline 的 WhitelistStage(20) 统一裁决，此处不再内联检查
                 String cmdResult = commandRegistry.executeGroupMessage(content);
                 if (cmdResult != null) {
+                    // OUT 落库由 MessageSender 统一完成（方向=OUT、类型按发送方式、raw=出站载荷）
                     messageSender.sendGroupText(groupOpenid, cmdResult, msgId);
                     dev.xuanji.core.storage.log.MessageLogger.groupMessage("OUT",
                             appId, groupOpenid, memberOpenid,
-                            "text", cmdResult, "");
-                    // OUT 落库（per-bot qqbot_message，消息监控「发送」方向）
-                    try {
-                        qqBotRepository.insertMessage(appId, "group", groupOpenid, memberOpenid,
-                                "OUT", "text", cmdResult, null, null, null, null,
-                                dev.xuanji.core.util.TimeUtils.nowEpochSeconds());
-                    } catch (Exception ex) {
-                        log.debug("[OUT落库] 失败: {}", ex.getMessage());
-                    }
+                            outboundType(cmdResult), cmdResult, "");
                     return;
                 }
             } finally {
                 CommandRegistry.clearContext();
             }
 
-            // 未匹配 → 提示帮助
+            // 未匹配 → 提示帮助（OUT 落库由 MessageSender 统一完成）
             if (event.isAtBot()) {
                 String helpText = "发送\"帮助\"查看可用命令";
                 messageSender.sendGroupText(groupOpenid, helpText, msgId);
                 dev.xuanji.core.storage.log.MessageLogger.groupMessage("OUT", appId, groupOpenid, memberOpenid, "text", helpText, "");
-                try {
-                    qqBotRepository.insertMessage(appId, "group", groupOpenid, memberOpenid,
-                            "OUT", "text", helpText, null, null, null, null,
-                            dev.xuanji.core.util.TimeUtils.nowEpochSeconds());
-                } catch (Exception ex) {
-                    log.debug("[OUT落库] 失败: {}", ex.getMessage());
-                }
             }
 
         } catch (Exception e) {
@@ -230,11 +227,37 @@ public class GroupMessageHandler implements EventHandler {
         } catch (Exception ex) { return null; }
     }
 
+    /** 取首条附件的 content_type（图片/语音/视频细分的依据）。 */
+    private static String firstAttachmentContentType(GroupMessageEvent e) {
+        if (e.getAttachments() == null || e.getAttachments().isEmpty()) return null;
+        return e.getAttachments().get(0).getContentType();
+    }
+
+    /** 取首条附件的文件名（按扩展名兜底识别媒体类型）。 */
+    private static String firstAttachmentFilename(GroupMessageEvent e) {
+        if (e.getAttachments() == null || e.getAttachments().isEmpty()) return null;
+        return e.getAttachments().get(0).getFilename();
+    }
+
+    /** OUT 方向消息类型：sendGroupText 走 text 传输，但指令结果常是 Markdown，
+     *  按内容粗略识别，避免机器人「发出的 Markdown 显示成 text」。 */
+    private static String outboundType(String content) {
+        if (content == null) return "text";
+        String c = content.trim();
+        if (c.startsWith("#") || c.contains("**") || c.contains("```")
+                || c.contains("![") || (c.contains("[") && c.contains("]("))
+                || c.startsWith("> ") || c.startsWith("- ") || c.startsWith("* ")) {
+            return "markdown";
+        }
+        return "text";
+    }
+
     /** 构建 SDK 事件（消息链直塞：QQ 报文经 QqMessageConverter 解析后直塞 chain/hasAttachments，媒体订阅可命中）。
      *  框架层按需下载：传入 appId，URL 形态的 media 在解析时自动下载落盘（开关在 xuanji_config/bot_setting）。 */
     private static dev.xuanji.sdk.event.GroupMessageEvent sdkEvent(GroupMessageEvent raw, ObjectNode data, String appId) {
+        // 直接走结构化入口：data 本就是 ObjectNode，无需 toString() 再 parse 回来（省一次 JSON 往返）
         dev.xuanji.api.message.MessageChain chain =
-                dev.xuanji.adapter.qqbot.converter.QqMessageConverter.fromQqPayload(data.toString(), appId);
+                dev.xuanji.adapter.qqbot.converter.QqMessageConverter.fromQqData(data, appId);
         return new dev.xuanji.sdk.event.GroupMessageEvent.Builder()
                 .messageId(raw.getId())
                 .content(raw.getContent())

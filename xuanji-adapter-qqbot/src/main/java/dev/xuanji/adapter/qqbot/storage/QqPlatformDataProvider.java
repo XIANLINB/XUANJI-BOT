@@ -108,8 +108,61 @@ public class QqPlatformDataProvider implements PlatformDataProvider {
     }
 
     @Override
+    public List<Map<String, Object>> listMessagesByTargetRange(String instanceId, String chatType,
+                                                                String targetId,
+                                                                long since, long until, long before, int limit) {
+        return repo.listMessagesByTargetRange(instanceId, chatType, targetId, since, until, before, limit);
+    }
+
+    @Override
     public List<Map<String, Object>> listEvents(String instanceId, int limit) {
         return repo.listEvents(instanceId, limit);
+    }
+
+    @Override
+    public List<Map<String, Object>> messageTrend(String instanceId, long sinceEpochSeconds) {
+        return repo.messageTrend(instanceId, sinceEpochSeconds);
+    }
+
+    @Override
+    public Map<String, Object> messageDirectionStats(String instanceId, long sinceStart, long untilEnd) {
+        return repo.messageDirectionStats(instanceId, sinceStart, untilEnd);
+    }
+
+    @Override
+    public void updateConnMode(String instanceId, String mode) {
+        // 1. 写平台库 qqbot_bot.conn_mode
+        try {
+            repo.updateConnMode(instanceId, mode);
+        } catch (Exception e) {
+            log.warn("[QQ] 写平台库 conn_mode 失败: {}", e.getMessage());
+        }
+        // 2. 同步更新内存 RobotRegistry 的 Robot.connectionMethod（关键，否则 startBot 仍读旧值）
+        Robot robot = robotRegistry.findByAppId(instanceId);
+        if (robot != null) {
+            robot.setConnectionMethod(mode);
+            log.info("[QQ] 同步内存 RobotRegistry: appId={} → connMode={}", instanceId, mode);
+        } else {
+            log.warn("[QQ] RobotRegistry 未找到: appId={}（下次 startBot 需重启）", instanceId);
+        }
+    }
+
+    @Override
+    public Map<String, Object> stats(String instanceId, long sinceEpochSeconds) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("heatmap", repo.heatmap(instanceId, sinceEpochSeconds));
+        m.put("typeDist", repo.msgTypeDist(instanceId, sinceEpochSeconds));
+        m.put("activeGroups", repo.activeGroups(instanceId, sinceEpochSeconds, 10));
+        m.put("activeUsers", repo.activeUsers(instanceId, sinceEpochSeconds, 10));
+        m.put("activeBots", repo.activeBots(instanceId, sinceEpochSeconds, 10));
+        m.put("directionDist", repo.directionDist(instanceId, sinceEpochSeconds));
+        m.put("eventTypeDist", repo.eventTypeDist(instanceId, sinceEpochSeconds));
+        return m;
+    }
+
+    @Override
+    public List<Map<String, Object>> groupRiskStats(String instanceId, long sinceEpochSeconds, int limit) {
+        return repo.groupRiskStats(instanceId, sinceEpochSeconds, limit);
     }
 
     @Override
@@ -137,6 +190,11 @@ public class QqPlatformDataProvider implements PlatformDataProvider {
             default -> List.of();
         };
         return repo.countEventsSince(instanceId, qqTypes, sinceEpochSeconds);
+    }
+
+    @Override
+    public long countAllEventsSince(String instanceId, long sinceEpochSeconds) {
+        return repo.countAllEventsSince(instanceId, sinceEpochSeconds);
     }
 
     @Override

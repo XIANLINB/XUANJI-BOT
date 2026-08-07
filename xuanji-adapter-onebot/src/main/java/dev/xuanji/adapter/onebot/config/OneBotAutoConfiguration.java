@@ -1,25 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  dev.xuanji.api.message.DefaultMediaRefResolver
- *  dev.xuanji.api.message.MediaRefResolver
- *  dev.xuanji.api.message.MediaRefResolverHolder
- *  dev.xuanji.core.command.CommandRegistry
- *  dev.xuanji.core.concurrent.BotOutboundExecutor
- *  dev.xuanji.core.pipeline.BotPipeline
- *  dev.xuanji.core.storage.BotDataSourceRegistry
- *  dev.xuanji.core.storage.FrameworkBotRepository
- *  dev.xuanji.core.storage.MessageEventRecorder
- *  jakarta.annotation.PostConstruct
- *  lombok.Generated
- *  org.slf4j.Logger
- *  org.slf4j.LoggerFactory
- *  org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
- *  org.springframework.boot.context.properties.EnableConfigurationProperties
- *  org.springframework.context.annotation.Bean
- *  org.springframework.context.annotation.Configuration
- */
 package dev.xuanji.adapter.onebot.config;
 
 import dev.xuanji.adapter.onebot.adapter.OneBotAdapter;

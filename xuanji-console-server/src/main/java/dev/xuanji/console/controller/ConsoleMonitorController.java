@@ -7,6 +7,7 @@ import dev.xuanji.core.pipeline.BotPipeline;
 import dev.xuanji.core.storage.ConnectionStatusProvider;
 import dev.xuanji.core.storage.HealthMetricProvider;
 import dev.xuanji.core.storage.PlatformDataProvider;
+import dev.xuanji.core.web.XuanjiApi;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.bind.annotation.*;
@@ -18,8 +19,9 @@ import java.util.Map;
  * 控制台 · 仪表盘 / 运行健康 / 运行时配置（只读查询 + 配置写入）。
  */
 @Slf4j
+@XuanjiApi
 @RestController
-@RequestMapping("/xuanji/api/console")
+@RequestMapping("/console")
 public class ConsoleMonitorController {
 
     private final ConsoleQueryService queryService;
@@ -115,6 +117,12 @@ public class ConsoleMonitorController {
     @GetMapping("/config")
     public Map<String, Object> config() {
         return configService.getConfigView();
+    }
+
+    /** 命令清单（命令管理页数据源）：命令名/插件/方法/作用域/权限/限流。 */
+    @GetMapping("/commands")
+    public java.util.List<Map<String, Object>> commands() {
+        return commandRegistry.listCommands();
     }
 
     /** 更新全局 KV 设置（body: {k: v, ...}）。 */

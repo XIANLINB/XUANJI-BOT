@@ -66,7 +66,9 @@ public class BotInfoSync {
 
             log.info("[BotInfoSync] Bot 信息已同步: {} ({})", username, botId);
         } catch (Exception e) {
-            log.error("[BotInfoSync] 同步失败: appId={}, error={}", appId, e.getMessage());
+            // 降级为 warn：机器人可能在数据库消息表有历史记录但 RobotRegistry 缺（消息历史回流、未实时启用等），
+            // 不阻塞启动；该机器人真正启用后 ws 握手 READY 处会再次同步
+            log.warn("[BotInfoSync] 跳过同步 appId={}（{}）", appId, e.getMessage());
         }
     }
 

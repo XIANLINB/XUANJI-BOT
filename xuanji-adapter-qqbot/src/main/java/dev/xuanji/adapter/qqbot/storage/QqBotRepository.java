@@ -89,24 +89,72 @@ public class QqBotRepository {
     /** 同步 Bot 信息（/users/@me）到平台库 qqbot_botinfo。 */
     public void upsertBotInfo(String appId, String botId, String name, String avatar,
                               Boolean isBot, String unionOpenid, String shareUrl, String welcomeMsg) {
-        JdbcTemplate jdbc = platformJdbc();
-        Long botFk = jdbc.queryForObject("SELECT id FROM qqbot_bot WHERE bot_appid=?", Long.class, appId);
-        jdbc.update("""
-            MERGE INTO qqbot_botinfo (botid, bot_id, name, avatar, is_bot, union_openid, share_url, welcome_msg)
-            KEY (botid) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, botFk, botId, name, avatar, isBot, unionOpenid, shareUrl, welcomeMsg);
+        try {
+            JdbcTemplate jdbc = platformJdbc();
+            Long botFk = jdbc.queryForObject("SELECT id FROM qqbot_bot WHERE bot_appid=?", Long.class, appId);
+            jdbc.update("""
+                MERGE INTO qqbot_botinfo (botid, bot_id, name, avatar, is_bot, union_openid, share_url, welcome_msg)
+                KEY (botid) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, botFk, botId, name, avatar, isBot, unionOpenid, shareUrl, welcomeMsg);
+        } catch (DataAccessException e) {
+            log.warn("同步 botinfo 失败: appId={}, {}", appId, e.getMessage());
+        }
     }
 
     /** 读取指定 bot 的基础信息（平台库 qqbot_botinfo），降级返回空 Map。 */
     public Map<String, Object> getBotInfo(String appId) {
         try {
             return platformJdbc().queryForMap("""
-                SELECT i.name, i.avatar, i.share_url FROM qqbot_botinfo i
+                SELECT i.bot_id, i.name, i.avatar, i.is_bot, i.union_openid, i.share_url, i.welcome_msg
+                FROM qqbot_botinfo i
                 JOIN qqbot_bot b ON b.id = i.botid WHERE b.bot_appid = ?
             """, appId);
         } catch (DataAccessException e) {
             log.debug("读取 botinfo 失败（可能尚未同步）: {}", e.getMessage());
             return Map.of();
+        }
+    }
+
+    /** 更新平台库 qqbot_bot.conn_mode（控制台切换连接方式时用）。 */
+    public void updateConnMode(String appId, String mode) {
+        try {
+            int n = platformJdbc().update("UPDATE qqbot_bot SET CONN_MODE=? WHERE bot_appid=?", mode, appId);
+            log.info("[QqRepo] 更新 conn_mode: appId={}, mode={}, 影响行={}", appId, mode, n);
+        } catch (DataAccessException e) {
+            log.warn("更新 conn_mode 失败: appId={}, {}", appId, e.getMessage());
+        }
+    }
+
+    /**
+     * 消息统计（按时段 + 入站/出站方向聚合）。
+     *
+     * @param appId   机器人 AppID
+     * @param sinceStart 开始时间戳（epoch 秒，含）
+     * @param untilEnd   结束时间戳（epoch 秒，不含；MAX_VALUE 表示到当前）
+     * @return {"in": count, "out": count}
+     */
+    public Map<String, Object> messageDirectionStats(String appId, long sinceStart, long untilEnd) {
+        try {
+            // 注意：qqbot_message 在 per-bot 实例库（jdbc(appId)），不能用 platformJdbc()（共享库只有 qqbot_bot/qqbot_botinfo）！
+            List<Map<String, Object>> rows = jdbc(appId).queryForList("""
+                SELECT DIRECTION, COUNT(*) AS CNT
+                FROM qqbot_message
+                WHERE CREATE_TIME >= ? AND CREATE_TIME < ?
+                GROUP BY DIRECTION
+            """, sinceStart, untilEnd);
+            Map<String, Object> r = new LinkedHashMap<>();
+            r.put("in", 0);
+            r.put("out", 0);
+            for (Map<String, Object> row : rows) {
+                String d = String.valueOf(row.getOrDefault("DIRECTION", "")).toUpperCase();
+                long c = ((Number) row.getOrDefault("CNT", 0)).longValue();
+                if ("OUT".equals(d)) r.put("out", c);
+                else if ("IN".equals(d)) r.put("in", c);
+            }
+            return r;
+        } catch (Exception e) {
+            log.debug("消息方向统计失败: {}", e.getMessage());
+            return java.util.Map.of("in", 0, "out", 0);
         }
     }
 
@@ -431,11 +479,144 @@ public class QqBotRepository {
         """.formatted(col), chatType, targetId, limit);
     }
 
+    /**
+     * 单会话消息范围查询（控制台分页用）：按 create_time 范围 + 上界过滤，倒序取最近 limit 条。
+     * until / before 为 Long.MAX_VALUE 表示无上界。
+     */
+    public List<Map<String, Object>> listMessagesByTargetRange(String appId, String chatType, String targetId,
+                                                                long since, long until, long before, int limit) {
+        String col = "GROUP".equalsIgnoreCase(chatType) ? "group_id" : "user_id";
+        StringBuilder sql = new StringBuilder(
+                "SELECT * FROM qqbot_message WHERE chat_type=? AND ").append(col).append("=? AND create_time>=?");
+        List<Object> args = new ArrayList<>();
+        args.add(chatType);
+        args.add(targetId);
+        args.add(since);
+        if (until < Long.MAX_VALUE) {
+            sql.append(" AND create_time<=?");
+            args.add(until);
+        }
+        if (before < Long.MAX_VALUE) {
+            sql.append(" AND create_time<?");
+            args.add(before);
+        }
+        sql.append(" ORDER BY id DESC LIMIT ?");
+        args.add(Math.min(Math.max(limit, 1), 500));
+        return query(appId, sql.toString(), args.toArray());
+    }
+
+    // ═══════════════════ 数据中心聚合 ═══════════════════
+
+    /** 热力图：星期×小时 消息数（DAY_OF_WEEK: 1=周日 … 7=周六；HOUR: 0-23）。 */
+    public List<Map<String, Object>> heatmap(String appId, long sinceEpochSeconds) {
+        return query(appId, """
+            SELECT DAY_OF_WEEK(DATEADD('SECOND', create_time, TIMESTAMP '1970-01-01')) AS DOW,
+                   HOUR(DATEADD('SECOND', create_time, TIMESTAMP '1970-01-01')) AS HR,
+                   COUNT(*) AS CNT
+            FROM qqbot_message
+            WHERE create_time >= ?
+            GROUP BY DOW, HR
+        """, sinceEpochSeconds);
+    }
+
+    /** 消息类型分布。 */
+    public List<Map<String, Object>> msgTypeDist(String appId, long sinceEpochSeconds) {
+        return query(appId, """
+            SELECT msg_type, COUNT(*) AS CNT
+            FROM qqbot_message WHERE create_time >= ?
+            GROUP BY msg_type ORDER BY CNT DESC
+        """, sinceEpochSeconds);
+    }
+
+    /** 活跃群 TOP（群名 LEFT JOIN qqbot_group，仅群聊消息；群名缺失为空串，前端用群 ID 前 8 位兜底）。 */
+    public List<Map<String, Object>> activeGroups(String appId, long sinceEpochSeconds, int limit) {
+        return query(appId, """
+            SELECT m.group_id AS GID, COUNT(*) AS CNT, MAX(COALESCE(g.group_name, '')) AS GNAME
+            FROM qqbot_message m
+            LEFT JOIN qqbot_group g ON g.group_id = m.group_id AND g.bot_id = m.bot_id
+            WHERE m.chat_type='group' AND m.create_time >= ?
+            GROUP BY m.group_id ORDER BY CNT DESC LIMIT ?
+        """, sinceEpochSeconds, Math.min(Math.max(limit, 1), 50));
+    }
+
+    /** 活跃用户 TOP（昵称 LEFT JOIN qqbot_user；昵称缺失为空串，前端用用户 ID 前 8 位兜底）。 */
+    public List<Map<String, Object>> activeUsers(String appId, long sinceEpochSeconds, int limit) {
+        return query(appId, """
+            SELECT m.user_id AS UID, COUNT(*) AS CNT, MAX(COALESCE(u.nickname, '')) AS NICK
+            FROM qqbot_message m
+            LEFT JOIN qqbot_user u ON u.platform_user_id = m.user_id AND u.bot_id = m.bot_id
+            WHERE m.create_time >= ?
+            GROUP BY m.user_id ORDER BY CNT DESC LIMIT ?
+        """, sinceEpochSeconds, Math.min(Math.max(limit, 1), 50));
+    }
+
+    /** 活跃机器人 TOP（按 appId 聚合消息数 + 机器人名称）。LEFT JOIN 用 bot_key=appId 关联。 */
+    public List<Map<String, Object>> activeBots(String appId, long sinceEpochSeconds, int limit) {
+        return query(appId, """
+            SELECT m.bot_id AS APP_ID, COUNT(*) AS CNT,
+                   MAX(COALESCE(b.bot_name, '')) AS BNAME
+            FROM qqbot_message m
+            LEFT JOIN qqbot_bot b ON b.bot_key = CAST(m.bot_id AS VARCHAR)
+            WHERE m.create_time >= ?
+            GROUP BY m.bot_id ORDER BY CNT DESC LIMIT ?
+        """, sinceEpochSeconds, Math.min(Math.max(limit, 1), 50));
+    }
+
+    /** 消息方向分布（IN=入站/OUT=出站，按 direction 计数）。 */
+    public List<Map<String, Object>> directionDist(String appId, long sinceEpochSeconds) {
+        return query(appId, """
+            SELECT DIRECTION, COUNT(*) AS CNT
+            FROM qqbot_message
+            WHERE CREATE_TIME >= ?
+            GROUP BY DIRECTION
+        """, sinceEpochSeconds);
+    }
+
+    /** 事件类型分布（按 qqbot_event.event_type 计数）。 */
+    public List<Map<String, Object>> eventTypeDist(String appId, long sinceEpochSeconds) {
+        return query(appId, """
+            SELECT event_type AS ETYPE, COUNT(*) AS CNT
+            FROM qqbot_event
+            WHERE create_time >= ?
+            GROUP BY event_type ORDER BY CNT DESC
+        """, sinceEpochSeconds);
+    }
+
+    /**
+     * 各群风控状态：按群聚合近 since 秒群聊消息数 + 群名/成员数（LEFT JOIN 群档案）。
+     * 群名缺失返回空串（前端用群 ID 前 8 位兜底），成员数未知为 0。
+     */
+    public List<Map<String, Object>> groupRiskStats(String appId, long sinceEpochSeconds, int limit) {
+        return query(appId, """
+            SELECT m.group_id AS GID,
+                   COUNT(*) AS MSG_CNT,
+                   MAX(COALESCE(g.group_name, '')) AS GNAME,
+                   MAX(COALESCE(g.member_count, 0)) AS MEMBER_CNT
+            FROM qqbot_message m
+            LEFT JOIN qqbot_group g ON g.group_id = m.group_id AND g.bot_id = m.bot_id
+            WHERE m.chat_type='group' AND m.create_time >= ?
+            GROUP BY m.group_id ORDER BY MSG_CNT DESC LIMIT ?
+        """, sinceEpochSeconds, Math.min(Math.max(limit, 1), 200));
+    }
+
     /** 系统事件流水（qqbot_event，原表全部字段，倒序取最近 limit 条）。 */
     public List<Map<String, Object>> listEvents(String appId, int limit) {
         return query(appId, """
             SELECT * FROM qqbot_event ORDER BY id DESC LIMIT ?
         """, limit);
+    }
+
+    /** 消息按天聚合（趋势图）：create_time 为 epoch 秒，按日 + 聊天类型计数。注意 DAY 是 H2 保留字，别名用 D。 */
+    public List<Map<String, Object>> messageTrend(String appId, long sinceEpochSeconds) {
+        return query(appId, """
+            SELECT FORMATDATETIME(DATEADD('SECOND', CREATE_TIME, TIMESTAMP '1970-01-01'), 'yyyy-MM-dd') AS D,
+                   CHAT_TYPE,
+                   COUNT(*) AS CNT
+            FROM qqbot_message
+            WHERE CREATE_TIME >= ?
+            GROUP BY D, CHAT_TYPE
+            ORDER BY D
+        """, sinceEpochSeconds);
     }
 
     public long countGroups(String appId) {
@@ -460,6 +641,11 @@ public class QqBotRepository {
         args.add(sinceEpochSeconds);
         return count(appId, "SELECT COUNT(*) FROM qqbot_event WHERE event_type IN (" + in + ") AND create_time>=?",
                 args.toArray());
+    }
+
+    /** 全部系统事件自 sinceEpochSeconds 起的发生次数（预警中心事件突增检查用）。 */
+    public long countAllEventsSince(String appId, long sinceEpochSeconds) {
+        return count(appId, "SELECT COUNT(*) FROM qqbot_event WHERE create_time>=?", sinceEpochSeconds);
     }
 
     /** 实例库全部系统事件数（不限时间，用于仪表盘汇总）。 */
@@ -570,5 +756,29 @@ public class QqBotRepository {
             case 7 -> "rich_media";
             default -> "text";
         };
+    }
+
+    /**
+     * 结合消息类型数值与附件信息解析可读标签（解决「图片/语音/视频显示为 text」问题）。
+     * <p>优先看附件：QQ 平台图片/语音/视频常以 {@code message_type=7} + 附件形式下发，
+     * 仅靠数值会落入 rich_media；此处按 content_type / 文件名进一步细分为 image/voice/video/file。
+     * 无附件时回退到 {@link #msgTypeLabel(Integer)}。</p>
+     */
+    public static String msgTypeLabel(Integer type, String contentType, String filename) {
+        if (contentType != null && !contentType.isBlank()) {
+            if (contentType.startsWith("image")) return "image";
+            if (contentType.startsWith("audio")) return "voice";
+            if (contentType.startsWith("video")) return "video";
+            if (contentType.startsWith("file")) return "file";
+        }
+        if (filename != null && !filename.isBlank()) {
+            String l = filename.toLowerCase();
+            if (l.endsWith(".png") || l.endsWith(".jpg") || l.endsWith(".jpeg")
+                    || l.endsWith(".gif") || l.endsWith(".webp") || l.endsWith(".bmp")) return "image";
+            if (l.endsWith(".mp3") || l.endsWith(".amr") || l.endsWith(".wav") || l.endsWith(".m4a")) return "voice";
+            if (l.endsWith(".mp4") || l.endsWith(".mov") || l.endsWith(".avi")) return "video";
+            return "file";
+        }
+        return msgTypeLabel(type);
     }
 }

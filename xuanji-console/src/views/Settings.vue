@@ -12,6 +12,7 @@ import {
 } from '@vicons/ionicons5'
 import api from '../api'
 import PageHero from '../components/PageHero.vue'
+import { groupName } from '../utils/names'
 
 const message = useMessage()
 
@@ -20,9 +21,11 @@ interface GroupRow { GROUP_ID?: string; groupId?: string; groupOpenid?: string; 
 interface SchemaItem {
   key: string
   label: string
-  type: 'switch' | 'number' | 'text' | 'longtext'
+  type: 'switch' | 'number' | 'text' | 'longtext' | 'select'
   defaultValue: string | number | boolean
   hint: string
+  /** select 类型的选项列表 */
+  options?: { label: string; value: string }[]
   /** 作用域：global=仅全局；bot=仅 bot；group=仅群；all=全部；不写默认 global+bot+group */
   scope?: ('global' | 'bot' | 'group')[]
 }
@@ -40,6 +43,10 @@ const SCHEMA: SchemaItem[] = [
   { key: 'media.download.max_file_bytes', label: '媒体单文件上限（字节）', type: 'number', defaultValue: 209715200, scope: ['global'], hint: '单文件超过此大小跳过；默认 200MB' },
   { key: 'media.storage.ttl_days', label: '媒体保留天数', type: 'number', defaultValue: 7, scope: ['global'], hint: '下载的媒体文件保留天数；过期自动删除' },
   { key: 'media.storage.max_bytes', label: '媒体总配额（字节）', type: 'number', defaultValue: 4294967296, scope: ['global'], hint: '所有媒体总占用；超限自动删最旧；默认 4GB' },
+  { key: 'framework.qqbot.api_base_mode', label: 'QQ 开放平台 API 基地址', type: 'select', defaultValue: 'new', scope: ['global'], hint: 'new=新统一地址 api.bot.qq.com（不区分沙箱/正式，推荐）；legacy=老平台 api.sgroup.qq.com，按机器人环境自动选正式/沙箱。改后 30 秒内生效（WebSocket 连接需重启机器人）', options: [
+    { label: '新统一地址（api.bot.qq.com）', value: 'new' },
+    { label: '老平台（正式/沙箱自动区分）', value: 'legacy' }
+  ] },
   // ---- 机器人配置（xuanji_bot_setting）----
   { key: 'command_prefix', label: '机器人命令前缀', type: 'text', defaultValue: '', scope: ['bot', 'group'], hint: '该机器人/群专属命令前缀（覆盖全局）' },
   { key: 'rate_limit_enabled', label: '启用命令限速（本机器人）', type: 'switch', defaultValue: false, scope: ['bot', 'group'], hint: '该机器人/群是否启用命令限速（覆盖全局）' },
@@ -398,6 +405,13 @@ onMounted(async () => {
                         :min="0"
                         @update:value="(v: number | null) => setField(item, v ?? 0)"
                       />
+                      <NSelect
+                        v-else-if="item.type === 'select'"
+                        :value="fieldValue(item) || String(item.defaultValue)"
+                        :options="item.options ?? []"
+                        style="width: 100%"
+                        @update:value="(v: string | null) => setField(item, v ?? String(item.defaultValue))"
+                      />
                       <NInput
                         v-else-if="item.type === 'longtext'"
                         type="textarea"
@@ -503,7 +517,7 @@ onMounted(async () => {
                   >
                     <div class="ignore-group-info">
                       <NText class="ignore-group-name">
-                        {{ g.GROUP_NAME || g.groupName || g.name || '未命名群' }}
+                        {{ groupName(g) }}
                       </NText>
                       <NText depth="3" style="font-size: 11px; font-family: ui-monospace, SFMono-Regular, monospace">
                         {{ g.GROUP_ID || g.groupId || g.groupOpenid }}

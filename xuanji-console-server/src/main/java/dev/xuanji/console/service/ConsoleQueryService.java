@@ -1,6 +1,7 @@
 package dev.xuanji.console.service;
 
 import dev.xuanji.core.config.XuanjiRobotProperties;
+import dev.xuanji.core.storage.BotDataSourceRegistry;
 import dev.xuanji.core.storage.PlatformDataProvider;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
@@ -32,31 +33,54 @@ public class ConsoleQueryService {
     private final JdbcTemplate jdbc;
     private final XuanjiRobotProperties robotProperties;
     private final ObjectProvider<PlatformDataProvider> dataProviders;
+    private final BotDataSourceRegistry botDataSourceRegistry;
 
     public ConsoleQueryService(JdbcTemplate jdbc,
                                XuanjiRobotProperties robotProperties,
-                               ObjectProvider<PlatformDataProvider> dataProviders) {
+                               ObjectProvider<PlatformDataProvider> dataProviders,
+                               BotDataSourceRegistry botDataSourceRegistry) {
         this.jdbc = jdbc;
         this.robotProperties = robotProperties;
         this.dataProviders = dataProviders;
+        this.botDataSourceRegistry = botDataSourceRegistry;
+    }
+
+    /** 暴露框架库 JdbcTemplate（用于写 xuanji_bot_setting 等）。 */
+    public JdbcTemplate getJdbc() {
+        return jdbc;
+    }
+
+    /** 暴露 XuanjiRobotProperties（用于运行时切换 conn_mode 等）。 */
+    public XuanjiRobotProperties getRobotProperties() {
+        return robotProperties;
     }
 
     /** 框架库中登记的一个机器人实例。 */
-    public record BotRef(String platform, String instanceId, String status) {}
+    public record BotRef(String platform, String instanceId, String status, String botKey, String botName) {}
 
-    /** 枚举框架库 xuanji_bot 中登记的全部机器人实例（按 instance_id 去重）。 */
+    /** 枚举框架库 xuanji_bot 中登记的全部机器人实例（按 instance_id 去重）。
+     * 机器人名称存在 xuanji_bot_setting (EAV: config_key='bot_name')。 */
     public List<BotRef> botRefs() {
         // 同 instance_id 可能由于历史 platform 命名迁移（qq → qqbot）残留多行，
         // 按 instance_id 去重，优先保留能解析到 PlatformDataProvider 的行（避免重复 bot / 读到空 platform）。
         Map<String, BotRef> byInstance = new LinkedHashMap<>();
         try {
-            for (var row : jdbc.queryForList("SELECT platform, instance_id, status FROM xuanji_bot")) {
+            String sql = """
+                SELECT b.platform, b.instance_id, b.status, b.bot_key,
+                       MAX(CASE WHEN s.config_key = 'bot_name' THEN s.config_value END) AS bot_name
+                FROM xuanji_bot b
+                LEFT JOIN xuanji_bot_setting s ON s.bot_key = b.bot_key
+                GROUP BY b.platform, b.instance_id, b.status, b.bot_key
+            """;
+            for (var row : jdbc.queryForList(sql)) {
                 String instanceId = str(row.get("INSTANCE_ID"));
                 if (instanceId == null || instanceId.isBlank()) continue;
                 BotRef ref = new BotRef(
                         String.valueOf(row.getOrDefault("PLATFORM", "qqbot")),
                         instanceId,
-                        String.valueOf(row.getOrDefault("STATUS", "unknown")));
+                        String.valueOf(row.getOrDefault("STATUS", "unknown")),
+                        str(row.get("BOT_KEY")),
+                        str(row.get("BOT_NAME")));
                 byInstance.merge(instanceId, ref, (kept, candidate) ->
                         providerFor(candidate.platform()) != null ? candidate : kept);
             }
@@ -153,6 +177,43 @@ public class ConsoleQueryService {
         try {
             Integer v = jdbc.queryForObject(sql, Integer.class, args);
             return v != null ? v : 0;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /** 读框架库 xuanji_config 全局配置值，无则 null。 */
+    public String configValue(String key) {
+        try {
+            List<Map<String, Object>> rows = jdbc.queryForList(
+                    "SELECT config_value FROM xuanji_config WHERE config_key=?", key);
+            if (rows.isEmpty()) return null;
+            Object v = rows.get(0).get("CONFIG_VALUE");
+            return v == null ? null : String.valueOf(v);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 跨 bot 实例库整数查询（qInt 的实例版），失败返回 0。 */
+    public Integer qIntForInstance(String instanceId, String sql) {
+        try {
+            String platform = resolvePlatform(instanceId);
+            JdbcTemplate bj = botDataSourceRegistry.forInstance(platform, instanceId);
+            if (bj == null) return 0;
+            return bj.queryForObject(sql, Integer.class);
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /** 跨 bot 实例库 UPDATE，返回受影响行数；失败返回 0。 */
+    public int jdbcUpdateForInstance(String instanceId, String sql) {
+        try {
+            String platform = resolvePlatform(instanceId);
+            JdbcTemplate bj = botDataSourceRegistry.forInstance(platform, instanceId);
+            if (bj == null) return 0;
+            return bj.update(sql);
         } catch (Exception e) {
             return 0;
         }

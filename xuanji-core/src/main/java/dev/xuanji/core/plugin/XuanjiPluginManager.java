@@ -39,6 +39,10 @@ public class XuanjiPluginManager extends DefaultPluginManager {
     private final PluginStateStore stateStore;
     private final CommandRegistry commandRegistry;
 
+    /** 插件配置服务（schema 注册/注销） */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private PluginConfigService pluginConfigService;
+
     /** pluginId → 该插件注册的所有指令实例（用于启用时重注册 / 停用反注册） */
     private final Map<String, List<Object>> pluginCommands = new HashMap<>();
     /** pluginId → 当前业务生命周期状态 */
@@ -264,6 +268,10 @@ public class XuanjiPluginManager extends DefaultPluginManager {
         try {
             Object instance = cls.getDeclaredConstructor().newInstance();
             registry.register(instance, pluginId);
+            // 插件实现了 PluginConfigProvider → 注册配置 schema（控制台动态面板数据源）
+            if (instance instanceof dev.xuanji.api.plugin.PluginConfigProvider pcp && pluginConfigService != null) {
+                pluginConfigService.register(pluginId, pcp);
+            }
             pluginCommands.computeIfAbsent(pluginId, k -> new ArrayList<>()).add(instance);
             log.info("[Plugin] 注册指令类: {}", cls.getSimpleName());
         } catch (Exception e) {
@@ -369,9 +377,62 @@ public class XuanjiPluginManager extends DefaultPluginManager {
         }
     }
 
+    /**
+     * 运行时扫描 plugins 目录，加载新增的插件 jar（不重启框架）。
+     *
+     * <p>框架启动时只加载一次（{@link #loadAndStartAll()}）；运行中往 plugins/ 放入新 jar
+     * 后调用本方法即可发现并加载：解析 descriptor → 跳过已加载 → loadPlugin + startPlugin
+     * + 建子容器 + 按持久态应用启停。
+     *
+     * @return 本次新加载的插件 id 列表（空 = 无新增）
+     */
+    public synchronized java.util.List<String> scanNewPlugins() {
+        java.util.List<String> loaded = new java.util.ArrayList<>();
+        Path pluginsDir = getPluginsRoot();
+        if (!pluginsDir.toFile().exists()) return loaded;
+        java.util.Set<String> known = new java.util.HashSet<>();
+        for (PluginWrapper w : getPlugins()) known.add(w.getPluginId());
+
+        org.pf4j.ManifestPluginDescriptorFinder finder = new org.pf4j.ManifestPluginDescriptorFinder();
+        try (var stream = java.nio.file.Files.list(pluginsDir)) {
+            for (Path jar : stream.filter(p -> p.getFileName().toString().endsWith(".jar"))
+                    .filter(p -> !p.getFileName().toString().startsWith("copy-"))
+                    .toList()) {
+                String id;
+                try {
+                    org.pf4j.PluginDescriptor pd = finder.find(jar);
+                    if (pd == null || pd.getPluginId() == null || pd.getPluginId().isBlank()) continue;
+                    id = pd.getPluginId();
+                } catch (Exception e) {
+                    log.debug("[Plugin] 扫描跳过非插件 jar: {} ({})", jar.getFileName(), e.getMessage());
+                    continue;
+                }
+                if (known.contains(id)) continue;
+                try {
+                    loadPlugin(jar);
+                    startPlugin(id);
+                    PluginWrapper w = getPlugin(id);
+                    if (w == null) continue;
+                    createPluginContext(w);
+                    applyPersistedState(w);
+                    loaded.add(id);
+                    log.info("[Plugin] 扫描发现并加载新插件: {} v{}", id, w.getDescriptor().getVersion());
+                } catch (Exception e) {
+                    log.error("[Plugin] 扫描加载失败: {} error={}", id, e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            log.error("[Plugin] 扫描插件目录失败: {}", e.getMessage());
+        }
+        return loaded;
+    }
+
     private void unregisterCommands(String id) {
         for (Object inst : pluginCommands.getOrDefault(id, List.of())) {
             commandRegistry.unregister(inst);
+        }
+        if (pluginConfigService != null) {
+            pluginConfigService.unregister(id);
         }
     }
 

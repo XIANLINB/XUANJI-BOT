@@ -57,6 +57,14 @@ public class BotOutboundExecutor implements DisposableBean {
     public BotOutboundExecutor(ConfigService configService) {
         this(configService == null ? (key -> 0L) : (key -> configService.getOutboundPaceMs(key)),
                 System::nanoTime, Thread::sleep);
+        // 注册到监控：出站虚拟线程池（每 bot 一条串行队列）
+        ThreadPoolRegistry.register("出站虚拟线程池(每bot)", () -> {
+            int n = executors.size();
+            return new ThreadPoolRegistry.PoolInfo(
+                    "出站虚拟线程池(每bot)", "VirtualThread(串行队列)",
+                    n, n, -1, n, -1, -1,
+                    "每 bot 1 条串行队列 + pace 节流；poolSize=已创建队列数");
+        });
     }
 
     /** 测试注入路径：假 Sleeper 睡眠时推进时钟，实现毫秒级确定性节奏验证。 */

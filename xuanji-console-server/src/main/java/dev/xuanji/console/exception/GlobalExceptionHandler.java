@@ -2,6 +2,7 @@ package dev.xuanji.console.exception;
 
 import dev.xuanji.api.exception.BusinessException;
 import dev.xuanji.api.result.R;
+import dev.xuanji.console.config.XuanjiApiRoutes;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 
 import java.util.stream.Collectors;
 
@@ -100,13 +102,18 @@ public class GlobalExceptionHandler {
 
     /**
      * 处理资源不存在异常（404）
+     *
+     * <p>判定用的是命名空间 {@link XuanjiApiRoutes#API_NAMESPACE}（{@code /xuanji/api/}）
+     * 而不是带版本号的 {@link XuanjiApiRoutes#API_PREFIX}：这样老版本前端缓存打过来的
+     * {@code /xuanji/api/console/xxx} 也能拿到明确的 JSON 404，而不是被静态资源处理器
+     * 兜成 SPA 的 index.html —— 后者会让前端拿到一坨 HTML 然后 JSON 解析报错，很难排查。
      */
     @ExceptionHandler(NoResourceFoundException.class)
     @ResponseStatus(HttpStatus.NOT_FOUND)
     public R<Void> handleNoResource(NoResourceFoundException e, jakarta.servlet.http.HttpServletRequest request) {
         String path = request.getRequestURI();
         // 只对 API 路径返回 JSON 404，非 API 路径让静态资源处理
-        if (path.startsWith("/xuanji/api/")) {
+        if (path.startsWith(XuanjiApiRoutes.API_NAMESPACE)) {
             return R.fail(404, "接口不存在");
         }
         return null; // 交给默认处理（静态资源 etc.）
@@ -123,5 +130,15 @@ public class GlobalExceptionHandler {
     public R<Void> handleException(Exception e, HttpServletRequest request) {
         log.error("[全局异常] 系统异常: URI={}, Message={}", request.getRequestURI(), e.getMessage(), e);
         return R.fail(500, "服务器内部错误");
+    }
+
+    /**
+     * SSE / 异步请求客户端断开：浏览器关页、网络中断时，容器会抛此异常，
+     * 属完全正常的客户端行为，<b>不应记为 ERROR</b>（否则每次断开都刷一条 ERROR 日志，
+     * 淹没真正有意义的错误）。仅以 DEBUG 记一笔，不返回响应体（连接早已不可用）。
+     */
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    public void handleAsyncClientGone(AsyncRequestNotUsableException e) {
+        log.debug("[全局异常] SSE/异步客户端已断开（正常行为）: {}", e.getMessage());
     }
 }

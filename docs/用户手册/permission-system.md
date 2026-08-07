@@ -97,7 +97,9 @@ else                  → 按 senderRole 映射（owner/admin/member，未知→
 
 ## 6. 控制台接口
 
-前缀 `/xuanji/api/console/permission`（`ConsolePermissionController`）：
+前缀 `/xuanji/api/v1/console/permission`（`ConsolePermissionController`）：
+
+> 控制台所有接口的 `/xuanji/api/v1` 前缀由 `XuanjiApiRoutes` 统一注入，controller 内只声明相对路径。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -132,7 +134,7 @@ public String manage(...) { ... }
 - **旧**：`xuanji.master.bot1` yml 配置 + `PermissionService` 半 no-op（master 因 key 错位近失效，黑名单/超管是桩）。
 - **新**：主人/黑名单全部持久化到 DB，经控制台设置；yml `xuanji.master.*` 已删除，`XuanjiRobotProperties.master` 字段已移除。
 - `WhitelistStage.resolveBotKey` 改为直接用 `bot.selfId()`（=appId），修复旧「bot1 兜底导致与 appId 错位」的 master 失效 bug。
-- `BlacklistController`（游离于 `/xuanji/api/permission`）已删除，功能并入 `ConsolePermissionController`（`/xuanji/api/console` 前缀）。
+- `BlacklistController`（游离于 `/xuanji/api/permission`）已删除，功能并入 `ConsolePermissionController`（现前缀 `/xuanji/api/v1/console`）。
 
 ---
 

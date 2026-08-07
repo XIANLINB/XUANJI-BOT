@@ -1,6 +1,7 @@
 package dev.xuanji.console.controller;
 
 import dev.xuanji.core.permission.PermissionService;
+import dev.xuanji.core.web.XuanjiApi;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -8,12 +9,13 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 权限管理控制台接口（前缀 {@code /xuanji/api/console/permission}）。
+ * 权限管理控制台接口（实际暴露前缀 {@code /xuanji/api/v1/console/permission}）。
  *
  * <p>管理机器人主人（每 bot 唯一）与群黑名单（每群可多名）。两者均持久化于框架库。
  */
+@XuanjiApi
 @RestController
-@RequestMapping("/xuanji/api/console/permission")
+@RequestMapping("/console/permission")
 @RequiredArgsConstructor
 public class ConsolePermissionController {
 

@@ -178,6 +178,83 @@ public class QqApiService {
     }
 
     /**
+     * POST multipart 上传（富媒体 /files 接口，本地文件流方式）。
+     *
+     * <p>QQ 富媒体上传支持两种方式：url（JSON 字段）与 multipart 文件流。
+     * 本地文件转 base64 后走此通道（form 字段：file_type / srv_send_msg / file 文件流）。
+     * 响应处理与 sendRequest 对齐（2xx 成功；其余抛 {@link BusinessException}，含平台错误码）。
+     *
+     * @param robotId  机器人 ID
+     * @param envType  环境类型
+     * @param path     API 路径（如 /v2/groups/{openid}/files）
+     * @param fileType 文件类型（1 图片 / 2 视频 / 3 语音）
+     * @param fileBytes 文件内容
+     * @param filename 文件名（用于 multipart filename 字段）
+     * @param timeoutSeconds 超时（秒）
+     * @return 响应 JSON（含 file_info）
+     */
+    public ObjectNode postMultipart(String robotId, String envType, String path,
+                                    int fileType, byte[] fileBytes, String filename, int timeoutSeconds) {
+        String[] creds = getCredentialOrThrow(robotId, envType);
+        String accessToken = accessTokenService.getAccessToken(creds[0], creds[1], envType, isNewOpenBot);
+        String apiBase = QqPlatformConfig.getApiBaseUrl(isNewOpenBot, envType);
+        String boundary = "XuanjiBoundary" + System.nanoTime();
+
+        java.io.ByteArrayOutputStream body = new java.io.ByteArrayOutputStream();
+        try {
+            writeFormField(body, boundary, "file_type", String.valueOf(fileType));
+            writeFormField(body, boundary, "srv_send_msg", "0");
+            body.write(("--" + boundary + "\r\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            body.write(("Content-Disposition: form-data; name=\"file\"; filename=\"" + filename + "\"\r\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            body.write("Content-Type: application/octet-stream\r\n\r\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            body.write(fileBytes);
+            body.write("\r\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            body.write(("--" + boundary + "--\r\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (java.io.IOException e) {
+            throw new BusinessException(500, "构造上传请求失败: " + e.getMessage());
+        }
+
+        HttpRequest.Builder rb = HttpRequest.newBuilder()
+                .uri(URI.create(apiBase + path))
+                .header("Authorization", "QQBot " + accessToken)
+                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                .timeout(Duration.ofSeconds(timeoutSeconds))
+                .POST(HttpRequest.BodyPublishers.ofByteArray(body.toByteArray()));
+
+        try {
+            HttpResponse<String> response = httpClient.send(rb.build(), HttpResponse.BodyHandlers.ofString());
+            String responseBody = response.body();
+            int statusCode = response.statusCode();
+            log.debug("QQ API multipart 响应: status={} path={}", statusCode, path);
+            if (statusCode == 200 || statusCode == 201 || statusCode == 202) {
+                onApiSuccess();
+                if (responseBody == null || responseBody.isEmpty()) return Json.obj();
+                return Json.parseObj(responseBody);
+            }
+            String traceId = response.headers().firstValue("X-Tps-trace-ID").orElse("N/A");
+            String errBody = responseBody == null ? "" : responseBody;
+            throw new BusinessException(statusCode,
+                    "QQ富媒体上传失败(" + statusCode + ") traceId=" + traceId + " " + truncate(errBody, 200));
+        } catch (java.io.IOException | InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new BusinessException(500, "QQ富媒体上传异常: " + e.getMessage());
+        }
+    }
+
+    private static void writeFormField(java.io.ByteArrayOutputStream out, String boundary,
+                                       String name, String value) throws java.io.IOException {
+        out.write(("--" + boundary + "\r\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        out.write(("Content-Disposition: form-data; name=\"" + name + "\"\r\n\r\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        out.write(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        out.write("\r\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    private static String truncate(String s, int max) {
+        if (s == null) return "";
+        return s.length() <= max ? s : s.substring(0, max);
+    }
+
+    /**
      * PUT 请求（通过 robotId）
      *
      * @param robotId 机器人 ID
@@ -204,6 +281,11 @@ public class QqApiService {
         String[] creds = getCredentialOrThrow(robotId, envType);
         // 使用全局配置的 isNewOpenBot
         return sendRequest("GET", creds[0], creds[1], envType, path, null, isNewOpenBot);
+    }
+
+    /** 拉取当前机器人信息（GET /users/@me）—— 含 union_openid / share_url / welcome_msg 等。 */
+    public ObjectNode getMe(String robotId, String envType) {
+        return get(robotId, envType, "/users/@me");
     }
 
     /**
@@ -396,11 +478,9 @@ public class QqApiService {
             // 记录链路追踪ID（文档7.4: OpenAPI返回HTTP头 X-Tps-trace-ID）
             String traceId = response.headers().firstValue("X-Tps-trace-ID").orElse("N/A");
 
+            // 完整打印响应报文（不截断），便于排查开放平台返回字段（如 /users/@me 的 union_openid 缺失问题）
             log.debug("QQ API响应: status={}, traceId={}, body={}",
-                    statusCode, traceId,
-                    responseBody != null && responseBody.length() > 300
-                            ? responseBody.substring(0, 300) + "..."
-                            : responseBody);
+                    statusCode, traceId, responseBody);
 
             // 4. 处理响应
             if (statusCode == 200 || statusCode == 201 || statusCode == 202) {

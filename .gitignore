@@ -32,3 +32,6 @@ release/
 _mods.txt
 USAGE-dist.txt
 *.log
+
+# ===== 小玄（WorkBuddy）工作产物：测试目录 / 脚本 / 日志 / 反编译工具，统一归档勿提交 =====
+workbuddy_artifacts/

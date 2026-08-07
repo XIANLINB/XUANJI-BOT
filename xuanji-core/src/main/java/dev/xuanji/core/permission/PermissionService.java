@@ -160,6 +160,7 @@ public class PermissionService {
                 MERGE INTO xuanji_blacklist (bot_key, group_id, user_id, reason)
                 KEY (bot_key, group_id, user_id) VALUES (?, ?, ?, ?)
             """, botKey, groupId, userId, reason == null ? "" : reason);
+            logBlacklist(botKey, groupId, userId, "ADD", reason);
             log.info("[权限] 拉黑: bot={}, group={}, user={}", botKey, groupId, userId);
         } catch (Exception e) {
             log.warn("[权限] 拉黑失败: {}", e.getMessage());
@@ -176,12 +177,73 @@ public class PermissionService {
             n = jdbc.update("DELETE FROM xuanji_blacklist WHERE bot_key=? AND group_id=? AND user_id=?",
                     botKey, groupId, userId);
         }
+        logBlacklist(botKey, groupId, userId, "REMOVE", null);
         log.info("[权限] 移除黑名单: bot={}, group={}, user={}, 删除{}行", botKey, groupId, userId, n);
     }
 
     public void removeBlacklistById(long id) {
+        // 先取原记录（写时间线需要群/用户信息），再删除
+        String botKey = "", groupId = "", userId = "";
+        try {
+            var row = jdbc.queryForMap("SELECT bot_key, group_id, user_id FROM xuanji_blacklist WHERE id=?", id);
+            botKey = str(row.get("BOT_KEY"));
+            groupId = str(row.get("GROUP_ID"));
+            userId = str(row.get("USER_ID"));
+        } catch (Exception ignored) { /* 记录不存在则按 id 删除 */ }
         int n = jdbc.update("DELETE FROM xuanji_blacklist WHERE id=?", id);
+        if (n > 0 && !userId.isBlank()) {
+            logBlacklist(botKey, groupId, userId, "REMOVE", null);
+        }
         log.info("[权限] 按ID移除黑名单: id={}, 删除{}行", id, n);
+    }
+
+    /** 写黑名单操作日志（风控中心时间线数据源；表未就绪时静默降级）。 */
+    private void logBlacklist(String botKey, String groupId, String userId, String action, String reason) {
+        try {
+            jdbc.update("INSERT INTO xuanji_blacklist_log (bot_key, group_id, user_id, action, reason, create_time) VALUES (?,?,?,?,?,?)",
+                    botKey == null ? "" : botKey,
+                    groupId == null ? "" : groupId,
+                    userId == null ? "" : userId,
+                    action,
+                    reason == null ? "" : reason,
+                    System.currentTimeMillis() / 1000);
+        } catch (Exception e) {
+            log.debug("[权限] 黑名单日志写入失败（表未就绪？）: {}", e.getMessage());
+        }
+    }
+
+    /** 黑名单操作时间线（风控中心）：按 bot 过滤，倒序取最近 limit 条。 */
+    public List<Map<String, Object>> listBlacklistLog(String botKey, int limit) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        try {
+            StringBuilder sql = new StringBuilder(
+                    "SELECT id, bot_key, group_id, user_id, action, reason, create_time FROM xuanji_blacklist_log");
+            List<Object> args = new ArrayList<>();
+            if (botKey != null && !botKey.isBlank()) {
+                sql.append(" WHERE bot_key=?");
+                args.add(botKey);
+            }
+            sql.append(" ORDER BY id DESC LIMIT ?");
+            args.add(Math.min(Math.max(limit, 1), 500));
+            jdbc.query(sql.toString(), rs -> {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("id", rs.getLong("id"));
+                row.put("botKey", rs.getString("bot_key"));
+                row.put("groupId", rs.getString("group_id"));
+                row.put("userId", rs.getString("user_id"));
+                row.put("action", rs.getString("action"));
+                row.put("reason", rs.getString("reason"));
+                row.put("createTime", rs.getLong("create_time"));
+                out.add(row);
+            }, args.toArray());
+        } catch (Exception e) {
+            log.debug("[权限] 黑名单时间线查询失败（表未就绪？）: {}", e.getMessage());
+        }
+        return out;
+    }
+
+    private static String str(Object v) {
+        return v == null ? "" : String.valueOf(v);
     }
 
     // ==================== 群超管（兼容旧接口，v3.3 不再使用） ====================

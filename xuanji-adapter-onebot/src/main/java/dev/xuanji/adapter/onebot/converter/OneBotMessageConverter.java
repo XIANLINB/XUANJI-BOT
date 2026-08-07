@@ -1,28 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  com.fasterxml.jackson.databind.JsonNode
- *  com.fasterxml.jackson.databind.node.ArrayNode
- *  com.fasterxml.jackson.databind.node.ObjectNode
- *  dev.xuanji.api.json.Json
- *  dev.xuanji.api.message.MessageChain
- *  dev.xuanji.api.message.MessageChain$Builder
- *  dev.xuanji.api.message.MessageElement
- *  dev.xuanji.api.message.MessageElement$Ark
- *  dev.xuanji.api.message.MessageElement$At
- *  dev.xuanji.api.message.MessageElement$Face
- *  dev.xuanji.api.message.MessageElement$File
- *  dev.xuanji.api.message.MessageElement$Image
- *  dev.xuanji.api.message.MessageElement$Keyboard
- *  dev.xuanji.api.message.MessageElement$Markdown
- *  dev.xuanji.api.message.MessageElement$Passthrough
- *  dev.xuanji.api.message.MessageElement$Quote
- *  dev.xuanji.api.message.MessageElement$Reply
- *  dev.xuanji.api.message.MessageElement$Text
- *  dev.xuanji.api.message.MessageElement$Video
- *  dev.xuanji.api.message.MessageElement$Voice
- */
 package dev.xuanji.adapter.onebot.converter;
 
 import com.fasterxml.jackson.databind.JsonNode;

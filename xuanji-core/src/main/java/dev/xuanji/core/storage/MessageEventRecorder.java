@@ -1,6 +1,8 @@
 package dev.xuanji.core.storage;
 
+import dev.xuanji.core.web.RealtimeEventPublisher;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -14,7 +16,8 @@ import java.util.Map;
 /**
  * 实时事件面板环形缓冲区 — 取代原先挂在 ConsoleApiController 上的静态方法 recordEvent。
  *
- * <p>事件分发/消息落库路径调用 {@link #record}，控制台 {@code /console/events} 经 {@link #snapshot} 读取。
+ * <p>事件分发/消息落库路径调用 {@link #record}，控制台 {@code /console/events} 经 {@link #snapshot} 读取；
+ * 同时每条记录会通过 {@link #publisher} 广播到 {@link RealtimeEventPublisher}，供 SSE 实时推送。
  */
 @Slf4j
 @Component
@@ -23,6 +26,10 @@ public class MessageEventRecorder {
     private static final int MAX = 200;
 
     private final Deque<Map<String, Object>> buffer = new ArrayDeque<>(MAX);
+
+    /** 实时事件广播器（可选，由 Spring 注入；手动 new 时为 null，跳过广播以兼容测试）。 */
+    @Autowired(required = false)
+    private RealtimeEventPublisher publisher;
 
     /**
      * 记录一条实时事件。
@@ -47,6 +54,12 @@ public class MessageEventRecorder {
         synchronized (buffer) {
             if (buffer.size() >= MAX) buffer.removeFirst();
             buffer.addLast(m);
+        }
+        // 实时广播（type=event），供 SSE 推送给已连接的控制台
+        if (publisher != null) {
+            Map<String, Object> evt = new LinkedHashMap<>(m);
+            evt.put("type", "event");
+            publisher.publish(evt);
         }
     }
 

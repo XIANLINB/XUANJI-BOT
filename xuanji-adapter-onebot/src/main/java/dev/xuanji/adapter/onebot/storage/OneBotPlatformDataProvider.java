@@ -1,13 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  dev.xuanji.core.storage.FrameworkBotRepository
- *  dev.xuanji.core.storage.PlatformDataProvider
- *  lombok.Generated
- *  org.slf4j.Logger
- *  org.slf4j.LoggerFactory
- */
 package dev.xuanji.adapter.onebot.storage;
 
 import dev.xuanji.adapter.onebot.session.OneBotSession;

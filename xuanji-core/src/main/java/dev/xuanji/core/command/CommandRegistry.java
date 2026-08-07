@@ -1,10 +1,13 @@
 package dev.xuanji.core.command;
 
 import dev.xuanji.api.annotation.*;
+import dev.xuanji.core.plugin.PluginConfigService;
+import dev.xuanji.core.storage.PluginStorageService;
 import dev.xuanji.sdk.bot.Bot;
 import dev.xuanji.sdk.event.GroupMessageEvent;
 import dev.xuanji.sdk.event.MessageEvent;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.lang.reflect.Method;
@@ -29,6 +32,14 @@ public class CommandRegistry {
     private final java.util.concurrent.atomic.AtomicLong rateLimitHits = new java.util.concurrent.atomic.AtomicLong();
     private final dev.xuanji.core.plugin.PluginBotBindingService bindingService;
 
+    /** 插件持久化服务（方法参数 PluginStorage 自动注入）。 */
+    @Autowired(required = false)
+    private PluginStorageService pluginStorageService;
+
+    /** 插件配置服务（方法参数 PluginConfig 自动注入）。 */
+    @Autowired(required = false)
+    private PluginConfigService pluginConfigService;
+
     public CommandRegistry(dev.xuanji.core.plugin.PluginBotBindingService bindingService) {
         this.bindingService = bindingService;
     }
@@ -50,6 +61,57 @@ public class CommandRegistry {
         m.put("disabledPlugins", disabledPlugins.size());
         m.put("pluginTimeoutCount", rateLimitHits.get());
         return m;
+    }
+
+    /** 命令级限速命中总次数（风控中心概览：@Command rateLimit 拦截计数）。 */
+    public long rateLimitHits() {
+        return rateLimitHits.get();
+    }
+
+    /**
+     * 命令清单（控制台「命令管理」页数据源）。
+     *
+     * <p>群聊/私聊各自注册一条 HandlerEntry（scope=BOTH 时同方法入两个列表），
+     * 按 {@code 命令名|插件|方法} 合并去重，作用域用 group/private 两个布尔表达。
+     */
+    public java.util.List<Map<String, Object>> listCommands() {
+        Map<String, Map<String, Object>> byKey = new java.util.LinkedHashMap<>();
+        collectCommands(groupMsgHandlers, byKey, true);
+        collectCommands(privateMsgHandlers, byKey, false);
+        return new java.util.ArrayList<>(byKey.values());
+    }
+
+    private void collectCommands(java.util.List<HandlerEntry> entries,
+                                 Map<String, Map<String, Object>> byKey, boolean group) {
+        for (HandlerEntry e : entries) {
+            String cmd = e.filter().cmd();
+            if (cmd == null || cmd.isEmpty()) continue;
+            String key = cmd + "|" + e.pluginId + "|" + e.method.getName();
+            Map<String, Object> m = byKey.computeIfAbsent(key, k -> {
+                // 权限优先级：@Command.roles()（CommandFilter 持有）> @RequireRole（requiredRole）> 默认 MEMBER
+                String[] cmdRoles = (e.filter() instanceof CommandFilter cf
+                        && cf.roles() != null && cf.roles().length > 0)
+                        ? cf.roles() : null;
+                java.util.List<String> roles = cmdRoles != null
+                        ? java.util.List.of(cmdRoles)
+                        : (e.requiredRole.isEmpty()
+                            ? java.util.List.of("MEMBER")
+                            : new java.util.ArrayList<>(e.requiredRole));
+                Map<String, Object> x = new java.util.LinkedHashMap<>();
+                x.put("cmd", cmd);
+                x.put("pluginId", e.pluginId);
+                x.put("method", e.method.getName());
+                x.put("order", e.order);
+                x.put("rateLimitMs", e.rateLimit);
+                x.put("roles", roles);
+                x.put("platforms", new java.util.ArrayList<>(e.platforms));
+                x.put("group", false);
+                x.put("private", false);
+                return x;
+            });
+            if (group) m.put("group", true);
+            else m.put("private", true);
+        }
     }
 
     public void register(Object pluginInstance, String pluginId) {
@@ -183,7 +245,7 @@ public class CommandRegistry {
             try {
                 // 平台白名单：限定了平台但事件平台不在其中 → 跳过
                 if (!e.platforms.isEmpty() && !e.platforms.contains(platform)) continue;
-                e.method.invoke(e.instance, resolveArgs(e.method, "", event));
+                e.method.invoke(e.instance, resolveArgs(e.method, "", event, e.pluginId));
             } catch (Exception ex) { log.warn("[GroupEvent] {}:", ex.getMessage()); }
         }
     }
@@ -209,7 +271,7 @@ public class CommandRegistry {
                 if (!checkRateLimit(e)) continue;
                 if (!checkRole(e)) continue;  // @RequireRole
                 String argsAfter = argsAfterCommand(trimmed, e.filter);
-                Object[] ma = resolveArgs(e.method, argsAfter, groupEventDtoTL.get());
+                Object[] ma = resolveArgs(e.method, argsAfter, groupEventDtoTL.get(), e.pluginId);
                 Object result = e.method.invoke(e.instance, ma);
                 if (result != null) return result.toString();
             } catch (Exception ex) {
@@ -298,7 +360,7 @@ public class CommandRegistry {
         return text;
     }
 
-    private Object[] resolveArgs(Method method, String args, dev.xuanji.sdk.event.MessageEvent event) {
+    private Object[] resolveArgs(Method method, String args, dev.xuanji.sdk.event.MessageEvent event, String pluginId) {
         Parameter[] params = method.getParameters();
         Object[] values = new Object[params.length];
         // @Arg 独立游标：从 args（已剥掉命令词）按顺序取 token，不按参数下标错位
@@ -313,6 +375,18 @@ public class CommandRegistry {
             }
             if (Bot.class.isAssignableFrom(type)) {
                 values[i] = botTL.get(); continue;
+            }
+            // 插件持久化存储：按当前插件 id 注入隔离视图
+            if (dev.xuanji.api.plugin.PluginStorage.class.isAssignableFrom(type)) {
+                values[i] = pluginStorageService != null && pluginId != null
+                        ? pluginStorageService.view(pluginId) : null;
+                continue;
+            }
+            // 插件配置读取：DB 值 > schema 默认值 > 兜底
+            if (dev.xuanji.api.plugin.PluginConfig.class.isAssignableFrom(type)) {
+                values[i] = pluginConfigService != null && pluginId != null
+                        ? pluginConfigService.view(pluginId) : null;
+                continue;
             }
             Arg arg = params[i].getAnnotation(Arg.class);
             if (arg != null) {

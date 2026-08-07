@@ -1,6 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- */
 package dev.xuanji.adapter.onebot.session;
 
 public interface OneBotSession {

@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { NCard, NSpace, NButton, NInputNumber, NSelect, NSwitch, NIcon, NEmpty, NTooltip } from 'naive-ui'
-import { DocumentTextOutline, ReloadOutline, ArrowDownOutline, TimerOutline } from '@vicons/ionicons5'
+import { NCard, NSpace, NButton, NInputNumber, NSelect, NSwitch, NIcon, NEmpty, NTooltip, useMessage } from 'naive-ui'
+import { DocumentTextOutline, ReloadOutline, ArrowDownOutline, TimerOutline, PulseOutline, DownloadOutline } from '@vicons/ionicons5'
 import api from '../api'
+import { openStream } from '../api/http'
 import { useFillHeight } from '../composables/useFillHeight'
+import dayjs from 'dayjs'
+import { exportCsv, exportJson } from '../utils/export'
 
 // 日志页工具栏较高（一行放不下会换行），预留更多空间
 const { fillHeight } = useFillHeight(90)
+
+const message = useMessage()
 
 const lines = ref(100)
 const raw = ref('')
@@ -25,6 +30,13 @@ let pollTimer: number | null = null
 
 // 追踪链路：点击某行 traceId 后，仅显示同一 traceId 的日志
 const traceFilter = ref('')
+
+// 实时流（SSE）：连接后服务端推送新增日志行；与轮询互斥，断开自动降级为轮询
+const REALTIME_KEY = 'xuanji.logs.realtime'
+const realtime = ref(localStorage.getItem(REALTIME_KEY) === 'true') // 默认关
+const streamEs = ref<EventSource | null>(null)
+const streamError = ref(false)
+const LIVE_CAP = 5000 // 实时累积行数上限，避免失控增长
 
 const LEVEL_ORDER: Record<string, number> = { TRACE: 0, DEBUG: 1, INFO: 2, WARN: 3, ERROR: 4 }
 const LEVEL_COLOR: Record<string, string> = {
@@ -79,6 +91,47 @@ const entries = computed<Entry[]>(() => {
   }
   return result
 })
+
+// ══════ 日期筛选 + 导出（批次6） ══════
+const dateFilter = ref(0)
+const LOG_RANGE_OPTIONS = [
+  { label: '全部时间', value: 0 },
+  { label: '今天', value: 1 },
+  { label: '近 7 天', value: 7 },
+  { label: '近 30 天', value: 30 }
+]
+const filteredEntries = computed<Entry[]>(() => {
+  if (!dateFilter.value) return entries.value
+  const since = dayjs().subtract(dateFilter.value, 'day').startOf('day')
+  return entries.value.filter((e) => {
+    if (!e.time) return true // 原始行无时间戳不参与日期过滤
+    const t = dayjs(e.time)
+    return t.isValid() && t.isAfter(since)
+  })
+})
+
+function exportLogs(format: 'csv' | 'json') {
+  const data = filteredEntries.value
+  const stamp = dayjs().format('YYYYMMDD-HHmmss')
+  if (format === 'json') {
+    exportJson(data, `runtime-log-${stamp}.json`)
+  } else {
+    exportCsv(
+      data,
+      [
+        { key: 'time', label: '时间' },
+        { key: 'level', label: '级别' },
+        { key: 'thread', label: '线程' },
+        { key: 'logger', label: '记录器' },
+        { key: 'message', label: '消息' },
+        { key: 'trace', label: 'TraceId' },
+        { key: 'stack', label: '堆栈' }
+      ],
+      `runtime-log-${stamp}.csv`
+    )
+  }
+  message.success(`已导出 ${data.length} 条（${format.toUpperCase()}）`)
+}
 
 function shortLogger(n: string): string {
   if (!n) return ''
@@ -158,6 +211,49 @@ watch([pollEnabled, pollSec], () => {
   startPoll()
 })
 
+// ══════ 实时流（SSE） ══════
+function startStream() {
+  stopStream()
+  stopPoll()
+  const es = openStream()
+  es.addEventListener('log', (e: MessageEvent) => appendLiveLine((e as MessageEvent).data))
+  es.onopen = () => { streamError.value = false }
+  es.onerror = () => {
+    // EventSource 会自动重连；持续失败则降级为轮询保证可用性
+    streamError.value = true
+    if (realtime.value && !pollEnabled.value) startPoll()
+  }
+  streamEs.value = es
+}
+
+function stopStream() {
+  if (streamEs.value) {
+    streamEs.value.close()
+    streamEs.value = null
+  }
+}
+
+function appendLiveLine(line: string) {
+  if (!line) return
+  raw.value = raw.value ? raw.value + '\n' + line : line
+  const parts = raw.value.split('\n')
+  if (parts.length > LIVE_CAP) {
+    raw.value = parts.slice(parts.length - LIVE_CAP).join('\n')
+  }
+  if (autoScroll.value) scrollToBottom()
+}
+
+function toggleRealtime(v: boolean) {
+  realtime.value = v
+  localStorage.setItem(REALTIME_KEY, String(v))
+  if (v) {
+    startStream()
+  } else {
+    stopStream()
+    if (pollEnabled.value) startPoll()
+  }
+}
+
 function clickTrace(trace?: string) {
   if (!trace) return
   traceFilter.value = traceFilter.value === trace ? '' : trace
@@ -165,10 +261,14 @@ function clickTrace(trace?: string) {
 
 onMounted(() => {
   load().then(() => {
-    if (pollEnabled.value) startPoll() // 若上次开启轮询，进入页面即恢复
+    if (realtime.value) startStream() // 若上次开启实时流，进入页面即恢复
+    else if (pollEnabled.value) startPoll()
   })
 })
-onUnmounted(stopPoll)
+onUnmounted(() => {
+  stopStream()
+  stopPoll()
+})
 
 const fontOptions = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20].map((n) => ({ label: n + ' px', value: n }))
 const levelOptions = [
@@ -213,6 +313,15 @@ const pollOptions = [
         <NInputNumber v-model:value="lines" :min="50" :max="5000" :step="50" style="width: 110px" />
         <NSelect v-model:value="minLevel" :options="levelOptions" style="width: 130px" />
         <NSelect v-model:value="fontSize" :options="fontOptions" style="width: 96px" />
+        <NSelect v-model:value="dateFilter" :options="LOG_RANGE_OPTIONS" style="width: 110px" />
+        <NButton size="small" secondary :disabled="!filteredEntries.length" @click="exportLogs('csv')">
+          <template #icon><NIcon><DownloadOutline /></NIcon></template>
+          CSV
+        </NButton>
+        <NButton size="small" secondary :disabled="!filteredEntries.length" @click="exportLogs('json')">
+          <template #icon><NIcon><DownloadOutline /></NIcon></template>
+          JSON
+        </NButton>
         <NSpace align="center" :size="6">
           <NSwitch v-model:value="autoScroll" size="small" />
           <span class="ctl-label">自动滚动</span>
@@ -228,6 +337,16 @@ const pollOptions = [
           开启后按设定间隔自动拉取最新日志（live tail）。后台标签页不轮询。默认 30 秒，可在右侧设置。切换页面后开关状态会自动保留。
         </NTooltip>
         <NSelect v-model:value="pollSec" :options="pollOptions" style="width: 90px" :disabled="!pollEnabled" />
+        <NTooltip trigger="hover">
+          <template #trigger>
+            <NSpace align="center" :size="6">
+              <NSwitch v-model:value="realtime" size="small" @update:value="toggleRealtime" />
+              <NIcon size="14" :color="streamError ? '#ffa94d' : '#18a058'"><PulseOutline /></NIcon>
+              <span class="ctl-label">实时</span>
+            </NSpace>
+          </template>
+          开启后通过 SSE 实时接收新增日志行（服务端推送，无需轮询）。与轮询互斥；连接异常时自动降级为轮询。
+        </NTooltip>
         <NButton type="primary" :loading="loading" @click="load">
           <template #icon><NIcon><ReloadOutline /></NIcon></template>
           刷新
@@ -237,8 +356,8 @@ const pollOptions = [
 
     <NCard :bordered="false" content-style="padding: 0">
       <div ref="boxRef" class="log-box" :style="{ fontSize: fontSize + 'px', maxHeight: fillHeight + 'px' }">
-        <template v-if="entries.length">
-          <div v-for="(e, i) in entries" :key="i" class="log-row">
+        <template v-if="filteredEntries.length">
+          <div v-for="(e, i) in filteredEntries" :key="i" class="log-row">
             <span class="log-time">{{ e.time || '--:--:--' }}</span>
             <span class="log-badge" :style="badgeStyle(e.level)">{{ e.level }}</span>
             <span

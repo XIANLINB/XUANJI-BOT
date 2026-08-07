@@ -1,28 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  lombok.Generated
- *  org.slf4j.Logger
- *  org.slf4j.LoggerFactory
- *  org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
- *  org.springframework.context.annotation.Configuration
- *  org.springframework.http.HttpStatus
- *  org.springframework.http.HttpStatusCode
- *  org.springframework.http.server.ServerHttpRequest
- *  org.springframework.http.server.ServerHttpResponse
- *  org.springframework.http.server.ServletServerHttpRequest
- *  org.springframework.web.socket.CloseStatus
- *  org.springframework.web.socket.TextMessage
- *  org.springframework.web.socket.WebSocketHandler
- *  org.springframework.web.socket.WebSocketMessage
- *  org.springframework.web.socket.WebSocketSession
- *  org.springframework.web.socket.config.annotation.EnableWebSocket
- *  org.springframework.web.socket.config.annotation.WebSocketConfigurer
- *  org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
- *  org.springframework.web.socket.handler.TextWebSocketHandler
- *  org.springframework.web.socket.server.HandshakeInterceptor
- */
 package dev.xuanji.adapter.onebot.websocket;
 
 import dev.xuanji.adapter.onebot.api.OneBotApiService;

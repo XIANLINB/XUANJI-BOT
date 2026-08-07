@@ -1,14 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  jakarta.annotation.PreDestroy
- *  lombok.Generated
- *  org.slf4j.Logger
- *  org.slf4j.LoggerFactory
- *  org.springframework.context.event.ContextRefreshedEvent
- *  org.springframework.context.event.EventListener
- */
 package dev.xuanji.adapter.onebot.websocket;
 
 import dev.xuanji.adapter.onebot.api.OneBotApiService;

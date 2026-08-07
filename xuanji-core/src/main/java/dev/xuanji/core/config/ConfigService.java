@@ -157,8 +157,8 @@ public class ConfigService {
     }
 
     /**
-     * 三级「忽略其他机器人消息」判定（群 &gt; bot &gt; 全局 &gt; 默认 false）：
-     * 值为 "true"（忽略）时返回 true。
+     * 三级「忽略其他机器人消息」判定（群 &gt; bot &gt; 全局 &gt; 默认 true）：
+     * 值为 "true"（忽略）时返回 true；未配置任何级别时默认忽略（防其他机器人消息误触发插件）。
      */
     public boolean isIgnoreBotMessages(String botKey, String groupId) {
         // 1. 群级
@@ -172,7 +172,8 @@ public class ConfigService {
         // 3. 全局
         String gl = getGlobalConfig().get("ignore_bot_messages");
         if (gl != null) return "true".equalsIgnoreCase(gl.trim());
-        return false;
+        // 4. 默认：忽略（未配置任何级别时，其他机器人的消息不触发插件）
+        return true;
     }
 
     /**

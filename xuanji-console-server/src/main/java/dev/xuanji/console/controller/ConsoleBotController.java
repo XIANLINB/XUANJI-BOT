@@ -3,6 +3,7 @@ package dev.xuanji.console.controller;
 import dev.xuanji.console.service.ConsoleQueryService;
 import dev.xuanji.core.config.XuanjiRobotProperties;
 import dev.xuanji.core.storage.PlatformDataProvider;
+import dev.xuanji.core.web.XuanjiApi;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
@@ -20,8 +21,9 @@ import static dev.xuanji.console.service.ConsoleQueryService.strOrEmpty;
  * 群/好友/消息等统计经 {@link PlatformDataProvider} 按平台聚合，core 不出现平台字样。
  */
 @Slf4j
+@XuanjiApi
 @RestController
-@RequestMapping("/xuanji/api/console")
+@RequestMapping("/console")
 public class ConsoleBotController {
 
     private final ConsoleQueryService queryService;
@@ -75,7 +77,7 @@ public class ConsoleBotController {
         return list;
     }
 
-    /** 机器人详情（含脱敏密钥 / 环境 / 统计）。 */
+    /** 机器人详情（含脱敏密钥 / 环境 / 统计 / 机器人信息）。 */
     @GetMapping("/bots/{botKey}")
     public Map<String, Object> botDetail(@PathVariable String botKey) {
         String appId = queryService.resolveAppId(botKey);
@@ -107,16 +109,108 @@ public class ConsoleBotController {
         m.put("env", robots != null && robots.get(botKey) != null && robots.get(botKey).isSandbox() ? "SANDBOX" : "PRODUCTION");
 
         PlatformDataProvider p = queryService.providerFor(platform);
-        long since = ConsoleQueryService.todayStartEpochSeconds();
+        long today0 = ConsoleQueryService.todayStartEpochSeconds();
+        long week0 = java.time.Instant.now().getEpochSecond() - 7L * 86400;
+        long month0 = java.time.Instant.now().getEpochSecond() - 30L * 86400;
         m.put("groupsTotal", p == null ? 0 : p.countGroups(appId));
         m.put("friendsTotal", p == null ? 0 : p.countFriends(appId));
         m.put("todayMessages", p == null ? 0
-                : p.countMessagesSince(appId, PlatformDataProvider.CHAT_GROUP, since)
-                + p.countMessagesSince(appId, PlatformDataProvider.CHAT_C2C, since));
+                : p.countMessagesSince(appId, PlatformDataProvider.CHAT_GROUP, today0)
+                + p.countMessagesSince(appId, PlatformDataProvider.CHAT_C2C, today0));
         m.put("connectionType", p == null ? "" : p.getConnectionType(appId));
         // webhook 回调域名（完整回调 = https://{domain}/webhook/{appId}）
-        m.put("domain", p == null ? "" : strOrEmpty(p.getBotConfig(appId).get("webhookUrl")));
+        String domain = p == null ? "" : strOrEmpty(p.getBotConfig(appId).get("webhookUrl"));
+        m.put("domain", domain);
+
+        // 机器人信息（union_openid / share_url / welcome_msg，从 qqbot_botinfo 表，启动后调 /users/@me 同步）
+        // 注意：queryForMap 会把查询到的列全部放进 map，即使值为 NULL（key 存在 → getOrDefault 也返回 null）！
+        // 因此必须用 strOrEmpty 做 null 安全取值（同时兼容大小写列名），绝不能用 getOrDefault(...).toString()。
+        if (p != null) {
+            Map<String, Object> info = p.getBotInfo(appId);
+            m.put("unionOpenid", strOrEmpty(info.get("UNION_OPENID"), info.get("union_openid")));
+            m.put("shareUrl", strOrEmpty(info.get("SHARE_URL"), info.get("share_url")));
+            m.put("welcomeMsg", strOrEmpty(info.get("WELCOME_MSG"), info.get("welcome_msg")));
+            m.put("botName", strOrEmpty(info.get("NAME"), info.get("name")));
+            m.put("botAvatar", strOrEmpty(info.get("AVATAR"), info.get("avatar")));
+            m.put("botId", strOrEmpty(info.get("BOT_ID"), info.get("bot_id")));
+
+            // 消息统计：今日/本周/本月 × 入站/出站
+            long now = java.time.Instant.now().getEpochSecond();
+            Map<String, Object> msgStats = new LinkedHashMap<>();
+            msgStats.put("today", p.messageDirectionStats(appId, today0, now));
+            msgStats.put("week",  p.messageDirectionStats(appId, week0,  now));
+            msgStats.put("month", p.messageDirectionStats(appId, month0, now));
+            m.put("messageStats", msgStats);
+        } else {
+            m.put("unionOpenid", "");
+            m.put("shareUrl", "");
+            m.put("welcomeMsg", "");
+            m.put("botName", "");
+            m.put("botAvatar", "");
+            m.put("botId", "");
+            m.put("messageStats", Map.of("today", Map.of("in", 0, "out", 0),
+                    "week", Map.of("in", 0, "out", 0), "month", Map.of("in", 0, "out", 0)));
+        }
+
+        // 创建时间（从框架库 xuanji_bot.create_time 读取）
+        try {
+            var ts = queryService.getJdbc().queryForObject(
+                    "SELECT CREATE_TIME FROM xuanji_bot WHERE INSTANCE_ID=?",
+                    java.sql.Timestamp.class, appId);
+            if (ts != null) m.put("createTime", ts.getTime() / 1000);
+        } catch (Exception ignored) { /* 不影响主体返回 */ }
+
         return m;
+    }
+
+    /** 切换连接方式（websocket ↔ webhook）：校验 → 更新配置 → stop+start 重连。 */
+    @PutMapping("/bots/{botKey}/conn-mode")
+    public Map<String, Object> updateConnMode(@PathVariable String botKey,
+                                               @RequestParam String mode) {
+        if (mode == null || (!mode.equalsIgnoreCase("websocket") && !mode.equalsIgnoreCase("webhook"))) {
+            return Map.of("error", "mode 必须是 websocket 或 webhook");
+        }
+        String appId = queryService.resolveAppId(botKey);
+        if (appId == null || appId.isBlank()) return Map.of("error", "Bot not found");
+        String platform = queryService.resolvePlatform(appId);
+        PlatformDataProvider p = queryService.providerFor(platform);
+        if (p == null) return Map.of("error", "unsupported platform: " + platform);
+
+        String normalized = mode.toLowerCase();
+        // webhook 模式：必须先有 webhookUrl
+        if ("webhook".equals(normalized)) {
+            String webhookUrl = strOrEmpty(p.getBotConfig(appId).get("webhookUrl"));
+            if (webhookUrl.isBlank()) {
+                return Map.of("error", "切换 webhook 前请先配置 webhook 回调域名（在 '运行环境' 配置中设置）");
+            }
+        }
+
+        try {
+            // 1. 写框架库 xuanji_bot_setting.conn_mode（下次启动生效）
+            String sqlSet = "MERGE INTO xuanji_bot_setting (bot_key, config_key, config_value) KEY(bot_key, config_key) VALUES (?, 'conn_mode', ?)";
+            queryService.getJdbc().update(sqlSet, botKey, normalized);
+
+            // 2. 同步更新适配器（QQ 平台写平台库 + 内存 Robot）
+            p.updateConnMode(appId, normalized);
+
+            // 3. 同步更新 starter 的 XuanjiRobotProperties 内存（getRobots() 拿到的对象）
+            robotProperties.updateConnectionMethod(botKey, normalized);
+
+            // 4. stopBot：断开旧连接（webhook 标停用；websocket 真正断开）
+            try { p.stopBot(appId); } catch (Exception ignored) {}
+
+            // 5. startBot：按新模式建立连接（startBot 内部会读取 Robot.connectionMethod）
+            String env = "SANDBOX";
+            var allRobots = queryService.getRobotProperties().getRobots();
+            if (allRobots != null && allRobots.get(botKey) != null && !allRobots.get(botKey).isSandbox()) env = "PRODUCTION";
+            p.startBot(appId, env);
+
+            log.info("[Console] 切换机器人连接方式: botKey={}, appId={}, mode={}", botKey, appId, normalized);
+            return Map.of("ok", true, "msg", "已切换到 " + normalized + "，连接已重启");
+        } catch (Exception e) {
+            log.error("[Console] 切换连接方式失败: {}", e.getMessage(), e);
+            return Map.of("error", e.getMessage());
+        }
     }
 
     /** 停止机器人连接（WebSocket 断开 / Webhook 标记停用）。 */

@@ -4,6 +4,16 @@ import { get, put, del, getActuatorMetric } from './http'
 export const monitorApi = {
   getDashboard: () => get('/console/dashboard'),
   getHealth: () => get('/console/health'),
+  // 运行监控指标：系统资源 + QPS + 线程池 + 框架统计（真实数据）
+  getMetricsOverview: () => get('/console/metrics/overview'),
+  // QPS 逐秒曲线（默认近 60 秒）
+  getMetricsQps: (seconds = 60) => get('/console/metrics/qps', { seconds }),
+  // 性能模板推荐：mode = eco（经济）| perf（性能）
+  getTuneRecommend: (mode: 'eco' | 'perf' = 'eco') => get('/console/tune/recommend', { mode }),
+  // 命令清单（命令管理页）
+  getCommands: () => get('/console/commands'),
+  // 框架版本日志（仪表盘时间线）
+  getVersionLog: () => get('/console/version-log'),
   // 运行时配置快照：全局 KV + 每机器人配置 + 群级配置
   getConfig: () => get('/console/config'),
   putGlobalConfig: (body: Record<string, string>) => put('/console/config/global', body),

@@ -2,6 +2,7 @@ package dev.xuanji.console.controller;
 
 import dev.xuanji.console.service.ConsoleQueryService;
 import dev.xuanji.core.storage.PlatformDataProvider;
+import dev.xuanji.core.web.XuanjiApi;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
@@ -16,8 +17,9 @@ import java.util.Map;
  * <p>跨所有 bot 实例库聚合，每行盖 {@code BOT_APPID}（真实 appId）章供前端区分；
  * 各行 {@code BOT_ID} 是 per-bot 库内局部自增 id，不能跨 bot 当身份用。
  */
+@XuanjiApi
 @RestController
-@RequestMapping("/xuanji/api/console")
+@RequestMapping("/console")
 public class ConsoleContactController {
 
     private final ConsoleQueryService queryService;
@@ -74,23 +76,41 @@ public class ConsoleContactController {
         return list;
     }
 
-    /** 单个会话的消息记录（实时监控右侧聊天窗）。type=group|c2c。返回 qqbot_message 原表全部字段 + BOT_APPID。 */
+    /**
+     * 单个会话的消息记录（实时监控右侧聊天窗）。
+     * <ul>
+     *   <li>type=group|c2c（必填）</li>
+     *   <li>targetId=群号/用户 openid（必填）</li>
+     *   <li>startTime/endTime=时间范围 epoch 秒（可选；startTime 默认 0，endTime 默认 Long.MAX_VALUE）</li>
+     *   <li>beforeTime=加载更早消息：create_time < beforeTime（可选，配合上滑加载更多）</li>
+     *   <li>limit=本次最大条数（默认 100，上限 500；内部 +1 用于判断 hasMore）</li>
+     * </ul>
+     * 返回 {@code { rows: [...], hasMore: bool }}：rows 按 create_time 升序（早→晚），hasMore 表示还有更早消息。
+     */
     @GetMapping("/contact-messages")
-    public List<Map<String, Object>> contactMessages(@RequestParam String type,
-                                                     @RequestParam String targetId) {
+    public Map<String, Object> contactMessages(@RequestParam String type,
+                                                @RequestParam String targetId,
+                                                @RequestParam(required = false, defaultValue = "0") long startTime,
+                                                @RequestParam(required = false, defaultValue = "0") long endTime,
+                                                @RequestParam(required = false, defaultValue = "0") long beforeTime,
+                                                @RequestParam(defaultValue = "100") int limit) {
         String chatType = "group".equalsIgnoreCase(type)
                 ? PlatformDataProvider.CHAT_GROUP : PlatformDataProvider.CHAT_C2C;
+        long since = startTime;
+        long until = endTime > 0 ? endTime : Long.MAX_VALUE;
+        long before = beforeTime > 0 ? beforeTime : Long.MAX_VALUE;
+        int lim = Math.min(Math.max(limit, 1), 500);
+
         List<Map<String, Object>> all = new ArrayList<>();
         for (ConsoleQueryService.BotRef ref : queryService.botRefs()) {
             PlatformDataProvider p = queryService.providerFor(ref.platform());
             if (p == null) continue;
-            for (Map<String, Object> row : p.listMessagesByTarget(ref.instanceId(), chatType, targetId, 200)) {
-                Map<String, Object> r = new LinkedHashMap<>(row);
-                r.put("BOT_APPID", ref.instanceId());
-                all.add(r);
-            }
+            all.addAll(p.listMessagesByTargetRange(ref.instanceId(), chatType, targetId, since, until, before, lim + 1));
         }
-        all.sort(Comparator.comparingLong((Map<String, Object> r) -> ConsoleQueryService.asLong(r.get("CREATE_TIME"))).reversed());
-        return all;
+        // 单 session 不会有跨 bot 重叠，直接按时间排序
+        all.sort(Comparator.comparingLong((Map<String, Object> r) -> ConsoleQueryService.asLong(r.get("CREATE_TIME"))));
+        boolean hasMore = all.size() > lim;
+        if (hasMore) all = all.subList(0, lim);
+        return Map.of("rows", all, "hasMore", hasMore);
     }
 }

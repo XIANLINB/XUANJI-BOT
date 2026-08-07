@@ -58,7 +58,7 @@ mvn -o test                        # B2：全量测试
 |---|---|---|
 | C1 | 框架库 | `data/xuanji/xuanji.mv.db` 出现 **10 张表**：xuanji_bot / xuanji_config / xuanji_bot_setting / xuanji_dedup / xuanji_plugin / xuanji_plugin_kv / xuanji_bot_owner / xuanji_blacklist / xuanji_plugin_binding / xuanji_setup |
 | C2 | 旧表迁移 | 无旧表残留（xuanji_setting / xuanji_bot_config / xuanji_super_admin / xuanji_qqbot_group* 等已删除） |
-| C3 | 控制台 API | `GET /xuanji/api/console/bots` → `[]`（无机器人） |
+| C3 | 控制台 API | `GET /xuanji/api/v1/console/bots` → `[]`（无机器人） |
 | C4 | 前端可达 | `GET /xuanji/console/` 返回 SPA HTML；`/setup/status` 返回未完成向导状态 |
 
 ### 3.2 带旧 data 的迁移验证（第二轮）

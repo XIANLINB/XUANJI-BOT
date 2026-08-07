@@ -111,7 +111,31 @@ public final class QqMessageConverter {
     public static MessageChain fromQqPayload(String raw, String appId) {
         if (raw == null || raw.isBlank()) return MessageChain.EMPTY;
         try {
-            ObjectNode node = (ObjectNode) Json.parse(raw);
+            return fromQqData((ObjectNode) Json.parse(raw), appId);
+        } catch (Exception e) {
+            // 字符串入口的兜底：JSON 都解析不了，至少把原文当文本留住，不让消息凭空消失
+            return MessageChain.text(raw);
+        }
+    }
+
+    /**
+     * 解析 QQ 消息报文节点 → 消息链（{@link #fromQqPayload(String, String)} 的<b>结构化入口</b>）。
+     *
+     * <p>与字符串版能力完全一致（content 字符串 / 段数组、attachments 富媒体、按需自动下载），
+     * 区别只在于免去 {@code toString() → parse()} 的序列化往返 —— 事件转换是每条消息必经的热路径，
+     * 上游（{@code QqEventConverter}）手里本来就是 {@code ObjectNode}，没有理由再绕一圈。
+     *
+     * <p>兜底策略与字符串版<b>刻意不同</b>：字符串版解析失败会退化成 {@code Text(raw)} 保住原文；
+     * 本方法入参已是结构化节点，真出异常说明是字段形态异常而非文本，此时返回
+     * {@link MessageChain#EMPTY} 而不是把整坨 JSON 塞进消息文本（否则会污染命令匹配）。
+     *
+     * @param node  QQ 消息数据节点（webhook/WS 的 {@code d} 字段）
+     * @param appId 机器人 appId（用于 bot 级媒体下载开关；null = 不下载，保持 URL 形态）
+     * @return 消息链；无可解析内容时返回 {@link MessageChain#EMPTY}（不会返回 null）
+     */
+    public static MessageChain fromQqData(ObjectNode node, String appId) {
+        if (node == null) return MessageChain.EMPTY;
+        try {
             MessageChain.Builder b = MessageChain.builder();
 
             // 1. content：字符串或段数组
@@ -147,7 +171,7 @@ public final class QqMessageConverter {
             }
             return b.build();
         } catch (Exception e) {
-            return MessageChain.text(raw);
+            return MessageChain.EMPTY;
         }
     }
 

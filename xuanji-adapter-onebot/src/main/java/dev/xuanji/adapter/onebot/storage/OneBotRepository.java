@@ -1,14 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  dev.xuanji.core.storage.BotDataSourceRegistry
- *  lombok.Generated
- *  org.slf4j.Logger
- *  org.slf4j.LoggerFactory
- *  org.springframework.dao.DataAccessException
- *  org.springframework.jdbc.core.JdbcTemplate
- */
 package dev.xuanji.adapter.onebot.storage;
 
 import dev.xuanji.core.storage.BotDataSourceRegistry;

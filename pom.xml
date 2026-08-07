@@ -33,6 +33,7 @@
         <module>xuanji-adapter-onebot</module>
         <module>xuanji-core</module>
         <module>xuanji-console-server</module>
+        <module>xuanji-scheduler</module>
         <module>xuanji-plugin-demo</module>
         <module>xuanji-starter</module>
     </modules>
@@ -73,6 +74,11 @@
             <dependency>
                 <groupId>dev.xuanji</groupId>
                 <artifactId>xuanji-console-server</artifactId>
+                <version>1.0.0-SNAPSHOT</version>
+            </dependency>
+            <dependency>
+                <groupId>dev.xuanji</groupId>
+                <artifactId>xuanji-scheduler</artifactId>
                 <version>1.0.0-SNAPSHOT</version>
             </dependency>
         </dependencies>

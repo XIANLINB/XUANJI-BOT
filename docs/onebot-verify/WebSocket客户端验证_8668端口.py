@@ -3,7 +3,8 @@
 import socket, base64, os, json, time, struct
 
 HOST, PORT, PATH = "127.0.0.1", 8668, "/onebot/ws"
-TOKEN, SELF = "almHduWEJMC~JveO", "10001"
+TOKEN = os.environ.get("ONEBOT_TOKEN", "")  # 与 application.yml 的 ${ONEBOT_TOKEN:} 对齐，留空则不过 token
+SELF = "10001"
 
 
 def connect():

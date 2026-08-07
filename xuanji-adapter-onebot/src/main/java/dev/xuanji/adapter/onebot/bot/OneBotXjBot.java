@@ -1,24 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  com.fasterxml.jackson.databind.JsonNode
- *  com.fasterxml.jackson.databind.node.ArrayNode
- *  com.fasterxml.jackson.databind.node.ObjectNode
- *  dev.xuanji.api.json.Json
- *  dev.xuanji.api.message.MessageChain
- *  dev.xuanji.api.message.MessageElement
- *  dev.xuanji.api.message.MessageElement$Ark
- *  dev.xuanji.api.message.MessageElement$Passthrough
- *  dev.xuanji.api.message.MessageElement$Video
- *  dev.xuanji.api.message.MessageElement$Voice
- *  dev.xuanji.api.sender.SendReceipt
- *  dev.xuanji.core.concurrent.BotOutboundExecutor
- *  dev.xuanji.sdk.bot.Bot
- *  lombok.Generated
- *  org.slf4j.Logger
- *  org.slf4j.LoggerFactory
- */
 package dev.xuanji.adapter.onebot.bot;
 
 import com.fasterxml.jackson.databind.JsonNode;

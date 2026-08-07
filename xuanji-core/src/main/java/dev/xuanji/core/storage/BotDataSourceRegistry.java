@@ -2,6 +2,8 @@ package dev.xuanji.core.storage;
 
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import com.zaxxer.hikari.HikariPoolMXBean;
+import dev.xuanji.core.concurrent.ThreadPoolRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -67,6 +69,16 @@ public class BotDataSourceRegistry implements DisposableBean {
             // H2 单连接文件锁：禁止池内并发连接同一文件导致 lock timeout
             cfg.setAutoCommit(true);
             HikariDataSource ds = new HikariDataSource(cfg);
+            // 注册到监控：连接池实时状态（active/idle/total）
+            String poolKey = key.replaceFirst("^(platform|instance):", "");
+            ThreadPoolRegistry.register("H2连接池(" + poolKey + ")", () -> {
+                HikariPoolMXBean mx = ds.getHikariPoolMXBean();
+                return new ThreadPoolRegistry.PoolInfo(
+                        "H2连接池(" + poolKey + ")", "HikariCP",
+                        cfg.getMinimumIdle(), cfg.getMaximumPoolSize(),
+                        mx.getActiveConnections(), mx.getTotalConnections(), mx.getThreadsAwaitingConnection(), -1,
+                        "H2 单文件锁限制，per 库独立小池");
+            });
             log.info("[DataSource] 打开 H2(池化): {}", url);
             return new JdbcTemplate(ds);
         });

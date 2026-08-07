@@ -1,23 +1,27 @@
 package dev.xuanji.console.controller;
 
 import dev.xuanji.core.storage.MessageEventRecorder;
+import dev.xuanji.core.web.XuanjiApi;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
+import java.util.stream.Stream;
 
 /**
  * 控制台 API：系统状态、日志、权限管理。
  */
+@XuanjiApi
 @RestController
-@RequestMapping("/xuanji/api/console")
+@RequestMapping("/console")
 @RequiredArgsConstructor
 public class ConsoleApiController {
 
@@ -74,10 +78,16 @@ public class ConsoleApiController {
         try {
             Path logFile = Paths.get("logs", "xuanji-bot.log");
             if (!Files.exists(logFile)) return "日志文件不存在: " + logFile.toAbsolutePath();
-            List<String> all = Files.readAllLines(logFile);
             int max = Math.min(lines, 500); // 单次上限 500 行
-            int start = Math.max(0, all.size() - max);
-            return String.join("\n", all.subList(start, all.size()));
+            // 流式读取，仅保留尾部 max 行，避免把整个日志文件读进内存（大日志内存炸弹）
+            Deque<String> tail = new ArrayDeque<>(max);
+            try (Stream<String> stream = Files.lines(logFile, StandardCharsets.UTF_8)) {
+                for (Iterator<String> it = stream.iterator(); it.hasNext(); ) {
+                    tail.addLast(it.next());
+                    if (tail.size() > max) tail.removeFirst();
+                }
+            }
+            return String.join("\n", tail);
         } catch (IOException e) {
             return "日志读取失败: " + e.getMessage();
         }

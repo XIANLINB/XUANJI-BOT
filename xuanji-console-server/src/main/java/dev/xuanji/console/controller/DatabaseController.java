@@ -1,6 +1,7 @@
 package dev.xuanji.console.controller;
 
 import dev.xuanji.core.storage.BotDataSourceRegistry;
+import dev.xuanji.core.web.XuanjiApi;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -18,41 +19,69 @@ import java.util.stream.Collectors;
  * 数据库浏览接口 — 直接展示表数据。多数据源：
  * <ul>
  *   <li>业务库（@Primary）+ 日志库（@Qualifier("logJdbcTemplate")）：璇玑框架层表（xuanji_* / xlog_*）</li>
+ *   <li>平台共享库（data/{platform}/{platform}.mv.db）：跨 bot 共享的平台表（qqbot_bot / qqbot_botinfo / qqbot_message 等）</li>
  *   <li>各机器人实例库（data/{platform}/{instanceId}/data/{instanceId}.mv.db）：平台表（qqbot_* / onebot_*）</li>
  * </ul>
  *
  * <pre>
- * GET /xuanji/api/db/tables                — 全部表名（含框架库 + 各 bot 实例库），带 SOURCE 标记
- * GET /xuanji/api/db/rows?table=&source=   — 指定表全部行（限制 1000）；source 缺省查业务库
- * GET /xuanji/api/db/query?sql=&source=    — 只读 SQL 查询
+ * GET /xuanji/api/v1/db/tables                — 全部表名（含框架库 + 平台共享库 + 各 bot 实例库），带 SOURCE 标记
+ * GET /xuanji/api/v1/db/rows?table=&source=   — 指定表全部行（限制 1000）；source 缺省查业务库
+ * GET /xuanji/api/v1/db/query?sql=&source=    — 只读 SQL 查询
  * </pre>
  *
  * <p>SOURCE 取值：{@code business}（框架业务库）、{@code log}（框架日志库）、
+ * {@code qqbot:shared} / {@code onebot:shared}（平台共享库，跨 bot 公共表）、
  * {@code qqbot:{appid}} / {@code onebot:{selfId}}（各机器人实例库）。
  */
 @Slf4j
+@XuanjiApi
 @RestController
-@RequestMapping("/xuanji/api/db")
+@RequestMapping("/db")
 public class DatabaseController {
 
     private final JdbcTemplate jdbc;          // 业务库（@Primary）
     private final JdbcTemplate logJdbc;       // 日志库（消息/事件流水）
     private final BotDataSourceRegistry botRegistry;
+    private final dev.xuanji.console.service.AuditService auditService;
 
     public DatabaseController(JdbcTemplate jdbc,
                              @Qualifier("logJdbcTemplate") JdbcTemplate logJdbc,
-                             BotDataSourceRegistry botRegistry) {
+                             BotDataSourceRegistry botRegistry,
+                             dev.xuanji.console.service.AuditService auditService) {
         this.jdbc = jdbc;
         this.logJdbc = logJdbc;
         this.botRegistry = botRegistry;
+        this.auditService = auditService;
     }
 
-    /** 列出全部表：框架库（business/log）+ 各 bot 实例库（qqbot:{appid} / onebot:{selfId}）。 */
+    /** 列出全部表：框架库（business/log）+ 平台共享库（qqbot:shared/onebot:shared）+ 各 bot 实例库。 */
     @GetMapping("/tables")
     public List<Map<String, Object>> tables() {
         List<Map<String, Object>> list = new ArrayList<>();
         list.addAll(queryTables(jdbc, "business"));
         list.addAll(queryTables(logJdbc, "log"));
+
+        // 从所有 bot 实例里收集出现的 platform 集合（避免硬编码 qqbot/onebot）
+        Set<String> platforms = new LinkedHashSet<>();
+        for (Map<String, Object> inst : botInstances()) {
+            platforms.add(String.valueOf(inst.get("PLATFORM")));
+        }
+
+        // 1) 平台共享库（如 qqbot:shared，存放跨 bot 公共表：qqbot_bot / qqbot_botinfo / qqbot_message 等）
+        for (String platform : platforms) {
+            try {
+                JdbcTemplate sharedTpl = botRegistry.forPlatform(platform);
+                for (var r : sharedTpl.queryForList(
+                        "SELECT TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='PUBLIC' ORDER BY TABLE_NAME")) {
+                    r.put("SOURCE", platform + ":shared");
+                    list.add(r);
+                }
+            } catch (Exception e) {
+                log.debug("[DB] 列举共享库表失败: {} - {}", platform, e.getMessage());
+            }
+        }
+
+        // 2) 各 bot 实例库
         for (Map<String, Object> inst : botInstances()) {
             String platform = String.valueOf(inst.get("PLATFORM"));
             String id = String.valueOf(inst.get("INSTANCE_ID"));
@@ -131,7 +160,8 @@ public class DatabaseController {
 
     @GetMapping("/query")
     public Object query(@RequestParam String sql,
-                        @RequestParam(defaultValue = "") String source) {
+                        @RequestParam(defaultValue = "") String source,
+                        jakarta.servlet.http.HttpServletRequest request) {
         String upper = sql.trim().toUpperCase();
         if (upper.startsWith("INSERT") || upper.startsWith("UPDATE") ||
             upper.startsWith("DELETE") || upper.startsWith("DROP") ||
@@ -141,11 +171,16 @@ public class DatabaseController {
         }
         JdbcTemplate tpl = resolve(source);
         if (tpl == null) return Map.of("error", "无效的 source: " + source);
+        // 查询留痕（安全中心审计）
+        String detail = sql.trim();
+        if (detail.length() > 120) detail = detail.substring(0, 120) + "…";
+        auditService.record("SQL_QUERY", "source=" + (source.isBlank() ? "business" : source) + " | " + detail,
+                request.getRemoteAddr());
         List<Map<String, Object>> rows = tryQuery(tpl, sql);
         return Map.of("count", rows.size(), "rows", rows);
     }
 
-    /** 按 source 解析目标 JdbcTemplate。 */
+    /** 按 source 解析目标 JdbcTemplate。支持 {@code qqbot:shared} / {@code onebot:shared}（平台共享库）。 */
     private JdbcTemplate resolve(String source) {
         if (source == null || source.isBlank()) return jdbc;
         if ("business".equalsIgnoreCase(source)) return jdbc;   // 框架业务库
@@ -155,6 +190,10 @@ public class DatabaseController {
         String platform = source.substring(0, idx);
         String id = source.substring(idx + 1);
         try {
+            // 平台共享库（id="shared"）→ 跨 bot 公共表
+            if ("shared".equalsIgnoreCase(id)) {
+                return botRegistry.forPlatform(platform);
+            }
             return botRegistry.forInstance(platform, id);
         } catch (Exception e) {
             return null;

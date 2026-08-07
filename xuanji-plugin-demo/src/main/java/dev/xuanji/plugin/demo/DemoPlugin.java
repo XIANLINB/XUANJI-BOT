@@ -3,22 +3,28 @@ package dev.xuanji.plugin.demo;
 import dev.xuanji.api.annotation.*;
 import dev.xuanji.api.message.MessageChain;
 import dev.xuanji.api.message.MessageElement;
+import dev.xuanji.api.plugin.PluginConfig;
+import dev.xuanji.api.plugin.PluginConfigField;
+import dev.xuanji.api.plugin.PluginConfigProvider;
+import dev.xuanji.api.plugin.PluginStorage;
 import dev.xuanji.api.plugin.XuanjiPluginBase;
 import dev.xuanji.sdk.bot.Bot;
 import dev.xuanji.sdk.event.GroupMessageEvent;
 import dev.xuanji.sdk.msg.*;
 import org.pf4j.PluginWrapper;
 
+import java.util.List;
+
 /**
- * 璇玑演示插件 v1.1 — 全面覆盖 {@code @Command} 语法糖（P2-F）验收点：
+ * 璇玑演示插件 v1.2 — 全面覆盖 {@code @Command} 语法糖（P2-F）验收点：
  *
  * <ul>
  *   <li>G1  scope=GROUP 群命令（依赖 GroupMessageEvent 参数）</li>
  *   <li>G2  scope=BOTH 纯文本命令（无事件参数，群/私聊均可用）</li>
  *   <li>G4  media=NEED 媒体订阅（纯图片消息 content 为空也能命中）</li>
  *   <li>G5  @Arg 参数注入（独立游标，剥掉命令词后取参数）</li>
- *   <li>G6  Stripped 消息（仅文本参与匹配）</li>
- *   <li>G7  媒体五态归一化（chain.medias() + resolve(platform) → MediaRef）</li>
+ *   <li>G8  全量消息监听（空命令词，插件内部自行判断）</li>
+ *   <li>G9  插件持久化 PluginStorage + 配置 PluginConfig（签到示例）</li>
  * </ul>
  */
 public class DemoPlugin extends XuanjiPluginBase {
@@ -35,9 +41,59 @@ public class DemoPlugin extends XuanjiPluginBase {
         System.out.println("[DemoPlugin] onDisable() 钩子已触发 — 插件进入停用态");
     }
 
-    @XuanjiPlugin(id = "demo-plugin", name = "演示插件", version = "1.1.0",
-        author = "XuanJi Team", description = "展示璇玑 SDK 全部能力（@Command 语法糖）", rateLimit = 0)
-    public static class Commands {
+    @XuanjiPlugin(id = "demo-plugin", name = "演示插件", version = "1.2.0",
+        author = "XuanJi Team", description = "展示璇玑 SDK 全部能力（@Command 语法糖 + 持久化 + 配置面板）", rateLimit = 0)
+    public static class Commands implements PluginConfigProvider {
+
+        // ===== 配置 schema（控制台「插件管理 → 配置」动态生成表单）=====
+        @Override
+        public List<PluginConfigField> configSchema() {
+            return List.of(
+                    new PluginConfigField("coinPerCheckin", "每次签到金币", PluginConfigField.Type.NUMBER,
+                            "10", null, "签到一次奖励的金币数，控制台可改"),
+                    new PluginConfigField("streakBonus", "连续签到加成", PluginConfigField.Type.NUMBER,
+                            "5", null, "连续签到满 3 天后每次额外奖励"),
+                    new PluginConfigField("enableCheckin", "开启签到", PluginConfigField.Type.BOOLEAN,
+                            "true", null, "关闭后签到命令不生效"));
+        }
+
+        // ===== G8: 全量消息监听（空命令词 = 任何消息都进方法，插件内部自行判断）=====
+        // 返回 null 不回复、不拦截后续处理器；order=100 靠后执行，避免抢具体命令
+        @Command(value = "", scope = Command.Scope.BOTH, order = 100)
+        public String onAnyMessage(GroupMessageEvent e) {
+            String text = e.getPlainText();
+            if (text.contains("你好"))    return "你好呀，" + e.getSenderName() + "（全量监听示例）";
+            if (text.contains("123"))     return "你发了数字 123（全量监听示例）";
+            if (text.contains("打电话"))   return "演示环境不支持打电话（全量监听示例）";
+            return null; // 不匹配 → 不回复
+        }
+
+        // ===== G9: 签到（PluginStorage 持久化 + PluginConfig 配置，自动注入）=====
+        // at 默认 IGNORE：直接发「签到」即可触发（无需 @机器人）
+        @Command(value = "签到", scope = Command.Scope.GROUP)
+        public String sign(GroupMessageEvent e, PluginStorage store, PluginConfig cfg) {
+            if (!cfg.getBoolean("enableCheckin", true)) {
+                return "签到功能已由管理员关闭";
+            }
+            String uid = e.getSenderId();
+            String today = java.time.LocalDate.now().toString();
+            String last = store.getString("last:" + uid, "");
+            long total = store.getLong("total:" + uid, 0);
+            if (today.equals(last)) {
+                return e.getSenderName() + " 今天已经签过到啦！累计金币 " + total;
+            }
+            long coins = cfg.getLong("coinPerCheckin", 10);
+            long streak = "1".equals(last)
+                    ? store.getLong("streak:" + uid, 0) + 1
+                    : 1;
+            if (streak >= 3) coins += cfg.getLong("streakBonus", 5);
+            total += coins;
+            store.set("last:" + uid, today);
+            store.set("streak:" + uid, String.valueOf(streak));
+            store.set("total:" + uid, String.valueOf(total));
+            return e.getSenderName() + " 签到成功！金币 +" + coins
+                    + "（累计 " + total + "，连续 " + streak + " 天）";
+        }
 
         // ===== G2: BOTH 纯文本命令（无事件参数，群聊+私聊都注册）=====
         @Command("ping")
@@ -47,12 +103,6 @@ public class DemoPlugin extends XuanjiPluginBase {
         @Command(value = "hello", startWith = "hello")
         public String hello(@Arg("名字") String name) {
             return "你好, " + (name != null && !name.isBlank() ? name.trim() : "世界") + "!";
-        }
-
-        // ===== G1: scope=GROUP 群命令（方法签名依赖 GroupMessageEvent → 必须 GROUP）=====
-        @Command(value = "签到", scope = Command.Scope.GROUP, at = AtMode.NEED)
-        public void sign(GroupMessageEvent e, Bot bot) {
-            bot.reply(e.getSenderName() + " 签到成功！(scope=GROUP, @机器人触发)");
         }
 
         // ===== 群管理员命令（roles 过滤：owner/admin 小写）=====

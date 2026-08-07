@@ -1,21 +1,15 @@
-// 机器人下拉选项共享逻辑：Events / Messages 等页面按 Bot 过滤时复用。
-import { ref } from 'vue'
-import api from '../api'
+// 机器人下拉选项共享逻辑（批次11 重构）：底层数据收拢到 Pinia stores/bots，
+// 本 composable 保持旧接口（{ bots, loading, loadBots }）供 Events / Messages 等页面零改动复用。
+import { computed } from 'vue'
+import { useBotsStore } from '../stores/bots'
 
 export function useBots() {
-  const bots = ref<{ label: string; value: string }[]>([])
-  const loading = ref(false)
+  const store = useBotsStore()
+  const bots = computed(() => store.botOptions)
+  const loading = computed(() => store.loading)
 
-  async function loadBots() {
-    loading.value = true
-    try {
-      const bs: any[] = await api.getBots()
-      bots.value = bs.map((b) => ({ label: 'Bot #' + b.appId, value: b.appId }))
-    } catch {
-      bots.value = []
-    } finally {
-      loading.value = false
-    }
+  async function loadBots(force = false) {
+    await store.loadBots(force)
   }
 
   return { bots, loading, loadBots }

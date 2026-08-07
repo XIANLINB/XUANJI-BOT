@@ -1,17 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  com.fasterxml.jackson.databind.node.ArrayNode
- *  dev.xuanji.api.message.MessageChain
- *  dev.xuanji.core.concurrent.BotOutboundExecutor
- *  org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
- *  org.springframework.web.bind.annotation.GetMapping
- *  org.springframework.web.bind.annotation.PostMapping
- *  org.springframework.web.bind.annotation.RequestBody
- *  org.springframework.web.bind.annotation.RequestMapping
- *  org.springframework.web.bind.annotation.RestController
- */
 package dev.xuanji.adapter.onebot.config;
 
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -22,6 +8,7 @@ import dev.xuanji.adapter.onebot.session.OneBotSession;
 import dev.xuanji.adapter.onebot.session.OneBotSessionRegistry;
 import dev.xuanji.api.message.MessageChain;
 import dev.xuanji.core.concurrent.BotOutboundExecutor;
+import dev.xuanji.core.web.XuanjiApi;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -32,9 +19,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+@XuanjiApi
 @RestController
 @ConditionalOnProperty(prefix="xuanji.onebot", name={"enabled"}, havingValue="true")
-@RequestMapping(value={"/xuanji/api/onebot"})
+@RequestMapping(value={"/onebot"})
 public class OneBotController {
     private final OneBotProperties props;
     private final OneBotSessionRegistry registry;

@@ -12,6 +12,8 @@ import dev.xuanji.api.message.MessageChain;
 import dev.xuanji.api.message.MessageElement;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -33,7 +35,7 @@ public final class QqEventConverter {
         EventType type = mapEventType(rawEventType);
         XuanjiUser sender = extractUser(data, rawEventType);
         XuanjiGroup group = extractGroup(data, rawEventType);
-        MessageChain message = extractMessage(data, rawEventType);
+        MessageChain message = extractMessage(data, rawEventType, bot != null ? bot.selfId() : null);
         String replyMsgId = data.path("id").asText(null);
 
         return new BotEvent(
@@ -99,28 +101,68 @@ public final class QqEventConverter {
         return new XuanjiGroup(groupId, "", groupId, "", 0, Instant.now());
     }
 
-    static MessageChain extractMessage(ObjectNode data, String eventType) {
-        String content = data.path("content").asText(null);
-        if (content == null || content.isEmpty()) {
-            return null;
+    /**
+     * 从 QQ 事件数据解析消息链。
+     *
+     * <p>正文/富媒体一律委托 {@link QqMessageConverter#fromQqData(ObjectNode, String)}，
+     * 与 SDK 事件（{@code GroupMessageHandler.sdkEvent}）走同一套解析逻辑 ——
+     * 管道侧（命令路由 / 权限 / 黑名单）和插件侧看到的消息链从此完全一致，
+     * 不会再出现「插件能收到图片、命令匹配却只看得见空文本」的分叉。
+     *
+     * <p>本方法在此基础上补两类<b>事件层</b>字段（它们不在消息载荷里，转换器不该管）：
+     * <ol>
+     *   <li>{@code message_reference} → {@link MessageElement.Reply}，置于链首</li>
+     *   <li>{@code mentions} → {@link MessageElement.At}，紧随其后</li>
+     * </ol>
+     * QQ 平台会把 {@code @机器人} 从 content 里剥离到 mentions 数组，位置信息已丢失；
+     * 放在正文之前是对「@机器人 指令」这一实际语序的还原。
+     *
+     * @param data      事件数据（d 字段）
+     * @param eventType 原始事件类型（保留给后续按类型分支，如频道消息形态差异）
+     * @param appId     机器人 appId，用于媒体按需下载；null 则媒体保持 URL 形态
+     * @return 消息链；无任何内容时返回 {@code null}（与 {@link #convert} 的空消息语义对齐）
+     */
+    static MessageChain extractMessage(ObjectNode data, String eventType, String appId) {
+        MessageChain body = QqMessageConverter.fromQqData(data, appId);
+
+        List<MessageElement> prefix = new ArrayList<>();
+
+        // 1. 引用回复：{"message_reference":{"message_id":"xxx"}}
+        String refId = data.path("message_reference").path("message_id").asText(null);
+        if (refId != null && !refId.isBlank()) {
+            prefix.add(new MessageElement.Reply(refId));
         }
 
-        // 简单提取纯文本（后续 P3 完整解析分段）
-        MessageChain.Builder builder = MessageChain.builder();
-        builder.text(content.trim());
-
-        // @机器人 检测
+        // 2. @ 提及：QQ 把 @ 从 content 剥离到 mentions 数组
         JsonNode mentions = data.path("mentions");
-        if (mentions != null && mentions.isArray()) {
+        if (mentions.isArray()) {
             for (JsonNode m : mentions) {
-                String botFlag = m.path("bot").asText("false");
-                if ("true".equals(botFlag)) {
-                    // 在文本中检测到 @机器人
-                    break;
-                }
+                // 群场景优先 member_openid（与 extractUser 的 userId 口径一致，便于插件比对）
+                String userId = firstNonBlank(
+                        m.path("member_openid").asText(null),
+                        m.path("user_openid").asText(null),
+                        m.path("id").asText(null));
+                if (userId == null) continue;
+                prefix.add(new MessageElement.At(userId, m.path("username").asText("")));
             }
         }
 
-        return builder.build();
+        if (prefix.isEmpty()) {
+            return body.elements().isEmpty() ? null : body;
+        }
+
+        MessageChain.Builder builder = MessageChain.builder();
+        prefix.forEach(builder::add);
+        body.elements().forEach(builder::add);
+        MessageChain merged = builder.build();
+        return merged.elements().isEmpty() ? null : merged;
+    }
+
+    /** 返回第一个非空白值，全空返回 null。 */
+    private static String firstNonBlank(String... values) {
+        for (String v : values) {
+            if (v != null && !v.isBlank()) return v;
+        }
+        return null;
     }
 }

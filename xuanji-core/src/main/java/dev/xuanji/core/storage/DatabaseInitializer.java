@@ -193,6 +193,20 @@ public class DatabaseInitializer {
         """);
         jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_blacklist ON xuanji_blacklist (bot_key, group_id, user_id)");
 
+        // 8.1 黑名单操作日志（风控中心时间线：拉黑/解除均留痕）
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS xuanji_blacklist_log (
+                id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+                bot_key     VARCHAR(128) NOT NULL,
+                group_id    VARCHAR(128) NOT NULL,
+                user_id     VARCHAR(128) NOT NULL,
+                action      VARCHAR(16)  NOT NULL,
+                reason      VARCHAR(512),
+                create_time BIGINT       DEFAULT 0
+            )
+        """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS idx_blacklist_log ON xuanji_blacklist_log (bot_key, create_time)");
+
         // 9. 插件-机器人绑定
         jdbc.execute("""
             CREATE TABLE IF NOT EXISTS xuanji_plugin_binding (
@@ -204,12 +218,92 @@ public class DatabaseInitializer {
             )
         """);
 
-        // ==================== 向导进度（SetupController 自建表） ====================
+        // 10. 审计日志（安全中心：登录/登出/改PIN/SQL/备份恢复/插件卸载等敏感操作留痕）
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS xuanji_audit (
+                id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+                action      VARCHAR(64)  NOT NULL,
+                detail      VARCHAR(1024),
+                ip          VARCHAR(64),
+                create_time BIGINT       DEFAULT 0
+            )
+        """);
 
+        // 11. 定时任务定义（xuanji-scheduler 模块）
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS xuanji_scheduler_job (
+                id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+                name            VARCHAR(128) NOT NULL,
+                job_type        VARCHAR(32)  NOT NULL,
+                cron            VARCHAR(64)  NOT NULL,
+                target_platform VARCHAR(32)  DEFAULT '',
+                target_bot      VARCHAR(128) DEFAULT '',
+                target_type     VARCHAR(16)  DEFAULT '',
+                target_id       VARCHAR(256) DEFAULT '',
+                content         TEXT         DEFAULT '',
+                enabled         BOOLEAN      DEFAULT TRUE,
+                last_run        BIGINT       DEFAULT 0,
+                next_run        BIGINT       DEFAULT 0,
+                run_count       BIGINT       DEFAULT 0,
+                fail_count      BIGINT       DEFAULT 0,
+                remark          VARCHAR(256) DEFAULT '',
+                created_at      BIGINT       DEFAULT 0
+            )
+        """);
+
+        // 12. 定时任务执行日志（xuanji-scheduler 模块）
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS xuanji_scheduler_job_log (
+                id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+                job_id      BIGINT       NOT NULL,
+                job_name    VARCHAR(128) DEFAULT '',
+                start_time  BIGINT       DEFAULT 0,
+                end_time    BIGINT       DEFAULT 0,
+                elapsed_ms  BIGINT       DEFAULT 0,
+                status      VARCHAR(16)  DEFAULT 'SUCCESS',
+                result      TEXT         DEFAULT '',
+                error       TEXT         DEFAULT '',
+                created_at  BIGINT       DEFAULT 0
+            )
+        """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS idx_audit_time ON xuanji_audit (create_time DESC)");
+
+        // 13. 预警中心：每 bot 告警配置（预警用户 ID + 开关）
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS xuanji_alert_config (
+                id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+                bot_key       VARCHAR(128) NOT NULL,
+                enabled       BOOLEAN      DEFAULT FALSE,
+                alert_user_id VARCHAR(128) DEFAULT '',
+                created_at    BIGINT       DEFAULT 0,
+                updated_at    BIGINT       DEFAULT 0
+            )
+        """);
+
+        // 14. 预警中心：告警记录
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS xuanji_alert_record (
+                id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+                bot_key     VARCHAR(128) NOT NULL,
+                rule        VARCHAR(64)  NOT NULL,
+                message     VARCHAR(1024) DEFAULT '',
+                create_time BIGINT       DEFAULT 0
+            )
+        """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS idx_alert_record_time ON xuanji_alert_record (create_time DESC)");
+
+        // ==================== 向导进度（xuanji_setup） ====================
+        // 兼容指南 §一/§三：所有建表统一放在 DatabaseInitializer，使用完整 5 列 schema
+        // （与 SetupController 的 CREATE TABLE IF NOT EXISTS 完全一致，幂等不冲突）。
+        // SetupController 内的 ALTER COLUMN IF NOT EXISTS 仍作为防御兜底保留，
+        // 用于补齐历史上可能用 2 列 schema 建过的旧库，彻底消除对初始化顺序的依赖。
         jdbc.execute("""
             CREATE TABLE IF NOT EXISTS xuanji_setup (
-                id   INT PRIMARY KEY,
-                step INT DEFAULT 0
+                id          INT          PRIMARY KEY,
+                pin_salt    VARCHAR(64),
+                pin_hash    VARCHAR(128),
+                step        INT          DEFAULT 0,
+                completed   BOOLEAN      DEFAULT FALSE
             )
         """);
 

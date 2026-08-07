@@ -7,7 +7,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.NullNode;
 import dev.xuanji.api.json.Json;
 
+import dev.xuanji.adapter.qqbot.api.QqApiService;
 import dev.xuanji.adapter.qqbot.registry.AccessTokenService;
+import dev.xuanji.adapter.qqbot.storage.QqBotRepository;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -82,6 +84,12 @@ public class QqBotWsClient {
 
     /** AccessToken 管理服务，用于鉴权时获取有效的 Token */
     private final AccessTokenService accessTokenService;
+
+    /** API 服务（用于启动后调 /users/@me 同步机器人信息） */
+    private final QqApiService qqApiService;
+
+    /** 平台库 Repository（用于 upsertBotInfo 写入 qqbot_botinfo） */
+    private final QqBotRepository qqBotRepository;
 
     /**
      * 事件订阅意图（intents），位掩码表示
@@ -180,6 +188,7 @@ public class QqBotWsClient {
     public QqBotWsClient(String robotId, String envType, String appId, String appSecret,
                           String gatewayUrl, BotPipeline botPipeline,
                           GatewayService gatewayService, AccessTokenService accessTokenService,
+                          QqApiService qqApiService, QqBotRepository qqBotRepository,
                           int intents, boolean isNewOpenBot,
                           ScheduledExecutorService scheduler,
                           ExecutorService connectExecutor) {
@@ -191,6 +200,8 @@ public class QqBotWsClient {
         this.botPipeline = botPipeline;
         this.gatewayService = gatewayService;
         this.accessTokenService = accessTokenService;
+        this.qqApiService = qqApiService;
+        this.qqBotRepository = qqBotRepository;
         this.intents = intents;
         this.isNewOpenBot = isNewOpenBot;
         this.scheduler = scheduler;
@@ -476,6 +487,8 @@ public class QqBotWsClient {
             reconnectDelay.set(1); // 重置重连延迟
             sessionId = data.path("session_id").asText();
             log.info("[BotWS] Ready! sessionId={}, robotId={}", sessionId, robotId);
+            // 异步同步机器人信息（union_openid / share_url / welcome_msg）到平台库 qqbot_botinfo
+            scheduleBotInfoSync();
             return;
         }
 
@@ -546,6 +559,34 @@ public class QqBotWsClient {
      * <p>使用指数退避策略：延迟 = min(当前延迟 * 2, 60 秒)。
      * 重连失败时会尝试获取新的网关地址（因为网关地址可能已变更）。
      */
+    private void scheduleBotInfoSync() {
+        // 异步调 /users/@me + upsertBotInfo（不阻塞 ws 主线程）
+        connectExecutor.submit(() -> {
+            try {
+                ObjectNode me = qqApiService.getMe(robotId, envType);
+                if (me == null || me.isMissingNode() || me.isNull()) {
+                    log.debug("[BotWS] /users/@me 返回空，robotId={}", robotId);
+                    return;
+                }
+                String botId = me.path("id").asText(null);
+                String name = me.path("username").asText(null);
+                String avatar = me.path("avatar").asText(null);
+                Boolean isBot = me.path("bot").asBoolean();
+                String unionOpenid = me.path("union_openid").asText(null);
+                String shareUrl = me.path("share_url").asText(null);
+                String welcomeMsg = me.path("welcome_message").asText(null);
+                if (unionOpenid == null) unionOpenid = me.path("unionOpenid").asText(null);
+                if (shareUrl == null) shareUrl = me.path("shareUrl").asText(null);
+                if (welcomeMsg == null) welcomeMsg = me.path("welcomeMsg").asText(null);
+                qqBotRepository.upsertBotInfo(appId, botId, name, avatar, isBot, unionOpenid, shareUrl, welcomeMsg);
+                log.info("[BotWS] 同步机器人信息成功: appId={}, union_openid={}, share_url={}",
+                        appId, unionOpenid, shareUrl);
+            } catch (Exception e) {
+                log.warn("[BotWS] 同步机器人信息失败: appId={}, {}", appId, e.getMessage());
+            }
+        });
+    }
+
     private void scheduleReconnect() {
         if (!running.get()) return;
 

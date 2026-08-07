@@ -1,6 +1,7 @@
 package dev.xuanji.adapter.qqbot.event.handler.c2c;
 
 import dev.xuanji.adapter.qqbot.dto.C2cMessageEvent;
+import dev.xuanji.adapter.qqbot.storage.QqBotRepository;
 import dev.xuanji.core.command.CommandRegistry;
 import dev.xuanji.core.config.XuanjiRobotProperties;
 import dev.xuanji.adapter.qqbot.api.MessageSender;
@@ -68,16 +69,23 @@ public class C2cMessageHandler implements EventHandler {
             if (botKey == null) botKey = "bot1";
             String appId = robotProperties.getRobots() != null && robotProperties.getRobots().get(botKey) != null
                     ? robotProperties.getRobots().get(botKey).getAppId() : String.valueOf(robotId);
-            dev.xuanji.core.storage.log.MessageLogger.c2cMessage("IN",
-                    appId, openid, "text", content, data.toString());
+            String inType = QqBotRepository.msgTypeLabel(
+                    event.getMessageType(), firstAttachmentContentType(event), firstAttachmentFilename(event));
+            // 纯文本但内容像 Markdown（QQ 可能以 text 段送达 markdown 文本）→ 归为 markdown
+            if ("text".equals(inType)) inType = outboundType(content);
+            // 机器人自消息（author.bot=true）已在发送侧由 MessageSender 落 OUT，回调不再重复记 IN
+            if (!isBotAuthor) {
+                dev.xuanji.core.storage.log.MessageLogger.c2cMessage("IN",
+                        appId, openid, inType, content, data.toString());
 
-            // 消息落库（per-bot qqbot_message；机器人自消息也记录）
-            try {
-                qqBotRepository.insertMessage(appId, "c2c", null, openid,
-                        "IN", "text", content, msgId, null, null, data.toString(),
-                        dev.xuanji.core.util.TimeUtils.nowEpochSeconds());
-            } catch (Exception ex) {
-                log.debug("[消息落库] 失败: {}", ex.getMessage());
+                // 消息落库（per-bot qqbot_message）
+                try {
+                    qqBotRepository.insertMessage(appId, "c2c", null, openid,
+                            "IN", inType, content, msgId, null, null, data.toString(),
+                            dev.xuanji.core.util.TimeUtils.nowEpochSeconds());
+                } catch (Exception ex) {
+                    log.debug("[消息落库] 失败: {}", ex.getMessage());
+                }
             }
 
             // 机器人自消息：三级配置判定「忽略其他机器人消息」→ 只记录不做任何处理
@@ -108,17 +116,10 @@ public class C2cMessageHandler implements EventHandler {
             try {
                 String result = commandRegistry.executePrivateMessage(content);
                 if (result != null) {
+                    // OUT 落库由 MessageSender 统一完成（bot.reply → sendC2cText/Markdown → 落库）
                     bot.reply(result);
                     dev.xuanji.core.storage.log.MessageLogger.c2cMessage("OUT",
-                            appId, openid, "text", result, "");
-                    // OUT 落库（per-bot qqbot_message，消息监控「发送」方向）
-                    try {
-                        qqBotRepository.insertMessage(appId, "c2c", null, openid,
-                                "OUT", "text", result, null, null, null, null,
-                                dev.xuanji.core.util.TimeUtils.nowEpochSeconds());
-                    } catch (Exception ex) {
-                        log.debug("[OUT落库] 失败: {}", ex.getMessage());
-                    }
+                            appId, openid, outboundType(result), result, "");
                 }
             } finally {
                 CommandRegistry.clearContext();
@@ -135,5 +136,29 @@ public class C2cMessageHandler implements EventHandler {
         try {
             qqBotRepository.ensureUser(appId, userId, nickname);
         } catch (Exception ignored) {}
+    }
+
+    /** 取首条附件的 content_type（图片/语音/视频细分的依据）。 */
+    private static String firstAttachmentContentType(C2cMessageEvent e) {
+        if (e.getAttachments() == null || e.getAttachments().isEmpty()) return null;
+        return e.getAttachments().get(0).getContentType();
+    }
+
+    /** 取首条附件的文件名（按扩展名兜底识别媒体类型）。 */
+    private static String firstAttachmentFilename(C2cMessageEvent e) {
+        if (e.getAttachments() == null || e.getAttachments().isEmpty()) return null;
+        return e.getAttachments().get(0).getFilename();
+    }
+
+    /** OUT 方向消息类型：指令结果常是 Markdown，按内容粗略识别。 */
+    private static String outboundType(String content) {
+        if (content == null) return "text";
+        String c = content.trim();
+        if (c.startsWith("#") || c.contains("**") || c.contains("```")
+                || c.contains("![") || (c.contains("[") && c.contains("]("))
+                || c.startsWith("> ") || c.startsWith("- ") || c.startsWith("* ")) {
+            return "markdown";
+        }
+        return "text";
     }
 }

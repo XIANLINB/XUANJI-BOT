@@ -24,6 +24,10 @@
         </dependency>
         <dependency>
             <groupId>dev.xuanji</groupId>
+            <artifactId>xuanji-scheduler</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.xuanji</groupId>
             <artifactId>xuanji-adapter-qqbot</artifactId>
         </dependency>
         <dependency>
@@ -70,15 +74,11 @@
 
     <build>
         <plugins>
-            <!-- 可执行 Fat JAR -->
+            <!-- 可执行 Fat JAR：spring-boot-maven-plugin 在 package 阶段默认即绑定 repackage，
+                 无需再显式声明 execution，否则会 repackage 两次、把 BOOT-INF 应用类整个弄丢 -->
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
-                <executions>
-                    <execution>
-                        <goals><goal>repackage</goal></goals>
-                    </execution>
-                </executions>
             </plugin>
         </plugins>
     </build>

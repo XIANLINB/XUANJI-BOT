@@ -1,14 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  dev.xuanji.api.adapter.Bot
- *  dev.xuanji.api.adapter.Bot$Status
- *  dev.xuanji.api.adapter.BotManager
- *  lombok.Generated
- *  org.slf4j.Logger
- *  org.slf4j.LoggerFactory
- */
 package dev.xuanji.adapter.onebot.adapter;
 
 import dev.xuanji.api.adapter.Bot;

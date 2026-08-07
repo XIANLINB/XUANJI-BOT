@@ -77,6 +77,15 @@ async function finish() {
     }
     // 告知路由守卫：已完成，放行
     ;(window as any).__xuanjiSetupDone = true
+    // 初始化刚设的 PIN 直接用于登录，下发会话 cookie，避免再手动输一次
+    try {
+      const login = await api.authLogin({ pin: pinForm.pin })
+      if (login.error) throw new Error(login.error)
+    } catch (e: any) {
+      message.warning('初始化完成，但自动登录失败，请手动登录')
+      router.replace('/login')
+      return
+    }
     message.success('初始化完成，进入控制台')
     router.replace('/dashboard')
   } catch (e: any) {

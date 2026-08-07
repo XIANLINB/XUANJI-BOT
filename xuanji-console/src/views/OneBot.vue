@@ -39,7 +39,7 @@ onMounted(load)
 
 <template>
   <div>
-    <PageHero title="OneBot 接入" subtitle="OneBot v11 适配器状态与接入地址（Napcat / Lagrange / go-cqhttp）" :icon="GitNetworkOutline">
+    <PageHero title="OneBot" subtitle="OneBot v11 适配器状态与接入地址（Napcat / Lagrange / go-cqhttp）" :icon="GitNetworkOutline">
       <NButton :loading="loading" @click="load">刷新</NButton>
     </PageHero>
 

@@ -91,6 +91,8 @@ class RateLimitStage implements PipelineStage {
 
     private final java.util.Map<String, Long> lastAccess = new java.util.concurrent.ConcurrentHashMap<>();
     private final dev.xuanji.core.config.ConfigService configService;
+    // 命中统计（风控中心概览：框架级限流拦截次数，含维度 user/group 双计）
+    private final java.util.concurrent.atomic.AtomicLong hits = new java.util.concurrent.atomic.AtomicLong();
 
     RateLimitStage(dev.xuanji.core.config.ConfigService configService) {
         this.configService = configService;
@@ -98,6 +100,13 @@ class RateLimitStage implements PipelineStage {
 
     @Override public String name() { return "rate-limit"; }
     @Override public int order() { return 30; }
+
+    /** 命中统计（供 BotPipeline.getRateLimitStats 聚合）。 */
+    public Map<String, Object> stats() {
+        Map<String, Object> m = new java.util.LinkedHashMap<>();
+        m.put("rateLimitHits", hits.get());
+        return m;
+    }
 
     @Override
     public Result handle(BotEvent e, PipelineChain c) {
@@ -130,6 +139,7 @@ class RateLimitStage implements PipelineStage {
         long now = System.currentTimeMillis();
         Long last = lastAccess.get(key);
         if (last != null && (now - last) < windowMs) {
+            hits.incrementAndGet();
             log.debug("[rate-limit] 用户过频: key={}, sender={}", key, e.sender() != null ? e.sender().platformUserId() : "null");
             return Result.ABORT;
         }

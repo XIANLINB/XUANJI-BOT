@@ -2,6 +2,7 @@ package dev.xuanji.core.pipeline;
 
 import dev.xuanji.api.event.BotEvent;
 import dev.xuanji.api.pipeline.PipelineStage;
+import dev.xuanji.core.metric.QpsMeter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -48,6 +49,7 @@ public class BotPipeline {
      */
     public void proceed(BotEvent event) {
         processedCount.incrementAndGet();
+        QpsMeter.hit();
         doProceed(event, 0);
     }
 
@@ -91,6 +93,17 @@ public class BotPipeline {
         for (PipelineStage s : stages) {
             if (s instanceof DedupStage dd) {
                 m.putAll(dd.stats());
+            }
+        }
+        return m;
+    }
+
+    /** 框架级限流命中统计（风控中心概览：RateLimitStage 拦截次数）。 */
+    public Map<String, Object> getRateLimitStats() {
+        Map<String, Object> m = new LinkedHashMap<>();
+        for (PipelineStage s : stages) {
+            if (s instanceof RateLimitStage rl) {
+                m.putAll(rl.stats());
             }
         }
         return m;

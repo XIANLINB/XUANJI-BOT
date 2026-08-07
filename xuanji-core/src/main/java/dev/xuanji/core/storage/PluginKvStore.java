@@ -4,6 +4,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -31,5 +33,19 @@ public class PluginKvStore {
 
     public void remove(String pluginId, String key) {
         jdbc.update("DELETE FROM xuanji_plugin_kv WHERE plugin_id=? AND kv_key=?", pluginId, key);
+    }
+
+    /** 查询某插件命名空间下的全部 KV（控制台配置表单回显用）。 */
+    public Map<String, String> list(String pluginId) {
+        Map<String, String> m = new LinkedHashMap<>();
+        org.springframework.jdbc.core.RowCallbackHandler rch =
+                rs -> m.put(rs.getString("kv_key"), rs.getString("kv_value"));
+        jdbc.query("SELECT kv_key, kv_value FROM xuanji_plugin_kv WHERE plugin_id=?", rch, pluginId);
+        return m;
+    }
+
+    /** 清空某插件的全部 KV（卸载插件时清除持久化数据）。 */
+    public void clear(String pluginId) {
+        jdbc.update("DELETE FROM xuanji_plugin_kv WHERE plugin_id=?", pluginId);
     }
 }
