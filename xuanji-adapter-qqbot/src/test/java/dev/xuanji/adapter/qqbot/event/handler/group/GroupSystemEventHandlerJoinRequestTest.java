@@ -1,6 +1,6 @@
 package dev.xuanji.adapter.qqbot.event.handler.group;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.ObjectNode;
 import dev.xuanji.api.json.Json;
 import org.junit.jupiter.api.Test;
 

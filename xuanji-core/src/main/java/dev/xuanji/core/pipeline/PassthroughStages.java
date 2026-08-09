@@ -30,6 +30,16 @@ class WhitelistStage implements PipelineStage {
     @Override public String name() { return "whitelist"; }
     @Override public int order() { return 20; }
 
+    /** 黑名单/权限拦截计数（风控中心：被拦事件数）。 */
+    private final java.util.concurrent.atomic.AtomicLong blockCount = new java.util.concurrent.atomic.AtomicLong();
+
+    /** 拦截统计（供 BotPipeline / 风控中心聚合）。 */
+    public Map<String, Object> stats() {
+        Map<String, Object> m = new java.util.LinkedHashMap<>();
+        m.put("blacklistBlocks", blockCount.get());
+        return m;
+    }
+
     @Override
     public Result handle(BotEvent e, PipelineChain c) {
         String botKey = resolveBotKey(e);
@@ -45,6 +55,7 @@ class WhitelistStage implements PipelineStage {
             return c.proceed();
         }
         if (!permission.check(botKey, groupId, memberId, null)) {
+            blockCount.incrementAndGet();
             log.debug("[whitelist] 拦截: bot={}, user={}", botKey, memberId);
             return Result.ABORT;
         }
@@ -55,9 +66,9 @@ class WhitelistStage implements PipelineStage {
     private static String fallbackMemberId(BotEvent e) {
         try {
             var data = e.platformData();
-            if (data == null || !(data instanceof com.fasterxml.jackson.databind.node.ObjectNode obj)) return null;
+            if (data == null || !(data instanceof tools.jackson.databind.node.ObjectNode obj)) return null;
             var author = obj.get("author");
-            if (author instanceof com.fasterxml.jackson.databind.node.ObjectNode ao) {
+            if (author instanceof tools.jackson.databind.node.ObjectNode ao) {
                 var m = ao.get("member_openid");
                 if (m != null && !m.isNull() && !m.asText().isEmpty()) return m.asText();
                 var uid = ao.get("id");

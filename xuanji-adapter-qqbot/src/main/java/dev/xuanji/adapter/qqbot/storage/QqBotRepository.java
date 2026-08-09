@@ -550,16 +550,30 @@ public class QqBotRepository {
         """, sinceEpochSeconds, Math.min(Math.max(limit, 1), 50));
     }
 
-    /** 活跃机器人 TOP（按 appId 聚合消息数 + 机器人名称）。LEFT JOIN 用 bot_key=appId 关联。 */
+    /**
+     * 活跃机器人 TOP（按消息内 bot_id 聚合消息数）。
+     * 不能跨实例库 qqbot_message + 共享库 qqbot_bot 做 JOIN（H2 物理文件不同），
+     * 改为实例库按 bot_id 分组聚合 + 共享库读 bot_appid→bot_name 映射内存 join。
+     * bot_name 实际由上层 DataCenterController 用 botRef.botName() 覆盖（框架库 xuanji_bot_setting），
+     * 此处仅做兜底，最终展示由框架库权威。
+     */
     public List<Map<String, Object>> activeBots(String appId, long sinceEpochSeconds, int limit) {
-        return query(appId, """
-            SELECT m.bot_id AS APP_ID, COUNT(*) AS CNT,
-                   MAX(COALESCE(b.bot_name, '')) AS BNAME
-            FROM qqbot_message m
-            LEFT JOIN qqbot_bot b ON b.bot_key = CAST(m.bot_id AS VARCHAR)
-            WHERE m.create_time >= ?
-            GROUP BY m.bot_id ORDER BY CNT DESC LIMIT ?
-        """, sinceEpochSeconds, Math.min(Math.max(limit, 1), 50));
+        try {
+            List<Map<String, Object>> rows = jdbc(appId).queryForList("""
+                SELECT bot_id AS APP_ID, COUNT(*) AS CNT
+                FROM qqbot_message
+                WHERE create_time >= ?
+                GROUP BY bot_id ORDER BY CNT DESC LIMIT ?
+            """, sinceEpochSeconds, Math.min(Math.max(limit, 1), 50));
+            // 从共享库 qqbot_bot 读 bot_appid → 名字映射（虽然共享库没 bot_name 列，先占位）
+            for (Map<String, Object> r : rows) {
+                r.put("BNAME", "");
+            }
+            return rows;
+        } catch (Exception e) {
+            log.debug("[QqRepo] 查询失败 appId={}: {}", appId, e.getMessage());
+            return List.of();
+        }
     }
 
     /** 消息方向分布（IN=入站/OUT=出站，按 direction 计数）。 */
@@ -641,6 +655,78 @@ public class QqBotRepository {
         args.add(sinceEpochSeconds);
         return count(appId, "SELECT COUNT(*) FROM qqbot_event WHERE event_type IN (" + in + ") AND create_time>=?",
                 args.toArray());
+    }
+
+    /**
+     * 群变动（控制台「群变动 / 成员变动」统计卡数据源）：
+     *   todayNewGroups = qqbot_group JOIN_TIME 在 [today0, now)
+     *   ydayNewGroups  = qqbot_group JOIN_TIME 在 [yday0, today0)
+     *   todayActiveMembers = qqbot_message group chat 去重 user_id 在 [today0, now)
+     *   ydayActiveMembers  = 同上 [yday0, today0)
+     */
+    public Map<String, Long> groupVariation(String appId, long today0, long yday0, long now) {
+        Map<String, Long> r = new LinkedHashMap<>();
+        try {
+            long todayNew = jdbc(appId).queryForObject(
+                    "SELECT COUNT(*) FROM qqbot_group WHERE JOIN_TIME>=? AND JOIN_TIME<? AND IS_DELETED=0",
+                    Long.class, today0, now);
+            long ydayNew = jdbc(appId).queryForObject(
+                    "SELECT COUNT(*) FROM qqbot_group WHERE JOIN_TIME>=? AND JOIN_TIME<? AND IS_DELETED=0",
+                    Long.class, yday0, today0);
+            long todayAct = jdbc(appId).queryForObject(
+                    "SELECT COUNT(DISTINCT user_id) FROM qqbot_message WHERE chat_type='group' AND create_time>=? AND create_time<?",
+                    Long.class, today0, now);
+            long ydayAct = jdbc(appId).queryForObject(
+                    "SELECT COUNT(DISTINCT user_id) FROM qqbot_message WHERE chat_type='group' AND create_time>=? AND create_time<?",
+                    Long.class, yday0, today0);
+            r.put("todayNewGroups", todayNew);
+            r.put("ydayNewGroups", ydayNew);
+            r.put("todayActiveMembers", todayAct);
+            r.put("ydayActiveMembers", ydayAct);
+        } catch (Exception e) {
+            log.debug("[QqRepo] 群变动查询失败 appId={}: {}", appId, e.getMessage());
+            r.put("todayNewGroups", 0L);
+            r.put("ydayNewGroups", 0L);
+            r.put("todayActiveMembers", 0L);
+            r.put("ydayActiveMembers", 0L);
+        }
+        return r;
+    }
+
+    /**
+     * 单聊用户变动（控制台「用户变动」统计卡数据源）：
+     *   todayNewFriends = qqbot_user JOIN_TIME 在 [today0, now)
+     *   ydayNewFriends  = qqbot_user JOIN_TIME 在 [yday0, today0)
+     *   todayActiveUsers = qqbot_message c2c chat 去重 user_id 在 [today0, now)
+     *   ydayActiveUsers  = 同上 [yday0, today0)
+     */
+    public Map<String, Long> friendVariation(String appId, long today0, long yday0, long now) {
+        Map<String, Long> r = new LinkedHashMap<>();
+        try {
+            long todayNew = jdbc(appId).queryForObject(
+                    "SELECT COUNT(*) FROM qqbot_user WHERE JOIN_TIME>=? AND JOIN_TIME<? AND IS_DELETED=0",
+                    Long.class, today0, now);
+            long ydayNew = jdbc(appId).queryForObject(
+                    "SELECT COUNT(*) FROM qqbot_user WHERE JOIN_TIME>=? AND JOIN_TIME<? AND IS_DELETED=0",
+                    Long.class, yday0, today0);
+            long todayAct = jdbc(appId).queryForObject(
+                    "SELECT COUNT(DISTINCT user_id) FROM qqbot_message WHERE chat_type='c2c' AND create_time>=? AND create_time<?",
+                    Long.class, today0, now);
+            long ydayAct = jdbc(appId).queryForObject(
+                    "SELECT COUNT(DISTINCT user_id) FROM qqbot_message WHERE chat_type='c2c' AND create_time>=? AND create_time<?",
+                    Long.class, yday0, today0);
+            r.put("todayNewFriends", todayNew);
+            r.put("ydayNewFriends", ydayNew);
+            r.put("todayActiveUsers", todayAct);
+            r.put("ydayActiveUsers", ydayAct);
+        } catch (Exception e) {
+            log.debug("[QqRepo] 单聊变动查询失败 appId={}: {}", appId, e.getMessage());
+            r.put("todayNewFriends", 0L);
+            r.put("ydayNewFriends", 0L);
+            r.put("todayActiveUsers", 0L);
+            r.put("ydayActiveUsers", 0L);
+        }
+        return r;
     }
 
     /** 全部系统事件自 sinceEpochSeconds 起的发生次数（预警中心事件突增检查用）。 */

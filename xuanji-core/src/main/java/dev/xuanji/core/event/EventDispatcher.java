@@ -4,7 +4,7 @@ import dev.xuanji.api.event.BotEvent;
 import dev.xuanji.core.bot.BotContextManager;
 import dev.xuanji.core.bot.DefaultBotContextManager;
 import dev.xuanji.core.storage.MessageEventRecorder;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;

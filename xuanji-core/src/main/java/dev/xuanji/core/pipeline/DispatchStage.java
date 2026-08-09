@@ -27,6 +27,9 @@ public class DispatchStage implements PipelineStage {
     public Result handle(BotEvent event, PipelineChain chain) {
         // 桥接：将统一事件路由到具体 Handler（不回灌 Pipeline，避免递归）
         eventDispatcher.dispatch(event);
-        return Result.CONTINUE;
+        // 关键：必须继续后续阶段（result-decorate 70 / respond 80 / llm-chat 85 等）。
+        // 若直接 return CONTINUE 不调 chain.proceed()，管线在 60 处截断，
+        // 后续阶段将永不执行（LlmChatStage 即因此一直未触发）。
+        return chain.proceed();
     }
 }

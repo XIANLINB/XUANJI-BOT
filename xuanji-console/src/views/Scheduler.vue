@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, h } from 'vue'
+import { ref, computed, onMounted, watch, h, nextTick } from 'vue'
 import {
   NCard, NButton, NSpace, NIcon, NText, NTag, NDataTable, NModal, NForm, NFormItem,
   NInput, NSelect, NSwitch, NDrawer, NDrawerContent, NEmpty, NAlert, NSpin,
@@ -11,6 +11,7 @@ import {
 } from '@vicons/ionicons5'
 import PageHero from '../components/PageHero.vue'
 import CommonChart from '../components/CommonChart.vue'
+import CronBuilder from '../components/CronBuilder.vue'
 import api from '../api'
 import dayjs from 'dayjs'
 import { groupName, userName } from '../utils/names'
@@ -103,10 +104,29 @@ const targetTypeOptions = [
 
 const botOptions = computed(() =>
   (bots.value || []).map((b: any) => ({ label: `${b.name || b.appId} (${b.appId})`, value: b.appId })))
+/** 群 ID 兼容大小写读取（H2 返回大写 GROUP_ID，值为 QQ group_openid） */
+const groupIdOf = (g: any): string =>
+  String(g.GROUP_ID ?? g.group_id ?? g.groupOpenid ?? g.groupId ?? '')
+/** 用户 ID 兼容大小写读取（H2 返回大写 PLATFORM_USER_ID，值为 QQ user_openid） */
+const friendIdOf = (f: any): string =>
+  String(f.PLATFORM_USER_ID ?? f.platform_user_id ?? f.USER_ID ?? f.user_id ?? f.openid ?? f.userId ?? '')
+// 目标群/用户必须按「已选机器人」过滤（后端 /contacts/groups 是跨所有 bot 聚合，每行带 BOT_APPID 章）
 const groupOptions = computed(() =>
-  (groups.value || []).map((g: any) => ({ label: `${groupName(g)} (${g.groupOpenid || g.groupId})`, value: g.groupOpenid || g.groupId })))
+  (groups.value || [])
+    .filter((g: any) => !form.value.targetBot || String(g.BOT_APPID ?? g.botKey ?? '') === String(form.value.targetBot))
+    .map((g: any) => ({ label: `${groupName(g)} (${groupIdOf(g)})`, value: groupIdOf(g) })))
 const friendOptions = computed(() =>
-  (friends.value || []).map((f: any) => ({ label: `${userName(f)} (${f.openid || f.userId})`, value: f.openid || f.userId })))
+  (friends.value || [])
+    .filter((f: any) => !form.value.targetBot || String(f.BOT_APPID ?? f.botKey ?? '') === String(form.value.targetBot))
+    .map((f: any) => ({ label: `${userName(f)} (${friendIdOf(f)})`, value: friendIdOf(f) })))
+
+// 切换机器人时清掉旧目标，避免残留上一个 bot 的群/用户
+//（编辑回显时 suppress 一次，避免把已保存的 targetId 清掉）
+let suppressBotReset = false
+watch(() => form.value.targetBot, (nv, ov) => {
+  if (suppressBotReset) return
+  if (ov && ov !== nv) form.value.targetId = ''
+})
 
 // ═══════════ 日志抽屉 ═══════════
 const showLogs = ref(false)
@@ -176,12 +196,14 @@ function openCreate() {
 
 function openEdit(r: any) {
   editingId.value = r.id
+  suppressBotReset = true   // 回显 targetId 时抑制机器人切换清理
   form.value = {
     name: r.name, jobType: r.jobType, cron: r.cron,
     targetPlatform: r.targetPlatform || 'qqbot', targetBot: r.targetBot || '',
     targetType: r.targetType || 'GROUP', targetId: r.targetId || '',
     content: r.content || '', remark: r.remark || ''
   }
+  nextTick(() => { suppressBotReset = false })
   showModal.value = true
 }
 
@@ -398,28 +420,77 @@ onMounted(load)
     </NCard>
 
     <!-- 新建 / 编辑弹窗 -->
-    <NModal v-model:show="showModal" preset="card" :title="editingId != null ? '编辑任务' : '新建定时任务'" style="width: 560px; max-width: 94vw" :bordered="false">
-      <NForm label-placement="top" size="small">
+    <NModal
+      v-model:show="showModal"
+      preset="card"
+      :title="editingId != null ? '编辑任务' : '新建定时任务'"
+      style="width: 680px; max-width: 94vw"
+      :bordered="false"
+      class="task-modal"
+    >
+      <NForm label-placement="left" label-width="92" size="small" :show-feedback="false">
+        <!-- ═══════ 基础信息 ═══════ -->
+        <div class="tm-section-title">
+          <NIcon size="14" color="#5b5bd6"><DocumentTextOutline /></NIcon>
+          <span>基础信息</span>
+        </div>
         <NFormItem label="任务名称">
-          <NInput v-model:value="form.name" placeholder="如：每天早安推送" />
+          <NInput v-model:value="form.name" placeholder="如：每天早安推送" clearable />
         </NFormItem>
         <NFormItem label="任务类型">
           <NRadioGroup v-model:value="form.jobType">
             <NRadioButton v-for="t in typeOptions" :key="t.value" :value="t.value">{{ t.label }}</NRadioButton>
           </NRadioGroup>
         </NFormItem>
-        <NFormItem label="Cron 表达式">
-          <NInput v-model:value="form.cron" placeholder="如 0 8 * * *" />
-          <NText v-if="cronNext != null" depth="3" style="font-size: 12px; margin-top: 4px">
-            <NIcon size="12" style="vertical-align: -2px"><TimeOutline /></NIcon>
-            下次执行：{{ fmtTime(cronNext) }}
-          </NText>
-          <NText v-else-if="form.cron" type="error" depth="3" style="font-size: 12px; margin-top: 4px">cron 表达式非法</NText>
+        <NFormItem label="备注">
+          <NInput v-model:value="form.remark" placeholder="选填 · 任务用途说明" clearable />
         </NFormItem>
+
+        <!-- ═══════ Cron 表达式 ═══════ -->
+        <div class="tm-section-title" style="margin-top: 4px">
+          <NIcon size="14" color="#07c160"><TimeOutline /></NIcon>
+          <span>Cron 表达式</span>
+          <NTag v-if="cronNext != null" :bordered="false" size="small" type="success" style="margin-left: auto">
+            <NIcon size="11" style="vertical-align: -1px"><TimeOutline /></NIcon>
+            下次执行：{{ fmtTime(cronNext) }}
+          </NTag>
+          <NTag v-else-if="form.cron" :bordered="false" size="small" type="error" style="margin-left: auto">cron 表达式非法</NTag>
+        </div>
+        <NFormItem label="cron 文本">
+          <NInput
+            v-model:value="form.cron"
+            placeholder="分 时 日 月 周（专家模式直接输入）"
+            clearable
+            style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace"
+          >
+            <template #prefix><NIcon size="15"><TimeOutline /></NIcon></template>
+          </NInput>
+        </NFormItem>
+        <div class="cron-builder-wrap">
+          <div class="cb-hint">
+            <NIcon size="13" color="#8a93a6"><TimeOutline /></NIcon>
+            快捷生成（与上方输入双向同步）
+          </div>
+          <CronBuilder :cron="form.cron" @update:cron="form.cron = $event" />
+        </div>
+
+        <!-- ═══════ 推送目标 / HTTP 回调 ═══════ -->
+        <div class="tm-section-title" style="margin-top: 4px">
+          <NIcon size="14" :color="form.jobType === 'HTTP' ? '#f0a020' : '#2090e0'">
+            <component :is="form.jobType === 'HTTP' ? CreateOutline : CreateOutline" />
+          </NIcon>
+          <span>{{ form.jobType === 'HTTP' ? 'HTTP 回调配置' : '推送目标' }}</span>
+        </div>
 
         <template v-if="form.jobType === 'BOT_PUSH'">
           <NFormItem label="机器人">
-            <NSelect v-model:value="form.targetBot" :options="botOptions" placeholder="选择要推送的机器人" filterable />
+            <NSelect
+              v-model:value="form.targetBot"
+              :options="botOptions"
+              placeholder="选择要推送的机器人"
+              filterable
+              clearable
+            />
           </NFormItem>
           <NFormItem label="目标类型">
             <NRadioGroup v-model:value="form.targetType">
@@ -432,16 +503,25 @@ onMounted(load)
               :options="form.targetType === 'GROUP' ? groupOptions : friendOptions"
               placeholder="选择目标"
               filterable
+              clearable
             />
           </NFormItem>
           <NFormItem label="推送内容">
-            <NInput v-model:value="form.content" type="textarea" :rows="3" placeholder="要定时发送的消息内容" />
+            <NInput
+              v-model:value="form.content"
+              type="textarea"
+              :rows="4"
+              placeholder="要定时发送的消息内容"
+              show-count
+            />
           </NFormItem>
         </template>
 
         <template v-else>
           <NFormItem label="回调 URL">
-            <NInput v-model:value="form.targetId" placeholder="https://example.com/webhook" />
+            <NInput v-model:value="form.targetId" placeholder="https://example.com/webhook" clearable>
+              <template #prefix><NIcon size="15"><CreateOutline /></NIcon></template>
+            </NInput>
           </NFormItem>
           <NFormItem label="请求方法">
             <NRadioGroup v-model:value="form.targetType">
@@ -449,14 +529,16 @@ onMounted(load)
               <NRadioButton value="POST">POST</NRadioButton>
             </NRadioGroup>
           </NFormItem>
-          <NFormItem label="请求体（POST 时，JSON）">
-            <NInput v-model:value="form.content" type="textarea" :rows="3" placeholder='{"hello":"world"}' />
+          <NFormItem label="请求体">
+            <NInput
+              v-model:value="form.content"
+              type="textarea"
+              :rows="4"
+              placeholder='POST 时填 JSON，例如 {"hello":"world"}'
+              style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace"
+            />
           </NFormItem>
         </template>
-
-        <NFormItem label="备注">
-          <NInput v-model:value="form.remark" placeholder="选填" />
-        </NFormItem>
       </NForm>
       <template #footer>
         <NSpace justify="end">
@@ -503,3 +585,50 @@ onMounted(load)
     </NModal>
   </div>
 </template>
+
+<style scoped>
+.tm-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--n-text-color-1);
+  padding: 12px 0 12px;
+  margin-top: 16px;
+  border-bottom: 1px dashed var(--n-border-color);
+}
+.tm-section-title:first-of-type { margin-top: 0; }
+
+.cron-builder-wrap {
+  background: var(--n-color-2);
+  border-radius: 10px;
+  padding: 14px 16px 16px;
+  margin-top: 10px;
+  margin-bottom: 6px;
+}
+.cb-hint {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--n-text-color-3);
+  margin-bottom: 10px;
+}
+
+/* 让 NForm 在 label-placement=left 下更舒展（每项之间留白充足） */
+.task-modal :deep(.n-form-item) {
+  margin-bottom: 22px;
+}
+.task-modal :deep(.n-form-item:last-child) {
+  margin-bottom: 0;
+}
+/* 让每个段标题与上一项之间留更大空隙 */
+.task-modal :deep(.tm-section-title + .n-form-item) {
+  margin-top: 0;
+}
+/* CronBuilder 区域内的紧凑 row 再给一点行距 */
+.task-modal :deep(.cron-builder-wrap .cb-row) {
+  margin-bottom: 4px;
+}
+</style>

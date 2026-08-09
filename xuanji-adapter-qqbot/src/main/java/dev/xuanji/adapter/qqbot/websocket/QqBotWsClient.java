@@ -3,8 +3,8 @@ package dev.xuanji.adapter.qqbot.websocket;
 import dev.xuanji.api.adapter.Bot;
 import dev.xuanji.core.pipeline.BotPipeline;
 import lombok.extern.slf4j.Slf4j;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.fasterxml.jackson.databind.node.NullNode;
+import tools.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.NullNode;
 import dev.xuanji.api.json.Json;
 
 import dev.xuanji.adapter.qqbot.api.QqApiService;
@@ -322,9 +322,9 @@ public class QqBotWsClient {
         ObjectNode d = Json.obj();
         d.put("token", "QQBot " + accessToken);  // 鉴权令牌格式：QQBot {ACCESS_TOKEN}
         d.put("intents", intents);                // 事件订阅意图位掩码
-        d.put("shard", Json.arr().add(0).add(1));  // 分片：[当前分片, 总分片数]
-        d.put("properties", Json.obj());    // 连接属性（可选）
-        identify.put("d", d);
+        d.set("shard", Json.arr().add(0).add(1));  // 分片：[当前分片, 总分片数]
+        d.set("properties", Json.obj());    // 连接属性（可选）
+        identify.set("d", d);
 
         String identifyJson = identify.toString();
         log.info("[BotWS] Identify 消息: {}", identifyJson);
@@ -346,7 +346,7 @@ public class QqBotWsClient {
         d.put("token", "QQBot " + accessToken);
         d.put("session_id", sessionId);  // 之前的会话 ID
         d.put("seq", lastSeq);           // 最后的事件序列号
-        resume.put("d", d);
+        resume.set("d", d);
         send(resume.toString());
         log.info("[BotWS] Resume 已发送, robotId={}, seq={}", robotId, lastSeq);
     }
@@ -387,7 +387,7 @@ public class QqBotWsClient {
                 // 发送心跳包：op=1, d=null
                 ObjectNode hb = Json.obj();
                 hb.put("op", 1);
-                hb.put("d", NullNode.instance);
+                hb.set("d", NullNode.instance);
                 send(hb.toString());
                 log.debug("[BotWS] 心跳已发送, robotId={}", robotId);
             } catch (Exception e) {
@@ -523,7 +523,7 @@ public class QqBotWsClient {
     private void handleHeartbeatRequest() {
         ObjectNode hb = Json.obj();
         hb.put("op", 1);
-        hb.put("d", NullNode.instance);
+        hb.set("d", NullNode.instance);
         send(hb.toString());
     }
 

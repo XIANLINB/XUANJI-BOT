@@ -7,10 +7,12 @@ import dev.xuanji.adapter.qqbot.storage.BotInfoSync;
 import dev.xuanji.adapter.qqbot.storage.QqBotRepository;
 import dev.xuanji.adapter.qqbot.webhook.SignatureVerifier;
 import dev.xuanji.adapter.qqbot.websocket.QqBotWsManager;
+import dev.xuanji.console.service.AuditService;
 import dev.xuanji.core.config.XuanjiRobotProperties;
 import dev.xuanji.core.storage.BotDataSourceRegistry;
 import dev.xuanji.core.storage.FrameworkBotRepository;
 import dev.xuanji.core.web.XuanjiApi;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationContext;
@@ -56,17 +58,20 @@ public class BotConfigController {
     private final ObjectProvider<QqBotRepository> qqBotRepository;
     private final FrameworkBotRepository frameworkBotRepository;
     private final ObjectProvider<BotInfoSync> botInfoSync;
+    private final AuditService auditService;
 
     public BotConfigController(ApplicationContext ctx,
                                XuanjiRobotProperties robotProperties,
                                ObjectProvider<QqBotRepository> qqBotRepository,
                                FrameworkBotRepository frameworkBotRepository,
-                               ObjectProvider<BotInfoSync> botInfoSync) {
+                               ObjectProvider<BotInfoSync> botInfoSync,
+                               AuditService auditService) {
         this.ctx = ctx;
         this.robotProperties = robotProperties;
         this.qqBotRepository = qqBotRepository;
         this.frameworkBotRepository = frameworkBotRepository;
         this.botInfoSync = botInfoSync;
+        this.auditService = auditService;
     }
 
     /** 列出全部机器人配置；QQ 适配器未启用时返回空列表而非报错。 */
@@ -95,7 +100,7 @@ public class BotConfigController {
 
     /** 新增或更新机器人配置；已存在时沿用原 status，不会因保存把在线机器人改成离线。 */
     @PostMapping
-    public Map<String, Object> save(@RequestBody Map<String, String> body) {
+    public Map<String, Object> save(@RequestBody Map<String, String> body, HttpServletRequest req) {
         String appId = body.get("appId");
         String secret = body.get("clientSecret");
         String sandbox = body.getOrDefault("sandbox", "false");
@@ -115,6 +120,7 @@ public class BotConfigController {
                 return Map.of("error", "QQ 适配器未启用 (xuanji.qqbot.enabled=false)");
             }
             Map<String, Object> existing = repo.getBotRow(appId);
+            boolean isNew = existing.isEmpty();
             String status = defaultIfBlank(str(existing, "STATUS"), "ONLINE");
             String webhookUrl = "webhook".equalsIgnoreCase(method) && !domain.isBlank() ? domain : null;
             repo.upsertBot(appId, secret, method, "true".equals(sandbox), status, webhookUrl);
@@ -127,6 +133,9 @@ public class BotConfigController {
 
             robotProperties.reload();
             log.info("[BotConfig] 已保存机器人配置: appId={}, mode={}", appId, method);
+            auditService.record(isNew ? "BOT_ADD" : "BOT_UPDATE",
+                    (isNew ? "新增机器人 appId=" : "更新机器人 appId=") + appId
+                            + " mode=" + method + " sandbox=" + sandbox, req);
             return Map.of("status", "ok");
         } catch (Exception e) {
             log.error("[BotConfig] 保存机器人失败: appId={}, {}", appId, e.getMessage(), e);
@@ -140,7 +149,7 @@ public class BotConfigController {
      * <p>各步骤独立容错，单步失败仅告警，保证清理尽可能做完，不留半删状态。
      */
     @DeleteMapping("/{appId}")
-    public Map<String, Object> delete(@PathVariable String appId) {
+    public Map<String, Object> delete(@PathVariable String appId, HttpServletRequest req) {
         if (appId == null || appId.isBlank()) {
             return Map.of("error", "AppID 不能为空");
         }
@@ -201,6 +210,7 @@ public class BotConfigController {
 
             robotProperties.reload();
             log.info("[BotConfig] 已彻底删除机器人: appId={}", appId);
+            auditService.record("BOT_DELETE", "彻底删除机器人 appId=" + appId, req);
             return Map.of("status", "ok");
         } catch (Exception e) {
             log.error("[BotConfig] 删除机器人失败: appId={}, {}", appId, e.getMessage(), e);
@@ -261,7 +271,7 @@ public class BotConfigController {
      * <p>已连接的 WS 会跳过重复启动；配置里不存在的 robotId 会被停连接并从框架库清掉。
      */
     @PostMapping("/reload")
-    public Map<String, Object> reload() {
+    public Map<String, Object> reload(HttpServletRequest req) {
         List<Map<String, Object>> bots = list();
         if (bots.isEmpty()) {
             return Map.of("error", "无 Bot 配置");
@@ -375,6 +385,7 @@ public class BotConfigController {
             }
 
             robotProperties.reload();
+            auditService.record("BOT_RELOAD", "热重载全部机器人配置，更新 " + count + " 个", req);
             return Map.of("status", "ok", "updated", count, "msg", "已重新加载 " + count + " 个 Bot");
         } catch (Exception e) {
             return Map.of("error", "重载失败，确认 xuanji-adapter-qqbot 已加载: " + e.getMessage());

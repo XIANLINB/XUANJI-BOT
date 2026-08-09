@@ -44,15 +44,18 @@ public class DataCenterController {
     private final JdbcTemplate jdbc;
     private final JdbcTemplate logJdbc;
     private final SessionStore sessionStore;
+    private final dev.xuanji.console.service.AuditService auditService;
 
     public DataCenterController(ConsoleQueryService queryService,
                                 JdbcTemplate jdbc,
                                 @Qualifier("logJdbcTemplate") JdbcTemplate logJdbc,
-                                SessionStore sessionStore) {
+                                SessionStore sessionStore,
+                                dev.xuanji.console.service.AuditService auditService) {
         this.queryService = queryService;
         this.jdbc = jdbc;
         this.logJdbc = logJdbc;
         this.sessionStore = sessionStore;
+        this.auditService = auditService;
     }
 
     // ═══════════════════ 聚合统计 ═══════════════════
@@ -290,7 +293,8 @@ public class DataCenterController {
      * botKey 可选：传值则机器人级项（eventLog/messages）只清理该机器人的实例库，框架级项不受影响。 */
     @PostMapping("/cache/clear")
     public Map<String, Object> clearCache(@RequestParam(value = "categories", required = false) String categories,
-                                          @RequestParam(value = "botKey", required = false) String botKey) {
+                                          @RequestParam(value = "botKey", required = false) String botKey,
+                                          jakarta.servlet.http.HttpServletRequest req) {
         java.util.List<String> cats = (categories == null || categories.isBlank())
                 ? java.util.List.of()
                 : java.util.Arrays.asList(categories.split(","));
@@ -315,6 +319,8 @@ public class DataCenterController {
         result.put("cleared", cleared);
         if (!errors.isEmpty()) result.put("errors", errors);
         result.put("msg", cleared.isEmpty() ? "未清理任何项" : ("已清理: " + String.join(", ", cleared)));
+        auditService.record("CACHE_CLEAR", "清理缓存: " + String.join(", ", cleared)
+                + (botKey != null && !botKey.isBlank() ? " (bot=" + botKey + ")" : ""), req);
         return result;
     }
 
@@ -449,7 +455,8 @@ public class DataCenterController {
 
     /** 按类型删除媒体文件（type=image|voice|video|file，空=全部）。媒体框架级共享不区分 bot。 */
     @PostMapping("/files/clear")
-    public Map<String, Object> clearFiles(@RequestParam(required = false) String type) {
+    public Map<String, Object> clearFiles(@RequestParam(required = false) String type,
+                                          jakarta.servlet.http.HttpServletRequest req) {
         Path root = mediaRoot().toAbsolutePath().normalize();
         if (!Files.isDirectory(root)) {
             return Map.of("status", "ok", "msg", "无文件", "removed", 0, "freedBytes", 0L);
@@ -472,6 +479,8 @@ public class DataCenterController {
             return Map.of("status", "error", "msg", e.getMessage());
         }
         log.info("[DataCenter] 按类型删除媒体: type={}, 删除{}个, 释放{}B", want, removed, freed);
+        auditService.record("FILE_CLEAR", "按类型删除媒体 type=" + (want == null ? "全部" : want)
+                + "，删除 " + removed + " 个，释放 " + fmtBytes(freed), req);
         return Map.of("status", "ok", "msg", "已删除 " + removed + " 个文件，释放 " + fmtBytes(freed),
                 "removed", removed, "freedBytes", freed);
     }
@@ -484,7 +493,8 @@ public class DataCenterController {
 
     /** 删除媒体目录内指定文件（仅相对路径，防穿越）。 */
     @DeleteMapping("/files")
-    public Map<String, Object> deleteFile(@RequestParam String path) {
+    public Map<String, Object> deleteFile(@RequestParam String path,
+                                          jakarta.servlet.http.HttpServletRequest req) {
         Path root = mediaRoot().toAbsolutePath().normalize();
         Path target = root.resolve(path).normalize();
         if (!target.startsWith(root)) {
@@ -492,7 +502,10 @@ public class DataCenterController {
         }
         try {
             boolean ok = Files.deleteIfExists(target);
-            if (ok) log.info("[DataCenter] 删除媒体文件: {}", path);
+            if (ok) {
+                log.info("[DataCenter] 删除媒体文件: {}", path);
+                auditService.record("FILE_DELETE", "删除媒体文件: " + path, req);
+            }
             return Map.of("status", ok ? "ok" : "error", "msg", ok ? "已删除" : "文件不存在");
         } catch (IOException e) {
             return Map.of("status", "error", "msg", e.getMessage());

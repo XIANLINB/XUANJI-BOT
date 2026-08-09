@@ -221,13 +221,20 @@ public class DatabaseInitializer {
         // 10. 审计日志（安全中心：登录/登出/改PIN/SQL/备份恢复/插件卸载等敏感操作留痕）
         jdbc.execute("""
             CREATE TABLE IF NOT EXISTS xuanji_audit (
-                id          BIGINT AUTO_INCREMENT PRIMARY KEY,
-                action      VARCHAR(64)  NOT NULL,
-                detail      VARCHAR(1024),
-                ip          VARCHAR(64),
-                create_time BIGINT       DEFAULT 0
+                id             BIGINT AUTO_INCREMENT PRIMARY KEY,
+                action         VARCHAR(64)  NOT NULL,
+                detail         VARCHAR(1024),
+                ip             VARCHAR(64),
+                device_type    VARCHAR(16)  DEFAULT '',
+                device_os      VARCHAR(32)  DEFAULT '',
+                device_browser VARCHAR(32)  DEFAULT '',
+                create_time    BIGINT       DEFAULT 0
             )
         """);
+        // 旧库迁移：早期版本无设备列，这里幂等补列（H2 支持 ADD COLUMN IF NOT EXISTS）
+        jdbc.execute("ALTER TABLE xuanji_audit ADD COLUMN IF NOT EXISTS device_type VARCHAR(16) DEFAULT ''");
+        jdbc.execute("ALTER TABLE xuanji_audit ADD COLUMN IF NOT EXISTS device_os VARCHAR(32) DEFAULT ''");
+        jdbc.execute("ALTER TABLE xuanji_audit ADD COLUMN IF NOT EXISTS device_browser VARCHAR(32) DEFAULT ''");
 
         // 11. 定时任务定义（xuanji-scheduler 模块）
         jdbc.execute("""
@@ -268,17 +275,34 @@ public class DatabaseInitializer {
         """);
         jdbc.execute("CREATE INDEX IF NOT EXISTS idx_audit_time ON xuanji_audit (create_time DESC)");
 
-        // 13. 预警中心：每 bot 告警配置（预警用户 ID + 开关）
+        // 13. 运行健康异常记录（健康页持久化：熔断/断连/慢阶段/QPS 突增）
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS xuanji_health_alarm (
+                id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+                type        VARCHAR(32)  NOT NULL,
+                level       VARCHAR(16)  DEFAULT 'WARN',
+                message     VARCHAR(512) DEFAULT '',
+                create_time BIGINT       DEFAULT 0
+            )
+        """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS idx_health_alarm_time ON xuanji_health_alarm (create_time DESC)");
+
+        // 14. 预警中心：每 bot 告警配置（预警用户 ID + 开关 + 规则配置 JSON）
         jdbc.execute("""
             CREATE TABLE IF NOT EXISTS xuanji_alert_config (
                 id            BIGINT AUTO_INCREMENT PRIMARY KEY,
                 bot_key       VARCHAR(128) NOT NULL,
                 enabled       BOOLEAN      DEFAULT FALSE,
                 alert_user_id VARCHAR(128) DEFAULT '',
+                rules         TEXT         DEFAULT '',
                 created_at    BIGINT       DEFAULT 0,
                 updated_at    BIGINT       DEFAULT 0
             )
         """);
+        // 旧库迁移：补 rules 列（已有库没有该列时 ALTER 添加）
+        try {
+            jdbc.execute("ALTER TABLE xuanji_alert_config ADD COLUMN IF NOT EXISTS rules TEXT DEFAULT ''");
+        } catch (Exception ignored) { /* 列已存在时忽略 */ }
 
         // 14. 预警中心：告警记录
         jdbc.execute("""

@@ -38,23 +38,40 @@ public class RiskService {
     private final BotPipeline pipeline;
     private final CommandRegistry commandRegistry;
     private final PermissionService permissionService;
+    private final AuditService auditService;
 
     public RiskService(JdbcTemplate jdbc, ConsoleQueryService queryService,
                        BotPipeline pipeline, CommandRegistry commandRegistry,
-                       PermissionService permissionService) {
+                       PermissionService permissionService, AuditService auditService) {
         this.jdbc = jdbc;
         this.queryService = queryService;
         this.pipeline = pipeline;
         this.commandRegistry = commandRegistry;
         this.permissionService = permissionService;
+        this.auditService = auditService;
     }
 
     // ═══════════════════ 全局概览 ═══════════════════
 
-    /** 全局风控命中概览：限速 / 去重 / 黑名单总量与近期新增。 */
+    /** 全局风控命中概览：黑名单拦截 / 命令执行 / 限速 / 去重 / 黑名单总量与近期新增。 */
     public Map<String, Object> overview() {
         long now = System.currentTimeMillis() / 1000;
         Map<String, Object> m = new LinkedHashMap<>();
+
+        // 黑名单拦截（WhitelistStage 计数）—— 真正"拦住谁"的第一手证据
+        Map<String, Object> block = new LinkedHashMap<>();
+        block.put("blocks", num(pipeline.getWhitelistStats().get("blacklistBlocks")));
+        m.put("block", block);
+
+        // 命令执行（CommandRegistry 计数）
+        Map<String, Object> command = new LinkedHashMap<>();
+        command.put("execCount", num(commandRegistry.getCommandStats().get("commandExecCount")));
+        command.put("failCount", num(commandRegistry.getCommandStats().get("commandFailCount")));
+        long exec = num(command.get("execCount"));
+        long fail = num(command.get("failCount"));
+        command.put("successRate", exec + fail == 0 ? 100.0
+                : Math.round(exec * 10000.0 / (exec + fail)) / 100.0);
+        m.put("command", command);
 
         // 限速：命令级 + 框架级
         Map<String, Object> rateLimit = new LinkedHashMap<>();
@@ -74,6 +91,8 @@ public class RiskService {
         // 黑名单
         Map<String, Object> blacklist = new LinkedHashMap<>();
         blacklist.put("total", count("SELECT COUNT(*) FROM xuanji_blacklist"));
+        blacklist.put("globalTotal", count("SELECT COUNT(*) FROM xuanji_blacklist WHERE group_id=''"));
+        blacklist.put("groupTotal", count("SELECT COUNT(*) FROM xuanji_blacklist WHERE group_id<>''"));
         blacklist.put("add24h", count("SELECT COUNT(*) FROM xuanji_blacklist_log WHERE action='ADD' AND create_time>=?",
                 now - DAY_SEC));
         blacklist.put("add7d", count("SELECT COUNT(*) FROM xuanji_blacklist_log WHERE action='ADD' AND create_time>=?",
@@ -81,6 +100,52 @@ public class RiskService {
         blacklist.put("remove24h", count("SELECT COUNT(*) FROM xuanji_blacklist_log WHERE action='REMOVE' AND create_time>=?",
                 now - DAY_SEC));
         m.put("blacklist", blacklist);
+
+        // 登录审计：成功 / 失败（防爆破监控）
+        Map<String, Object> login = new LinkedHashMap<>();
+        login.put("okTotal", count("SELECT COUNT(*) FROM xuanji_audit WHERE action='LOGIN_OK'"));
+        login.put("failTotal", count("SELECT COUNT(*) FROM xuanji_audit WHERE action='LOGIN_FAIL'"));
+        login.put("fail24h", count("SELECT COUNT(*) FROM xuanji_audit WHERE action='LOGIN_FAIL' AND create_time>=?",
+                now - DAY_SEC));
+        m.put("login", login);
+
+        // 健康告警分布（xuanji_health_alarm 类型计数）
+        Map<String, Object> healthAlarm = new LinkedHashMap<>();
+        try {
+            jdbc.query("SELECT type, COUNT(*) AS CNT FROM xuanji_health_alarm GROUP BY type",
+                    (java.sql.ResultSet rs) -> {
+                        healthAlarm.put(String.valueOf(rs.getString("type")), rs.getLong("CNT"));
+                    });
+        } catch (Exception e) {
+            log.debug("[Risk] 健康告警统计失败: {}", e.getMessage());
+        }
+        healthAlarm.put("total", num(healthAlarm.get("total")) == 0
+                ? count("SELECT COUNT(*) FROM xuanji_health_alarm") : healthAlarm.get("total"));
+        m.put("healthAlarm", healthAlarm);
+
+        // 定时任务成功率（xuanji_scheduler_job）
+        Map<String, Object> scheduler = new LinkedHashMap<>();
+        try {
+            var r = jdbc.queryForMap("""
+                SELECT COUNT(*) AS TOTAL,
+                       COALESCE(SUM(run_count),0) AS RUNS,
+                       COALESCE(SUM(fail_count),0) AS FAILS
+                FROM xuanji_scheduler_job
+                """);
+            long runs = num(r.get("RUNS")), fails = num(r.get("FAILS"));
+            scheduler.put("jobTotal", num(r.get("TOTAL")));
+            scheduler.put("runTotal", runs);
+            scheduler.put("failTotal", fails);
+            scheduler.put("successRate", runs + fails == 0 ? 100.0
+                    : Math.round(runs * 10000.0 / (runs + fails)) / 100.0);
+        } catch (Exception e) {
+            scheduler.put("jobTotal", 0);
+            scheduler.put("successRate", 100.0);
+        }
+        m.put("scheduler", scheduler);
+
+        // 操作审计分布（按 action 计数，登录/改口令/机器人操作等）
+        m.put("auditStats", auditService.actionStats());
         return m;
     }
 

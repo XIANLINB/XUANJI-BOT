@@ -1,5 +1,6 @@
 package dev.xuanji.console.controller;
 
+import dev.xuanji.console.service.AuditService;
 import dev.xuanji.console.service.ConsoleQueryService;
 import dev.xuanji.core.command.CommandRegistry;
 import dev.xuanji.core.config.ConfigService;
@@ -30,19 +31,28 @@ public class ConsoleMonitorController {
     private final BotPipeline botPipeline;
     private final ObjectProvider<HealthMetricProvider> healthProviders;
     private final ObjectProvider<ConnectionStatusProvider> connProviders;
+    private final AuditService auditService;
+    private final dev.xuanji.console.service.HealthAlarmService healthAlarmService;
+    private final dev.xuanji.core.plugin.XuanjiPluginManager pluginManager;
 
     public ConsoleMonitorController(ConsoleQueryService queryService,
                                     ConfigService configService,
                                     CommandRegistry commandRegistry,
                                     BotPipeline botPipeline,
                                     ObjectProvider<HealthMetricProvider> healthProviders,
-                                    ObjectProvider<ConnectionStatusProvider> connProviders) {
+                                    ObjectProvider<ConnectionStatusProvider> connProviders,
+                                    AuditService auditService,
+                                    dev.xuanji.console.service.HealthAlarmService healthAlarmService,
+                                    dev.xuanji.core.plugin.XuanjiPluginManager pluginManager) {
         this.queryService = queryService;
         this.configService = configService;
         this.commandRegistry = commandRegistry;
         this.botPipeline = botPipeline;
         this.healthProviders = healthProviders;
         this.connProviders = connProviders;
+        this.auditService = auditService;
+        this.healthAlarmService = healthAlarmService;
+        this.pluginManager = pluginManager;
     }
 
     // ═════════════════ 仪表盘 ═══════════════════
@@ -82,12 +92,33 @@ public class ConsoleMonitorController {
         m.put("todayC2cMessages", cMsg);
         m.put("messagesTotal", msgTotal);
         m.put("eventsTotal", evtTotal);
+        // 插件执行 / 消息去重（从健康监控取，Dashboard 复用）
+        try {
+            m.put("plugins", commandRegistry.getStats());
+            m.put("dedup", botPipeline.getDedupStats());
+        } catch (Exception ignored) {
+            m.put("plugins", Map.of());
+            m.put("dedup", Map.of());
+        }
+        // 已加载插件数（全部插件，含停用的）
+        try {
+            m.put("pluginsLoaded", pluginManager.listPlugins().size());
+        } catch (Exception e) {
+            m.put("pluginsLoaded", 0);
+        }
+        // 命令数（按 命令名|插件|方法 去重后的实际命令数，来自命令管理页同一数据源）
+        try {
+            m.put("commandCount", commandRegistry.listCommands().size());
+        } catch (Exception e) {
+            m.put("commandCount", 0);
+        }
         return m;
     }
 
     // ═══════════════════ 运行健康监控 ═════════════════
 
-    /** 运行健康快照：插件超时、去重、Pipeline 慢阶段、各平台熔断与连接状态。只读，不触碰生命线。 */
+    /** 运行健康快照：插件超时、去重、Pipeline 慢阶段、各平台熔断与连接状态。只读，不触碰生命线。
+     * 同时检测当前异常（熔断打开/断连/慢阶段/QPS 突增）并持久化到 xuanji_health_alarm。 */
     @GetMapping("/health")
     public Map<String, Object> health() {
         Map<String, Object> m = new LinkedHashMap<>();
@@ -108,7 +139,77 @@ public class ConsoleMonitorController {
             catch (Exception ignored) {}
         }
         m.put("connections", conns);
+
+        detectAndRecordAlarms(m);
         return m;
+    }
+
+    /** 检测当前异常并落库（5 分钟窗口去重，避免 30s 轮询刷屏）。 */
+    private void detectAndRecordAlarms(Map<String, Object> health) {
+        try {
+            // 1. 熔断打开
+            @SuppressWarnings("unchecked")
+            Map<String, Object> platforms = (Map<String, Object>) health.getOrDefault("platforms", Map.of());
+            for (Map.Entry<String, Object> e : platforms.entrySet()) {
+                Object cb = e.getValue() instanceof Map<?, ?> mm ? mm.get("circuitBreaker") : null;
+                java.util.List<Map<String, Object>> list = new java.util.ArrayList<>();
+                if (cb instanceof java.util.List<?> l) l.forEach(x -> { if (x instanceof Map<?, ?> mm2) list.add((Map<String, Object>) mm2); });
+                else if (cb instanceof Map<?, ?> mm3) list.add((Map<String, Object>) mm3);
+                for (Map<String, Object> r : list) {
+                    if ("OPEN".equalsIgnoreCase(String.valueOf(r.get("state")))) {
+                        healthAlarmService.record("CIRCUIT_OPEN", "ERROR",
+                                "熔断打开 platform=" + e.getKey() + " appId=" + r.get("appId")
+                                        + " 连续失败=" + r.get("consecutiveFailures"));
+                    }
+                }
+            }
+
+            // 2. WS 断连 / 重连中（非 CONNECTED 且非 CLOSED）
+            @SuppressWarnings("unchecked")
+            Map<String, Object> conns = (Map<String, Object>) health.getOrDefault("connections", Map.of());
+            for (Map.Entry<String, Object> e : conns.entrySet()) {
+                Object sessions = e.getValue() instanceof Map<?, ?> mm ? mm.get("sessions") : e.getValue();
+                if (!(sessions instanceof java.util.List<?> l)) continue;
+                for (Object x : l) {
+                    if (!(x instanceof Map<?, ?> s)) continue;
+                    String state = String.valueOf(s.get("state"));
+                    if (!"CONNECTED".equalsIgnoreCase(state) && !"CLOSED".equalsIgnoreCase(state)) {
+                        healthAlarmService.record("WS_DISCONNECT", "WARN",
+                                "WS 连接异常 platform=" + e.getKey() + " robotId=" + s.get("robotId")
+                                        + " 状态=" + state);
+                    }
+                }
+            }
+
+            // 3. Pipeline 慢阶段
+            @SuppressWarnings("unchecked")
+            Map<String, Object> slow = (Map<String, Object>) health.getOrDefault("pipelineSlowStages", Map.of());
+            for (Map.Entry<String, Object> e : slow.entrySet()) {
+                long cnt = e.getValue() instanceof Number n ? n.longValue() : 0;
+                if (cnt > 0) {
+                    healthAlarmService.record("SLOW_STAGE", "WARN", "Pipeline 慢阶段 " + e.getKey() + " 超 100ms " + cnt + " 次");
+                }
+            }
+
+            // 4. QPS 突增：当前 QPS > 平均 3 倍 且 > 15（防噪音）
+            try {
+                double cur = dev.xuanji.core.metric.QpsMeter.current();
+                double avg = dev.xuanji.core.metric.QpsMeter.avg(60);
+                if (cur > 15 && cur > avg * 3) {
+                    healthAlarmService.record("QPS_SPIKE", "WARN",
+                            "QPS 突增 当前=" + Math.round(cur) + " 平均=" + Math.round(avg));
+                }
+            } catch (Exception ignored) { /* QPS 检测失败不影响健康返回 */ }
+        } catch (Exception e) {
+            log.debug("[Health] 异常检测失败（可忽略）: {}", e.getMessage());
+        }
+    }
+
+    /** 健康异常历史记录（持久化，最多 200 条）。 */
+    @GetMapping("/health/alarms")
+    public Map<String, Object> healthAlarms(@RequestParam(defaultValue = "50") int limit) {
+        java.util.List<Map<String, Object>> rows = healthAlarmService.list(limit);
+        return Map.of("count", rows.size(), "rows", rows);
     }
 
     // ═══════════════════ 运行时配置 ═════════════════
@@ -127,23 +228,30 @@ public class ConsoleMonitorController {
 
     /** 更新全局 KV 设置（body: {k: v, ...}）。 */
     @PutMapping("/config/global")
-    public Map<String, Object> putGlobal(@RequestBody Map<String, String> body) {
+    public Map<String, Object> putGlobal(@RequestBody Map<String, String> body,
+                                         jakarta.servlet.http.HttpServletRequest req) {
         body.forEach((k, v) -> configService.setGlobal(k, v == null ? "" : v));
+        auditService.record("SETTINGS_UPDATE", "全局设置更新: " + String.join(", ", body.keySet()), req);
         return Map.of("status", "ok");
     }
 
     /** 更新某机器人配置（body: 字段映射；botKey 自动归一为 appId）。 */
     @PutMapping("/config/bot/{botKey}")
-    public Map<String, Object> putBot(@PathVariable String botKey, @RequestBody Map<String, String> body) {
+    public Map<String, Object> putBot(@PathVariable String botKey, @RequestBody Map<String, String> body,
+                                      jakarta.servlet.http.HttpServletRequest req) {
         configService.setBotConfig(botKey, body);
+        auditService.record("BOT_CONFIG_UPDATE", "bot=" + botKey + " 配置更新: " + String.join(", ", body.keySet()), req);
         return Map.of("status", "ok");
     }
 
     /** 更新某机器人某群的配置（三级粒度：全局 / bot / 群）。 */
     @PutMapping("/config/group/{botKey}/{groupId}")
     public Map<String, Object> putGroup(@PathVariable String botKey, @PathVariable String groupId,
-                                        @RequestBody Map<String, String> body) {
+                                        @RequestBody Map<String, String> body,
+                                        jakarta.servlet.http.HttpServletRequest req) {
         body.forEach((k, v) -> configService.setGroupConfig(botKey, groupId, k, v == null ? "" : v));
+        auditService.record("GROUP_CONFIG_UPDATE", "bot=" + botKey + " group=" + groupId
+                + " 配置更新: " + String.join(", ", body.keySet()), req);
         return Map.of("status", "ok");
     }
 

@@ -1,7 +1,8 @@
 package dev.xuanji.adapter.qqbot.event.handler.group;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.SerializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 import dev.xuanji.core.config.XuanjiRobotProperties;
 import dev.xuanji.adapter.qqbot.dto.GroupMessageEvent;
 import dev.xuanji.adapter.qqbot.api.MessageSender;
@@ -14,8 +15,8 @@ import dev.xuanji.core.command.CommandRegistry;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.extern.slf4j.Slf4j;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 import dev.xuanji.api.json.Json;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -41,25 +42,29 @@ import org.springframework.stereotype.Component;
 @EventMapping({"GROUP_MESSAGE_CREATE", "GROUP_AT_MESSAGE_CREATE"})
 public class GroupMessageHandler implements EventHandler {
 
-    private final ObjectMapper objectMapper = new ObjectMapper()
-            .enable(SerializationFeature.INDENT_OUTPUT);
+    private final ObjectMapper objectMapper = JsonMapper.builder()
+            .enable(SerializationFeature.INDENT_OUTPUT)
+            .build();
 
     private final XuanjiRobotProperties robotProperties;
     private final MessageSender messageSender;
     private final CommandRegistry commandRegistry;
     private final JdbcTemplate jdbc;
-    private final dev.xuanji.core.storage.log.MessageLogService logSvc;
     private final dev.xuanji.core.storage.MessageEventRecorder eventRecorder;
     private final dev.xuanji.adapter.qqbot.bot.QqBotFactory botFactory;
     private final dev.xuanji.adapter.qqbot.storage.QqBotRepository qqBotRepository;
     private final dev.xuanji.core.config.ConfigService configService;
+
+    /** LLM 兜底接管判定（llm 模块实现；未引入 llm 模块时为空列表，不影响原逻辑）。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private java.util.List<dev.xuanji.api.llm.LlmAvailability> llmAvailabilityList = java.util.List.of();
 
     private final Timer handleTimer;
     private final Timer e2eTimer;
 
     public GroupMessageHandler(XuanjiRobotProperties robotProperties, MessageSender messageSender,
                                CommandRegistry commandRegistry,
-                               JdbcTemplate jdbc, dev.xuanji.core.storage.log.MessageLogService logSvc,
+                               JdbcTemplate jdbc,
                                MeterRegistry meterRegistry,
                                dev.xuanji.core.storage.MessageEventRecorder eventRecorder,
                                dev.xuanji.adapter.qqbot.bot.QqBotFactory botFactory,
@@ -69,7 +74,6 @@ public class GroupMessageHandler implements EventHandler {
         this.messageSender = messageSender;
         this.commandRegistry = commandRegistry;
         this.jdbc = jdbc;
-        this.logSvc = logSvc;
         this.eventRecorder = eventRecorder;
         this.botFactory = botFactory;
         this.qqBotRepository = qqBotRepository;
@@ -95,6 +99,9 @@ public class GroupMessageHandler implements EventHandler {
         try {
             GroupMessageEvent event = objectMapper.readValue(data.toString(), GroupMessageEvent.class);
 
+            // 诊断：打印事件原始报文（含 _eventType / mentions / content 等，便于排查 @机器人 判定）
+            log.info("[收到群聊消息] 原始报文: {}", data);
+
             // 机器人自消息：author.bot=true（其他机器人/本机器人发的）。总是落库记录，处理与否按三级配置
             boolean isBotAuthor = event.getAuthor() != null && Boolean.TRUE.equals(event.getAuthor().getBot());
 
@@ -111,6 +118,13 @@ public class GroupMessageHandler implements EventHandler {
 
             log.info("[收到群聊消息][群{}] sender={}, memberOpenId={}, content={}",
                     groupOpenid, event.getAuthor().getUsername(), memberOpenid, content);
+
+            // @机器人 诊断：原始事件类型 / mentions 数量与 is_you / isAtBot 判定结果
+            log.info("[收到群聊消息] 事件类型={}, mentions={}, isAtBot={}, 原始content={}",
+                    event.getEventType(),
+                    event.getMentions() == null ? 0 : event.getMentions().size(),
+                    event.isAtBot(),
+                    event.getContent() == null ? "" : event.getContent());
 
             // 解析 botKey / appId
             String botKey = robotProperties.findBotKeyByRobotId(robotId);
@@ -183,6 +197,8 @@ public class GroupMessageHandler implements EventHandler {
                         sdkEvent(event, data, appId), xjBot, "qq");
             try {
                 // 权限已在 Pipeline 的 WhitelistStage(20) 统一裁决，此处不再内联检查
+                // 重置「命令命中」标记：LlmChatStage 据此判断命令是否未命中（LLM 闲聊兜底）
+                commandRegistry.resetCommandHitFlag();
                 String cmdResult = commandRegistry.executeGroupMessage(content);
                 if (cmdResult != null) {
                     // OUT 落库由 MessageSender 统一完成（方向=OUT、类型按发送方式、raw=出站载荷）
@@ -192,12 +208,18 @@ public class GroupMessageHandler implements EventHandler {
                             outboundType(cmdResult), cmdResult, "");
                     return;
                 }
+                // 命令未命中 → @OnMessage 全量监听器（非命令场景）
+                commandRegistry.dispatchOnMessage(true);
             } finally {
                 CommandRegistry.clearContext();
             }
 
             // 未匹配 → 提示帮助（OUT 落库由 MessageSender 统一完成）
             if (event.isAtBot()) {
+                // LLM 兜底接管：该群已开启 LLM 聊天时，由 LlmChatStage 异步回复，不再发生硬帮助
+                if (isLlmAvailable(botEvent)) {
+                    return;
+                }
                 String helpText = "发送\"帮助\"查看可用命令";
                 messageSender.sendGroupText(groupOpenid, helpText, msgId);
                 dev.xuanji.core.storage.log.MessageLogger.groupMessage("OUT", appId, groupOpenid, memberOpenid, "text", helpText, "");
@@ -209,6 +231,14 @@ public class GroupMessageHandler implements EventHandler {
             handleSample.stop(handleTimer);
             dev.xuanji.core.metrics.TraceContext.exit();
         }
+    }
+
+    /** LLM 是否会对当前事件兜底接管（任一 LlmAvailability 实现返回 true）。 */
+    private boolean isLlmAvailable(dev.xuanji.api.event.BotEvent botEvent) {
+        for (dev.xuanji.api.llm.LlmAvailability a : llmAvailabilityList) {
+            if (a.available(botEvent)) return true;
+        }
+        return false;
     }
 
     private void autoSyncGroup(String appId, String groupId, String memberId, String role, String nickname) {

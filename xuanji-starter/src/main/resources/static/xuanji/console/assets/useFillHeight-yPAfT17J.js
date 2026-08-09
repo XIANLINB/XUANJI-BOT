@@ -1,1 +1,0 @@
-import{a4 as i,ak as r,W as s}from"./index-FgWOnTD7.js";function d(t=0){const n=s(600),e=()=>{const o=160+t;n.value=Math.max(260,window.innerHeight-o)};return i(()=>{e(),window.addEventListener("resize",e)}),r(()=>window.removeEventListener("resize",e)),{fillHeight:n}}export{d as u};

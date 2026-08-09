@@ -1,7 +1,7 @@
 package dev.xuanji.adapter.qqbot.converter;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
 import dev.xuanji.api.adapter.Bot;
 import dev.xuanji.api.event.BotEvent;
 import dev.xuanji.api.event.EventType;

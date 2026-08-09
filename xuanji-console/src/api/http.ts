@@ -43,6 +43,17 @@ export async function put<T = any>(path: string, body?: unknown): Promise<T> {
   return res.json() as Promise<T>
 }
 
+/** multipart 文件上传（FormData；不手动设 Content-Type，浏览器自动带 boundary）。 */
+export async function upload<T = any>(path: string, form: FormData): Promise<T> {
+  const res = await fetch(BASE + path, {
+    method: 'POST',
+    credentials: 'include',
+    body: form
+  })
+  if (!res.ok) throw new Error('HTTP ' + res.status)
+  return res.json() as Promise<T>
+}
+
 export async function del<T = any>(path: string): Promise<T> {
   const res = await fetch(BASE + path, { method: 'DELETE', credentials: 'include' })
   if (!res.ok) throw new Error('HTTP ' + res.status)

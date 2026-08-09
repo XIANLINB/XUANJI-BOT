@@ -1,6 +1,7 @@
 package dev.xuanji.core.storage.log;
 
 import com.zaxxer.hikari.HikariDataSource;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -9,6 +10,7 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import javax.sql.DataSource;
+import java.util.Map;
 
 /**
  * 双数据源配置：
@@ -45,6 +47,29 @@ public class LogDbConfig {
     @Value("${spring.datasource.password:}")
     private String bizPassword;
 
+    /** 延迟取 ConfigService，避免 DataSource→JdbcTemplate→ConfigService→DataSource 循环依赖。 */
+    private final ObjectProvider<dev.xuanji.core.config.ConfigService> configProvider;
+
+    public LogDbConfig(ObjectProvider<dev.xuanji.core.config.ConfigService> configProvider) {
+        this.configProvider = configProvider;
+    }
+
+    /** 读 tune.* 池大小配置，未配置/非法用默认值。 */
+    private int poolSize(String key, int def) {
+        try {
+            dev.xuanji.core.config.ConfigService cs = configProvider.getIfAvailable();
+            if (cs != null) {
+                Map<String, String> g = cs.getGlobalConfig();
+                String v = g.get(key);
+                if (v != null && !v.isBlank()) {
+                    int n = Integer.parseInt(v.trim());
+                    if (n > 0) return n;
+                }
+            }
+        } catch (Exception ignored) { /* 默认 */ }
+        return def;
+    }
+
     // ===================== 日志库（独立文件，显式限定名） =====================
 
     @Bean
@@ -55,7 +80,7 @@ public class LogDbConfig {
         ds.setUsername(logUsername);
         ds.setPassword(logPassword);
         ds.setMinimumIdle(1);
-        ds.setMaximumPoolSize(3);
+        ds.setMaximumPoolSize(poolSize("tune.hikari_log_max", 3));
         return ds;
     }
 
@@ -75,7 +100,7 @@ public class LogDbConfig {
         ds.setUsername(bizUsername);
         ds.setPassword(bizPassword);
         ds.setMinimumIdle(1);
-        ds.setMaximumPoolSize(5);
+        ds.setMaximumPoolSize(poolSize("tune.hikari_main_max", 5));
         return ds;
     }
 

@@ -9,10 +9,12 @@ const Friends = () => import('../views/Friends.vue')
 const GroupMessages = () => import('../views/GroupMessages.vue')
 const C2cMessages = () => import('../views/C2cMessages.vue')
 const Events = () => import('../views/Events.vue')
+const Monitor = () => import('../views/Monitor.vue')
 const Database = () => import('../views/Database.vue')
 const Logs = () => import('../views/Logs.vue')
 const Health = () => import('../views/Health.vue')
 const Settings = () => import('../views/Settings.vue')
+const Tune = () => import('../views/Tune.vue')
 const Setup = () => import('../views/Setup.vue')
 const Login = () => import('../views/Login.vue')
 const Plugins = () => import('../views/PluginPage.vue')
@@ -24,9 +26,19 @@ const Stats = () => import('../views/Stats.vue')
 const Cache = () => import('../views/Cache.vue')
 const Files = () => import('../views/Files.vue')
 const Alert = () => import('../views/Alert.vue')
-const Risk = () => import('../views/Risk.vue')
 const Permission = () => import('../views/Permission.vue')
 const OneBot = () => import('../views/OneBot.vue')
+const AiConfig = () => import('../views/AiConfig.vue')
+const AiChat = () => import('../views/AiChat.vue')
+const AiPersonas = () => import('../views/AiPersonas.vue')
+const AiUsage = () => import('../views/AiUsage.vue')
+const AiTools = () => import('../views/AiTools.vue')
+const AiMcp = () => import('../views/AiMcp.vue')
+const AiKb = () => import('../views/AiKb.vue')
+const AiAudit = () => import('../views/AiAudit.vue')
+const AiSummary = () => import('../views/AiSummary.vue')
+const AiMemory = () => import('../views/AiMemory.vue')
+const AiProviders = () => import('../views/AiProviders.vue')
 
 export const routes = [
   { path: '/', redirect: '/dashboard' },
@@ -41,7 +53,8 @@ export const routes = [
     children: [
       { path: 'stats', name: 'stats', component: Stats, meta: { title: '聚合统计' } },
       { path: 'cache', name: 'cache', component: Cache, meta: { title: '缓存清理' } },
-      { path: 'files', name: 'files', component: Files, meta: { title: '文件存储' } }
+      { path: 'files', name: 'files', component: Files, meta: { title: '文件存储' } },
+      { path: 'events', name: 'events', component: Events, meta: { title: '系统事件' } }
     ]
   },
   {
@@ -97,22 +110,34 @@ export const routes = [
       { path: 'security', name: 'security', component: Security, meta: { title: '安全管理' } },
       { path: 'health', name: 'health', component: Health, meta: { title: '运行健康' } },
       { path: 'backup', name: 'backup', component: Backup, meta: { title: '备份恢复' } },
-      { path: 'alert', name: 'alert', component: Alert, meta: { title: '预警中心' } },
-      { path: 'risk', name: 'risk', component: Risk, meta: { title: '风控中心' } }
+      { path: 'alert', name: 'alert', component: Alert, meta: { title: '预警中心' } }
     ]
   },
-  {
-    path: '/logs-center',
-    name: 'logs-center',
-    redirect: '/logs-center/logs',
-    meta: { title: '日志中心' },
-    children: [
-      { path: 'logs', name: 'logs', component: Logs, meta: { title: '运行日志' } },
-      { path: 'events', name: 'events', component: Events, meta: { title: '事件日志' } }
-    ]
-  },
+  { path: '/logs', name: 'logs', component: Logs, meta: { title: '运行日志' } },
+  { path: '/monitor', name: 'monitor', component: Monitor, meta: { title: '消息监控' } },
+  { path: '/tune', name: 'tune', component: Tune, meta: { title: '性能模板' } },
   { path: '/scheduler', name: 'scheduler', component: Scheduler, meta: { title: '定时任务' } },
-  { path: '/settings', name: 'settings', component: Settings, meta: { title: '运行设置' } },
+  { path: '/settings', name: 'settings', component: Settings, meta: { title: '框架配置' } },
+  {
+    path: '/ai',
+    name: 'ai-admin',
+    redirect: '/ai/config',
+    meta: { title: 'AI 能力' },
+    children: [
+      // 子页随阶段逐个加：P0 AI 设置；P1 AI 对话 / 人格管理；P1.5 用量统计
+      { path: 'providers', name: 'ai-providers', component: AiProviders, meta: { title: '供应商管理' } },
+      { path: 'config', name: 'ai-config', component: AiConfig, meta: { title: 'AI 设置' } },
+      { path: 'chat', name: 'ai-chat', component: AiChat, meta: { title: 'AI 对话' } },
+      { path: 'personas', name: 'ai-personas', component: AiPersonas, meta: { title: '人格管理' } },
+      { path: 'usage', name: 'ai-usage', component: AiUsage, meta: { title: '用量统计' } },
+      { path: 'tools', name: 'ai-tools', component: AiTools, meta: { title: 'AI 工具' } },
+      { path: 'mcp', name: 'ai-mcp', component: AiMcp, meta: { title: 'MCP 服务' } },
+      { path: 'kb', name: 'ai-kb', component: AiKb, meta: { title: '知识库' } },
+      { path: 'audit', name: 'ai-audit', component: AiAudit, meta: { title: 'AI 审核' } },
+      { path: 'summary', name: 'ai-summary', component: AiSummary, meta: { title: 'AI 日报' } },
+      { path: 'memory', name: 'ai-memory', component: AiMemory, meta: { title: 'AI 记忆' } }
+    ]
+  },
   // 旧路径重定向（菜单重构前收藏的地址仍可用）
   { path: '/groups', redirect: '/chat-groups/list' },
   { path: '/friends', redirect: '/chat-c2c/friends' },
@@ -125,8 +150,14 @@ export const routes = [
   { path: '/security', redirect: '/ops/security' },
   { path: '/health', redirect: '/ops/health' },
   { path: '/backup', redirect: '/ops/backup' },
-  { path: '/logs', redirect: '/logs-center/logs' },
-  { path: '/events', redirect: '/logs-center/events' }
+  { path: '/logs-center', redirect: '/logs' },
+  { path: '/logs-center/logs', redirect: '/logs' },
+  { path: '/logs-center/events', redirect: '/data/events' },
+  { path: '/events', redirect: '/data/events' },
+  { path: '/ops/audit', redirect: '/ops/security' },
+  { path: '/logs-center/audit', redirect: '/ops/security' },
+  { path: '/ops/risk', redirect: '/ops/security' },
+  { path: '/risk', redirect: '/ops/security' }
 ]
 
 export const router = createRouter({

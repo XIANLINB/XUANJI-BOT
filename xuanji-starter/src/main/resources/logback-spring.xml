@@ -7,7 +7,7 @@
         </encoder>
     </appender>
 
-    <!-- 文件输出：JSON 结构化 -->
+    <!-- 文件输出：文本可读（移除 logstash JSON 编码器，换取 jar 体积 -4MB 并去掉 Jackson 2 依赖） -->
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>logs/xuanji-bot.log</file>
         <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
@@ -16,22 +16,8 @@
             <maxHistory>7</maxHistory>
             <totalSizeCap>500MB</totalSizeCap>
         </rollingPolicy>
-        <encoder class="net.logstash.logback.encoder.LoggingEventCompositeJsonEncoder">
-            <providers>
-                <timestamp/>
-                <message/>
-                <loggerName/>
-                <threadName/>
-                <logLevel/>
-                <mdc/>
-                <stackTrace>
-                    <fieldName>stack</fieldName>
-                    <throwableConverter class="net.logstash.logback.stacktrace.ShortenedThrowableConverter">
-                        <maxDepthPerThrowable>30</maxDepthPerThrowable>
-                        <rootCauseFirst>true</rootCauseFirst>
-                    </throwableConverter>
-                </stackTrace>
-            </providers>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %-40logger{36} - %msg%n</pattern>
         </encoder>
     </appender>
 

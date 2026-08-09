@@ -4,11 +4,12 @@ import { useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import {
   NCard, NSteps, NStep, NForm, NFormItem, NInput, NSwitch, NRadioGroup,
-  NRadioButton, NButton, NAlert, NText, NIcon, NResult, NSpace
+  NRadioButton, NButton, NAlert, NText, NIcon, NDivider, NGradientText,
+  NSpace
 } from 'naive-ui'
 import {
-  ColorPaletteOutline, KeyOutline, RocketOutline, CheckmarkCircleOutline,
-  OptionsOutline, ArrowForwardOutline
+  RocketOutline, KeyOutline, CheckmarkCircleOutline,
+  OptionsOutline, ArrowForwardOutline, SparklesOutline, ShieldCheckmarkOutline
 } from '@vicons/ionicons5'
 import api from '../api'
 import { brand } from '../theme'
@@ -26,7 +27,6 @@ const pinForm = reactive({ pin: '', confirm: '' })
 const pinError = ref('')
 
 function onPinInput(value: string, field: 'pin' | 'confirm') {
-  // 仅允许数字，最多 6 位
   const cleaned = value.replace(/\D/g, '').slice(0, 6)
   pinForm[field] = cleaned
   pinError.value = ''
@@ -75,9 +75,7 @@ async function finish() {
       message.error(r.error)
       return
     }
-    // 告知路由守卫：已完成，放行
     ;(window as any).__xuanjiSetupDone = true
-    // 初始化刚设的 PIN 直接用于登录，下发会话 cookie，避免再手动输一次
     try {
       const login = await api.authLogin({ pin: pinForm.pin })
       if (login.error) throw new Error(login.error)
@@ -121,7 +119,6 @@ async function saveAndEnter() {
       message.error(r.error)
       return
     }
-    // 向导写入的是数据库，需触发 reload 端点从库拉起 WS（与机器人管理页保存后的行为一致）
     try {
       await api.reloadBots()
       message.success('机器人已写入并启用，正在进入控制台')
@@ -135,34 +132,55 @@ async function saveAndEnter() {
     botLoading.value = false
   }
 }
+
+const setupSteps = [
+  { title: '设置访问口令', description: '必填' },
+  { title: '绑定机器人', description: '可选' }
+]
 </script>
 
 <template>
   <div class="setup-root">
-    <div class="setup-bg" />
+    <div class="setup-bg">
+      <div class="bg-blob bg-blob-1" />
+      <div class="bg-blob bg-blob-2" />
+      <div class="bg-blob bg-blob-3" />
+    </div>
+
     <NCard class="setup-card" :bordered="false">
-      <!-- 品牌头 -->
-      <div class="brand">
-        <NIcon size="26" :color="brand.primary"><ColorPaletteOutline /></NIcon>
-        <span class="brand-text">璇玑控制台 · 初始化引导</span>
+      <div class="brand-row">
+        <div class="brand-icon">
+          <NIcon size="32" :color="brand.primary"><RocketOutline /></NIcon>
+        </div>
+        <div class="brand-text">
+          <NGradientText :gradient="{ deg: 90, from: '#5b5bd6', to: '#2090e0' }" :size="20" style="font-weight: 800; letter-spacing: 1px">
+            璇玑控制台 · 初始化引导
+          </NGradientText>
+          <NText depth="3" style="display: block; font-size: 12px; margin-top: 2px">
+            Xuanji Bot Framework · First-time Setup
+          </NText>
+        </div>
       </div>
 
+      <NDivider style="margin: 14px 0 18px" />
+
       <NSteps :current="current" class="steps" size="small">
-        <NStep title="设置访问口令" :description="'必填'" />
-        <NStep title="绑定机器人" :description="'可选'" />
+        <NStep v-for="(s, i) in setupSteps" :key="i" :title="s.title" :description="s.description" />
       </NSteps>
 
       <!-- 第一步 -->
       <div v-if="current === 1" class="step-body">
         <div class="step-head">
-          <NIcon size="22" :color="brand.primary"><KeyOutline /></NIcon>
-          <NText strong style="font-size: 16px">设置 6 位访问口令</NText>
+          <div class="step-icon" style="background: rgba(91, 91, 214, 0.12); color: #5b5bd6">
+            <NIcon size="18"><KeyOutline /></NIcon>
+          </div>
+          <div>
+            <NText strong style="font-size: 15px; display: block">设置 6 位访问口令</NText>
+            <NText depth="3" style="font-size: 12px">系统自动生成随机盐 + PBKDF2 加盐哈希，原始口令不会落盘</NText>
+          </div>
         </div>
-        <NText depth="3" class="lead">
-          该口令用于控制台访问，系统会自动生成随机盐并使用 PBKDF2 加盐哈希后存储，原始口令不会落盘。
-        </NText>
 
-        <NForm class="form">
+        <NForm class="form" @submit.prevent="nextFromPin">
           <NFormItem label="访问口令（6 位数字）">
             <NInput
               :value="pinForm.pin"
@@ -171,6 +189,7 @@ async function saveAndEnter() {
               show-password-on="click"
               placeholder="例如 123456"
               :maxlength="6"
+              size="large"
               :input-props="{ inputmode: 'numeric' }"
             />
           </NFormItem>
@@ -182,10 +201,14 @@ async function saveAndEnter() {
               show-password-on="click"
               placeholder="再次输入 6 位数字"
               :maxlength="6"
+              size="large"
               :input-props="{ inputmode: 'numeric' }"
             />
           </NFormItem>
-          <NAlert v-if="pinError" type="error" :show-icon="true">{{ pinError }}</NAlert>
+          <NAlert v-if="pinError" type="error" :show-icon="true" style="margin-bottom: 10px">{{ pinError }}</NAlert>
+          <NAlert v-else-if="pinForm.confirm && pinValid" type="success" :show-icon="true" style="margin-bottom: 10px">
+            两次输入一致，可以继续
+          </NAlert>
         </NForm>
 
         <div class="actions">
@@ -196,7 +219,7 @@ async function saveAndEnter() {
             :loading="pinLoading"
             @click="nextFromPin"
           >
-            下一步
+            下一步：绑定机器人
             <template #icon><NIcon><ArrowForwardOutline /></NIcon></template>
           </NButton>
         </div>
@@ -205,12 +228,14 @@ async function saveAndEnter() {
       <!-- 第二步 -->
       <div v-else class="step-body">
         <div class="step-head">
-          <NIcon size="22" :color="brand.primary"><RocketOutline /></NIcon>
-          <NText strong style="font-size: 16px">绑定机器人（可选）</NText>
+          <div class="step-icon" style="background: rgba(32, 144, 224, 0.12); color: #2090e0">
+            <NIcon size="18"><RocketOutline /></NIcon>
+          </div>
+          <div>
+            <NText strong style="font-size: 15px; display: block">绑定机器人（可选）</NText>
+            <NText depth="3" style="font-size: 12px">现在绑定或跳过，稍后在「机器人管理」页面添加</NText>
+          </div>
         </div>
-        <NText depth="3" class="lead">
-          现在可以绑定一个 QQ/OneBot 机器人，也可以直接跳过，稍后在「机器人管理」页面添加。
-        </NText>
 
         <NForm class="form">
           <NFormItem label="AppID">
@@ -282,10 +307,15 @@ async function saveAndEnter() {
       </div>
 
       <div class="foot">
-        <NIcon size="14" :color="brand.success"><CheckmarkCircleOutline /></NIcon>
+        <NIcon size="13" color="#18a058"><ShieldCheckmarkOutline /></NIcon>
         <NText depth="3" style="font-size: 12px">框架开发阶段 · 数据目录可随时清空重走流程</NText>
       </div>
     </NCard>
+
+    <div class="setup-footer">
+      <NIcon size="12" color="#86909c"><SparklesOutline /></NIcon>
+      <NText depth="3" style="font-size: 11.5px">璇玑机器人框架 · 多平台 · Spring Boot · H2 嵌入式</NText>
+    </div>
   </div>
 </template>
 
@@ -294,64 +324,93 @@ async function saveAndEnter() {
   position: relative;
   min-height: 100vh;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background: var(--n-color);
+  background: linear-gradient(135deg, #f6f8fc 0%, #eef1f7 100%);
 }
 .setup-bg {
   position: absolute;
   inset: 0;
-  background:
-    radial-gradient(900px 500px at 15% 10%, rgba(91, 91, 214, 0.12), transparent 60%),
-    radial-gradient(800px 500px at 90% 90%, rgba(32, 144, 224, 0.12), transparent 60%);
+  overflow: hidden;
+  pointer-events: none;
+}
+.bg-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.35;
+}
+.bg-blob-1 {
+  width: 520px;
+  height: 520px;
+  top: -160px;
+  left: -120px;
+  background: radial-gradient(circle, #5b5bd6, transparent);
+}
+.bg-blob-2 {
+  width: 460px;
+  height: 460px;
+  bottom: -180px;
+  right: -100px;
+  background: radial-gradient(circle, #2090e0, transparent);
+}
+.bg-blob-3 {
+  width: 360px;
+  height: 360px;
+  top: 40%;
+  right: 30%;
+  background: radial-gradient(circle, #18a058, transparent);
+  opacity: 0.22;
 }
 .setup-card {
   position: relative;
-  width: 480px;
+  z-index: 1;
+  width: 520px;
   max-width: 92vw;
   border-radius: 18px;
-  box-shadow: 0 18px 50px rgba(20, 30, 60, 0.14);
-  padding: 26px 26px 18px;
+  box-shadow: 0 24px 60px rgba(20, 30, 60, 0.12), 0 2px 8px rgba(20, 30, 60, 0.04);
+  padding: 28px 28px 22px;
 }
-.brand {
+.brand-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 18px;
+  gap: 14px;
 }
-.brand-text {
-  font-weight: 800;
-  font-size: 17px;
-  letter-spacing: 0.5px;
-  background: linear-gradient(90deg, #5b5bd6, #2090e0);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
+.brand-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(91, 91, 214, 0.12), rgba(32, 144, 224, 0.12));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
-.steps {
-  margin-bottom: 18px;
-}
-.step-body {
-  padding: 4px 0;
-}
+.brand-text { min-width: 0; }
+.steps { margin-bottom: 18px; }
+.step-body { padding: 4px 0; }
 .step-head {
   display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  background: rgba(128, 128, 128, 0.04);
+  border-radius: 10px;
+}
+.step-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
+  justify-content: center;
+  flex-shrink: 0;
 }
-.lead {
-  display: block;
-  line-height: 1.7;
-  margin-bottom: 16px;
-}
-.form {
-  margin-top: 6px;
-}
-.actions {
-  margin-top: 18px;
-}
+.form { margin-top: 4px; }
+.actions { margin-top: 18px; }
 .foot {
   display: flex;
   align-items: center;
@@ -360,5 +419,14 @@ async function saveAndEnter() {
   margin-top: 16px;
   padding-top: 12px;
   border-top: 1px solid var(--n-border-color);
+}
+.setup-footer {
+  position: relative;
+  z-index: 1;
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0.7;
 }
 </style>

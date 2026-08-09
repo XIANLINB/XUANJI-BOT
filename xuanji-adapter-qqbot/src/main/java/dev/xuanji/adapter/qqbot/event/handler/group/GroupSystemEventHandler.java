@@ -6,7 +6,7 @@ import dev.xuanji.core.storage.log.MessageLogger;
 import dev.xuanji.core.config.XuanjiRobotProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.ObjectNode;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 

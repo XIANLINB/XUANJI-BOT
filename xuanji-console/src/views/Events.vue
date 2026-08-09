@@ -2,15 +2,16 @@
 import { ref, onMounted, onUnmounted, computed, h } from 'vue'
 import {
   NDataTable, NSelect, NButton, NAlert, NSpace, NIcon, NText,
-  NTag, NEmpty, NSpin, NSwitch, useMessage
+  NTag, NEmpty, NSpin, NSwitch, NCard, NGrid, NGi, NNumberAnimation,
+  NGradientText, useMessage, type DataTableColumns
 } from 'naive-ui'
-import type { DataTableColumns } from 'naive-ui'
-import { FlashOutline, PulseOutline, DownloadOutline } from '@vicons/ionicons5'
+import { FlashOutline, PulseOutline, DownloadOutline, RefreshOutline } from '@vicons/ionicons5'
 import api from '../api'
 import { openStream } from '../api/http'
 import { useBots } from '../composables/useBots'
 import dayjs from 'dayjs'
 import { exportCsv, exportJson } from '../utils/export'
+import StatCard from '../components/StatCard.vue'
 
 const { bots, loadBots } = useBots()
 
@@ -20,7 +21,7 @@ const err = ref('')
 const loading = ref(false)
 const message = useMessage()
 
-// ══════ 日期筛选 + 导出（批次6） ══════
+// ══════ 日期筛选 + 导出 ══════
 const dateFilter = ref(0)
 const RANGE_OPTIONS = [
   { label: '全部时间', value: 0 },
@@ -56,7 +57,7 @@ function exportEvents(format: 'csv' | 'json') {
   message.success(`已导出 ${data.length} 条（${format.toUpperCase()}）`)
 }
 
-// 事件类型 → 中文标签（后端已过滤消息类事件，这里只做展示映射）
+// 事件类型 → 中文标签 + 配色
 const TYPE_LABEL: Record<string, string> = {
   GROUP_ADD_ROBOT: '机器人入群',
   GROUP_DEL_ROBOT: '机器人退群',
@@ -72,6 +73,14 @@ const TYPE_LABEL: Record<string, string> = {
   GROUP_MESSAGE_CREATE: '群消息',
   GROUP_AT_MESSAGE_CREATE: '群@消息',
   C2C_MESSAGE_CREATE: '单聊消息'
+}
+const TYPE_COLOR: Record<string, 'success' | 'error' | 'warning' | 'info' | 'default'> = {
+  GROUP_ADD_ROBOT: 'success', GROUP_DEL_ROBOT: 'error',
+  GROUP_MEMBER_ADD: 'success', GROUP_MEMBER_REMOVE: 'warning',
+  GROUP_JOIN_REQUEST: 'warning', GROUP_MSG_REJECT: 'error', GROUP_MSG_RECEIVE: 'info',
+  FRIEND_ADD: 'success', FRIEND_DEL: 'error',
+  C2C_MSG_REJECT: 'error', C2C_MSG_RECEIVE: 'info',
+  GROUP_MESSAGE_CREATE: 'info', GROUP_AT_MESSAGE_CREATE: 'success', C2C_MESSAGE_CREATE: 'info'
 }
 
 function fmtTime(v: unknown): string {
@@ -98,7 +107,7 @@ async function load() {
   }
 }
 
-// ══════ 实时消息处理流水（SSE，与上方 DB 系统事件表互补） ══════
+// ══════ 实时消息处理流水（SSE） ══════
 const EVENTS_LIVE_KEY = 'xuanji.events.live'
 const live = ref(localStorage.getItem(EVENTS_LIVE_KEY) === 'true')
 const liveEvents = ref<any[]>([])
@@ -135,22 +144,37 @@ function textCell(v: unknown, max = 200) {
   return h('span', { title: s, style: 'cursor: help; word-break: break-all' }, s.length > max ? s.slice(0, max) + '…' : s)
 }
 
+// ══════ 统计卡 ══════
+const statCards = computed(() => {
+  const today0 = dayjs().startOf('day').unix()
+  const today = rows.value.filter((r) => Number(r.CREATE_TIME) >= today0).length
+  const memberEvt = rows.value.filter((r) => ['GROUP_ADD_ROBOT', 'GROUP_DEL_ROBOT', 'GROUP_MEMBER_ADD', 'GROUP_MEMBER_REMOVE'].includes(r.EVENT_TYPE)).length
+  const friendEvt = rows.value.filter((r) => ['FRIEND_ADD', 'FRIEND_DEL'].includes(r.EVENT_TYPE)).length
+  return [
+    { key: 'total', label: '事件总数', val: rows.value.length, color: '#5b5bd6', icon: FlashOutline },
+    { key: 'today', label: '今日事件', val: today, color: '#07c160', icon: RefreshOutline },
+    { key: 'member', label: '群成员变动', val: memberEvt, color: '#fa8c16', icon: PulseOutline },
+    { key: 'friend', label: '好友变动', val: friendEvt, color: '#2090e0', icon: DownloadOutline }
+  ]
+})
+
 const columns = computed<DataTableColumns>(() => [
   {
     title: '时间', key: 'CREATE_TIME', width: 170,
-    render: (row: any) => h('span', { style: 'font-variant-numeric: tabular-nums' }, fmtTime(row.CREATE_TIME))
+    render: (row: any) => h('span', { style: 'font-variant-numeric: tabular-nums; color: #86909c' }, fmtTime(row.CREATE_TIME))
   },
   {
-    title: '事件类型', key: 'EVENT_TYPE', width: 150,
+    title: '事件类型', key: 'EVENT_TYPE', width: 140,
     render: (row: any) => {
       const raw = row.EVENT_TYPE || '—'
-      return h(NTag, { size: 'small', type: 'info', bordered: false }, { default: () => TYPE_LABEL[raw] || raw })
+      return h(NTag, { size: 'small', round: true, bordered: false, type: TYPE_COLOR[raw] ?? 'default' },
+        { default: () => TYPE_LABEL[raw] || raw })
     }
   },
-  { title: '群', key: 'GROUP_ID', minWidth: 200, render: (row: any) => textCell(row.GROUP_ID, 60) },
-  { title: '用户', key: 'USER_ID', minWidth: 200, render: (row: any) => textCell(row.USER_ID, 60) },
-  { title: 'Bot', key: 'BOT_APPID', width: 140, render: (row: any) => textCell(row.BOT_APPID, 30) },
-  { title: '原始数据', key: 'RAW_JSON', minWidth: 300, render: (row: any) => textCell(row.RAW_JSON, 120) }
+  { title: '群', key: 'GROUP_ID', width: 180, ellipsis: { tooltip: true }, render: (row: any) => textCell(row.GROUP_ID, 60) },
+  { title: '用户', key: 'USER_ID', width: 180, ellipsis: { tooltip: true }, render: (row: any) => textCell(row.USER_ID, 60) },
+  { title: 'Bot', key: 'BOT_APPID', width: 130, ellipsis: { tooltip: true }, render: (row: any) => h('span', { style: 'font-variant-numeric: tabular-nums' }, textCell(row.BOT_APPID, 30)) },
+  { title: '原始数据', key: 'RAW_JSON', width: 320, ellipsis: { tooltip: true }, render: (row: any) => textCell(row.RAW_JSON, 120) }
 ])
 
 const pagination = computed(() =>
@@ -171,20 +195,22 @@ onUnmounted(stopStream)
   <div>
     <div class="page-head">
       <div class="page-title">
-        <NIcon size="20" color="#18a058"><FlashOutline /></NIcon>
-        <span>事件日志</span>
+        <NGradientText :gradient="{ deg: 90, from: '#18a058', to: '#2090e0' }" :size="18" style="font-weight: 700">
+          系统事件
+        </NGradientText>
         <NText depth="3" style="font-size: 13px">共 {{ filteredRows.length }} 条</NText>
       </div>
-      <NSpace align="center" :size="8">
+      <NSpace align="center" :size="8" wrap>
         <NSelect
           v-model:value="botFilter"
           :options="bots"
           placeholder="按 Bot 过滤"
           clearable
+          size="small"
           style="width: 170px"
           @update:value="load"
         />
-        <NSelect v-model:value="dateFilter" :options="RANGE_OPTIONS" style="width: 110px" />
+        <NSelect v-model:value="dateFilter" :options="RANGE_OPTIONS" size="small" style="width: 110px" />
         <NSpace align="center" :size="6">
           <NSwitch v-model:value="live" size="small" @update:value="toggleLive" />
           <NIcon size="14" color="#18a058"><PulseOutline /></NIcon>
@@ -198,9 +224,19 @@ onUnmounted(stopStream)
           <template #icon><NIcon><DownloadOutline /></NIcon></template>
           JSON
         </NButton>
-        <NButton type="primary" :loading="loading" @click="load">刷新</NButton>
+        <NButton size="small" type="primary" :loading="loading" @click="load">
+          <template #icon><NIcon><RefreshOutline /></NIcon></template>
+          刷新
+        </NButton>
       </NSpace>
     </div>
+
+    <!-- 统计卡 -->
+    <NGrid :cols="24" :x-gap="12" :y-gap="12" responsive="screen" item-responsive style="margin-bottom: 16px">
+      <NGi v-for="c in statCards" :key="c.key" span="24 s:12 m:6">
+        <StatCard :icon="c.icon" :color="c.color" :value="c.val" :label="c.label" :duration="800" />
+      </NGi>
+    </NGrid>
 
     <NAlert v-if="err" type="error" :title="'加载失败'" style="margin-bottom: 16px">{{ err }}</NAlert>
 
@@ -214,7 +250,7 @@ onUnmounted(stopStream)
       <div class="live-box">
         <div v-for="(e, i) in liveEvents" :key="i" class="live-row">
           <span class="live-time">{{ (e.time || '').slice(11, 19) || '--:--:--' }}</span>
-          <span class="live-badge">{{ e.level }}</span>
+          <span class="live-badge" :class="'lv-' + String(e.level).toLowerCase()">{{ e.level }}</span>
           <span class="live-cat">{{ e.category }}</span>
           <span v-if="e.botId" class="live-bot">{{ e.botId }}</span>
           <span class="live-msg">{{ e.message }}</span>
@@ -234,10 +270,10 @@ onUnmounted(stopStream)
         :columns="columns"
         :data="filteredRows"
         :pagination="pagination"
-        :max-height="600"
+        :bordered="false"
         size="small"
         striped
-        :scroll-x="1200"
+        style="margin-bottom: 12px"
       />
     </NSpin>
   </div>
@@ -255,9 +291,7 @@ onUnmounted(stopStream)
 .page-title {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 16px;
-  font-weight: 600;
+  gap: 10px;
 }
 .ctl-label {
   color: #8a93a6;
@@ -306,6 +340,10 @@ onUnmounted(stopStream)
   font-size: 0.82em;
   margin-right: 8px;
 }
+.live-badge.lv-info { background: rgba(24, 160, 88, 0.25); color: #6fdba6; }
+.live-badge.lv-warn { background: rgba(240, 160, 32, 0.25); color: #f5c066; }
+.live-badge.lv-error { background: rgba(229, 72, 77, 0.25); color: #f59aa0; }
+.live-badge.lv-debug { background: rgba(128, 128, 128, 0.22); color: #aab4c0; }
 .live-cat { color: #7a8aa0; margin-right: 8px; }
 .live-bot { color: #8ab4f8; margin-right: 8px; }
 .live-msg { font-weight: 500; }

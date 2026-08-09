@@ -1,6 +1,6 @@
 package dev.xuanji.adapter.qqbot.console;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.ObjectNode;
 import dev.xuanji.adapter.qqbot.api.MessageSender;
 import dev.xuanji.adapter.qqbot.storage.QqBotRepository;
 import dev.xuanji.api.json.Json;
@@ -116,8 +116,8 @@ public class ChatController {
             messageSender.runWithRobotContext(bot, () -> {
                 boolean group = "group".equalsIgnoreCase(targetType);
                 box[0] = group
-                        ? messageSender.uploadAndSendGroupMediaFile(bot, envOf(bot), targetId, fileType, data, filename, null)
-                        : messageSender.uploadAndSendC2cMediaFile(bot, envOf(bot), targetId, fileType, data, filename, null);
+                        ? messageSender.uploadAndSendGroupMediaData(bot, envOf(bot), targetId, fileType, data, null)
+                        : messageSender.uploadAndSendC2cMediaData(bot, envOf(bot), targetId, fileType, data, null);
             });
             log.info("[Chat] 富媒体发送成功: bot={} {} {} type={} file={}", bot, targetType, targetId, fileType, filename);
             return Map.of("status", "ok", "msgId",

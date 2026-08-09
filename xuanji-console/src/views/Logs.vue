@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { NCard, NSpace, NButton, NInputNumber, NSelect, NSwitch, NIcon, NEmpty, NTooltip, useMessage } from 'naive-ui'
+import { NCard, NSpace, NButton, NInputNumber, NSelect, NSwitch, NIcon, NEmpty, NTooltip, NRadioGroup, NRadioButton, useMessage } from 'naive-ui'
 import { DocumentTextOutline, ReloadOutline, ArrowDownOutline, TimerOutline, PulseOutline, DownloadOutline } from '@vicons/ionicons5'
 import api from '../api'
 import { openStream } from '../api/http'
@@ -13,27 +13,44 @@ const { fillHeight } = useFillHeight(90)
 
 const message = useMessage()
 
-const lines = ref(100)
+const lines = ref(300)
 const raw = ref('')
 const err = ref('')
 const loading = ref(false)
 const autoScroll = ref(true)
 const fontSize = ref(13)
-const minLevel = ref('ALL')
+const minLevel = ref('INFO')
 
-// 轮询（live tail）：可手动开关与设置间隔；状态持久化到本地存储（切换页面不丢失）
-const LOGS_POLL_ENABLED_KEY = 'xuanji.logs.pollEnabled'
+// ══════ 自动更新模式：关闭 / 轮询 / 实时（SSE）三态单选 ══════
+// 轮询与实时是互斥的两种「自动更新」手段，合并为一个三态避免同时运行/状态打架
+const LOGS_MODE_KEY = 'xuanji.logs.mode'
+type UpdateMode = 'off' | 'poll' | 'realtime'
+function migrateMode(): UpdateMode {
+  const saved = localStorage.getItem(LOGS_MODE_KEY) as UpdateMode | null
+  if (saved === 'off' || saved === 'poll' || saved === 'realtime') return saved
+  // 旧版两个独立开关迁移：实时优先，其次轮询
+  const wasRealtime = localStorage.getItem('xuanji.logs.realtime') === 'true'
+  const wasPoll = localStorage.getItem('xuanji.logs.pollEnabled') === 'true'
+  if (wasRealtime) return 'realtime'
+  if (wasPoll) return 'poll'
+  return 'off'
+}
+const updateMode = ref<UpdateMode>(migrateMode())
+const MODE_OPTIONS = [
+  { label: '关闭', value: 'off' },
+  { label: '轮询', value: 'poll' },
+  { label: '实时(SSE)', value: 'realtime' }
+]
+
+// 轮询间隔（仅轮询模式生效）；状态持久化到本地存储
 const LOGS_POLL_SEC_KEY = 'xuanji.logs.pollSec'
-const pollEnabled = ref(localStorage.getItem(LOGS_POLL_ENABLED_KEY) === 'true') // 默认关
 const pollSec = ref(Number(localStorage.getItem(LOGS_POLL_SEC_KEY)) || 30) // 默认 30 秒
 let pollTimer: number | null = null
 
 // 追踪链路：点击某行 traceId 后，仅显示同一 traceId 的日志
 const traceFilter = ref('')
 
-// 实时流（SSE）：连接后服务端推送新增日志行；与轮询互斥，断开自动降级为轮询
-const REALTIME_KEY = 'xuanji.logs.realtime'
-const realtime = ref(localStorage.getItem(REALTIME_KEY) === 'true') // 默认关
+// 实时流（SSE）：连接后服务端推送新增日志行
 const streamEs = ref<EventSource | null>(null)
 const streamError = ref(false)
 const LIVE_CAP = 5000 // 实时累积行数上限，避免失控增长
@@ -191,7 +208,6 @@ async function load() {
 
 function startPoll() {
   stopPoll()
-  if (!pollEnabled.value) return
   pollTimer = window.setInterval(() => {
     if (document.visibilityState === 'hidden') return // 后台标签页不轮询，省资源
     load()
@@ -205,23 +221,38 @@ function stopPoll() {
 }
 
 watch(autoScroll, (v) => { if (v) scrollToBottom() })
-watch([pollEnabled, pollSec], () => {
-  localStorage.setItem(LOGS_POLL_ENABLED_KEY, String(pollEnabled.value))
+watch(updateMode, () => {
+  localStorage.setItem(LOGS_MODE_KEY, updateMode.value)
+  applyUpdateMode()
+})
+watch(pollSec, () => {
   localStorage.setItem(LOGS_POLL_SEC_KEY, String(pollSec.value))
-  startPoll()
+  if (updateMode.value === 'poll') startPoll()
 })
 
-// ══════ 实时流（SSE） ══════
-function startStream() {
+// ══════ 自动更新模式统一调度：off → 全停；poll → 轮询；realtime → SSE（异常降级轮询） ══════
+function applyUpdateMode() {
   stopStream()
   stopPoll()
+  streamError.value = false
+  if (updateMode.value === 'poll') {
+    startPoll()
+  } else if (updateMode.value === 'realtime') {
+    startStream()
+  }
+}
+
+function startStream() {
   const es = openStream()
   es.addEventListener('log', (e: MessageEvent) => appendLiveLine((e as MessageEvent).data))
   es.onopen = () => { streamError.value = false }
   es.onerror = () => {
     // EventSource 会自动重连；持续失败则降级为轮询保证可用性
     streamError.value = true
-    if (realtime.value && !pollEnabled.value) startPoll()
+    if (updateMode.value === 'realtime') {
+      updateMode.value = 'poll' // 自动降级并同步 UI 三态
+      message.warning('实时(SSE)连接异常，已自动降级为轮询模式')
+    }
   }
   streamEs.value = es
 }
@@ -243,27 +274,13 @@ function appendLiveLine(line: string) {
   if (autoScroll.value) scrollToBottom()
 }
 
-function toggleRealtime(v: boolean) {
-  realtime.value = v
-  localStorage.setItem(REALTIME_KEY, String(v))
-  if (v) {
-    startStream()
-  } else {
-    stopStream()
-    if (pollEnabled.value) startPoll()
-  }
-}
-
 function clickTrace(trace?: string) {
   if (!trace) return
   traceFilter.value = traceFilter.value === trace ? '' : trace
 }
 
 onMounted(() => {
-  load().then(() => {
-    if (realtime.value) startStream() // 若上次开启实时流，进入页面即恢复
-    else if (pollEnabled.value) startPoll()
-  })
+  load().then(applyUpdateMode) // 恢复上次的三态模式
 })
 onUnmounted(() => {
   stopStream()
@@ -328,24 +345,25 @@ const pollOptions = [
         </NSpace>
         <NTooltip trigger="hover">
           <template #trigger>
-            <NSpace align="center" :size="6">
-              <NSwitch v-model:value="pollEnabled" size="small" />
-              <NIcon size="14" color="#8a93a6"><TimerOutline /></NIcon>
-              <span class="ctl-label">轮询</span>
-            </NSpace>
+            <span class="ctl-label">自动更新</span>
           </template>
-          开启后按设定间隔自动拉取最新日志（live tail）。后台标签页不轮询。默认 30 秒，可在右侧设置。切换页面后开关状态会自动保留。
+          三态互斥：关闭 / 轮询（定时拉取，后台标签页暂停）/ 实时（SSE 服务端推送）。实时连接异常时自动降级为轮询。
         </NTooltip>
-        <NSelect v-model:value="pollSec" :options="pollOptions" style="width: 90px" :disabled="!pollEnabled" />
+        <NRadioGroup v-model:value="updateMode" size="small">
+          <NRadioButton v-for="opt in MODE_OPTIONS" :key="opt.value" :value="opt.value" :label="opt.label" />
+        </NRadioGroup>
+        <NSelect v-model:value="pollSec" :options="pollOptions" style="width: 90px" :disabled="updateMode !== 'poll'" />
         <NTooltip trigger="hover">
           <template #trigger>
-            <NSpace align="center" :size="6">
-              <NSwitch v-model:value="realtime" size="small" @update:value="toggleRealtime" />
-              <NIcon size="14" :color="streamError ? '#ffa94d' : '#18a058'"><PulseOutline /></NIcon>
-              <span class="ctl-label">实时</span>
-            </NSpace>
+            <span class="ctl-label" :style="{ color: updateMode === 'realtime' ? (streamError ? '#ffa94d' : '#18a058') : 'inherit' }">
+              <NIcon size="14" style="vertical-align:-2px; margin-right: 2px">
+                <PulseOutline v-if="updateMode === 'realtime'" />
+                <TimerOutline v-else />
+              </NIcon>
+              {{ updateMode === 'realtime' ? (streamError ? '实时异常' : '实时中') : updateMode === 'poll' ? '轮询中' : '已停止' }}
+            </span>
           </template>
-          开启后通过 SSE 实时接收新增日志行（服务端推送，无需轮询）。与轮询互斥；连接异常时自动降级为轮询。
+          {{ updateMode === 'realtime' ? 'SSE 实时接收新增日志行（服务端推送，无需轮询）' : updateMode === 'poll' ? `每 ${pollSec} 秒自动拉取最新日志（live tail）` : '未开启自动更新，可手动刷新' }}
         </NTooltip>
         <NButton type="primary" :loading="loading" @click="load">
           <template #icon><NIcon><ReloadOutline /></NIcon></template>

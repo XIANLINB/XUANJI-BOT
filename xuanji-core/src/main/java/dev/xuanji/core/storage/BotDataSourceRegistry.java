@@ -32,6 +32,25 @@ import java.util.concurrent.ConcurrentHashMap;
 public class BotDataSourceRegistry implements DisposableBean {
 
     private final Map<String, JdbcTemplate> cache = new ConcurrentHashMap<>();
+    /** 全局配置（tune.hikari_instance_max 读取实例库连接池上限，未配置默认 3）。 */
+    private final dev.xuanji.core.config.ConfigService configService;
+
+    public BotDataSourceRegistry(dev.xuanji.core.config.ConfigService configService) {
+        this.configService = configService;
+    }
+
+    /** 实例库连接池最大连接数：读 tune.hikari_instance_max，默认 3。 */
+    private int instancePoolMax() {
+        try {
+            var g = configService.getGlobalConfig();
+            String v = g.get("tune.hikari_instance_max");
+            if (v != null && !v.isBlank()) {
+                int n = Integer.parseInt(v.trim());
+                if (n > 0) return n;
+            }
+        } catch (Exception ignored) { /* 默认 3 */ }
+        return 3;
+    }
 
     /** 平台共享库 JdbcTemplate。 */
     public JdbcTemplate forPlatform(String platform) {
@@ -62,7 +81,7 @@ public class BotDataSourceRegistry implements DisposableBean {
             cfg.setUsername("sa");
             cfg.setPassword("");
             cfg.setPoolName("h2-" + k.replaceAll("[^a-zA-Z0-9]", "-"));
-            cfg.setMaximumPoolSize(3);
+            cfg.setMaximumPoolSize(instancePoolMax());
             cfg.setMinimumIdle(1);
             cfg.setIdleTimeout(60_000);
             cfg.setConnectionTimeout(5_000);

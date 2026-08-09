@@ -166,6 +166,16 @@ public class QqPlatformDataProvider implements PlatformDataProvider {
     }
 
     @Override
+    public Map<String, Long> groupVariation(String instanceId, long today0, long yday0, long now) {
+        return repo.groupVariation(instanceId, today0, yday0, now);
+    }
+
+    @Override
+    public Map<String, Long> friendVariation(String instanceId, long today0, long yday0, long now) {
+        return repo.friendVariation(instanceId, today0, yday0, now);
+    }
+
+    @Override
     public long countGroups(String instanceId) {
         return repo.countGroups(instanceId);
     }

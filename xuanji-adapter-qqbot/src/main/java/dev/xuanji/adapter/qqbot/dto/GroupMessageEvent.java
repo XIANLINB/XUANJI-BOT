@@ -42,6 +42,10 @@ public class GroupMessageEvent {
     /** 消息时间戳（ISO 8601 格式，如 "2026-07-29T17:32:06+08:00"） */
     private String timestamp;
 
+    /** 原始事件类型（GROUP_MESSAGE_CREATE / GROUP_AT_MESSAGE_CREATE，由 EventDispatcher 注入 _eventType） */
+    @JsonProperty("_eventType")
+    private String eventType;
+
     /** 群聊场景：群组的 OpenID（群消息时有值，单聊时为空） */
     @JsonProperty("group_openid")
     private String groupOpenid;
@@ -219,11 +223,22 @@ public class GroupMessageEvent {
     }
 
     /**
-     * 判断是否为 @当前机器人的消息
+     * 判断是否为 @当前机器人的消息。
+     *
+     * <p>两种订阅模式兼容：
+     * <ul>
+     *   <li><b>AT 消息模式</b>（{@code GROUP_AT_MESSAGE_CREATE}）：官方仅在下发 @机器人 消息，
+     *       且事件<b>不携带 mentions</b> → 事件类型本身即判定依据，恒为 true；</li>
+     *   <li><b>全量消息模式</b>（{@code GROUP_MESSAGE_CREATE}）：@机器人 时 mentions 含
+     *       {@code is_you=true}，未 @ 时无该标记 → 按 mentions 判定。</li>
+     * </ul>
      *
      * @return true=@了当前机器人，false=没有@或@了其他人
      */
     public boolean isAtBot() {
+        if ("GROUP_AT_MESSAGE_CREATE".equals(eventType)) {
+            return true; // AT 订阅模式：事件本身即 @机器人（无 mentions）
+        }
         if (mentions == null) return false;
         return mentions.stream().anyMatch(m -> Boolean.TRUE.equals(m.getIsYou()));
     }

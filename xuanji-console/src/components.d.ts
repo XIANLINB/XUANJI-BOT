@@ -10,14 +10,18 @@ declare module 'vue' {
   export interface GlobalComponents {
     CommonChart: typeof import('./components/CommonChart.vue')['default']
     ConsoleLayout: typeof import('./components/ConsoleLayout.vue')['default']
+    CronBuilder: typeof import('./components/CronBuilder.vue')['default']
     DataTable: typeof import('./components/DataTable.vue')['default']
-    NAlert: typeof import('naive-ui')['NAlert']
+    NFormItem: typeof import('naive-ui')['NFormItem']
     NGi: typeof import('naive-ui')['NGi']
     NGrid: typeof import('naive-ui')['NGrid']
     NInput: typeof import('naive-ui')['NInput']
+    NModal: typeof import('naive-ui')['NModal']
+    NSelect: typeof import('naive-ui')['NSelect']
     NSpace: typeof import('naive-ui')['NSpace']
     PageHero: typeof import('./components/PageHero.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    StatCard: typeof import('./components/StatCard.vue')['default']
   }
 }

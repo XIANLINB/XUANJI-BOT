@@ -1,6 +1,6 @@
 package dev.xuanji.adapter.qqbot.sender;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.ObjectNode;
 import dev.xuanji.adapter.qqbot.api.MessageSender;
 import dev.xuanji.api.sender.SendReceipt;
 import dev.xuanji.core.sender.BotPushSender;

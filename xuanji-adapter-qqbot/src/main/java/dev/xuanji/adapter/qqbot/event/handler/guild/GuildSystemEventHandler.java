@@ -3,7 +3,7 @@ package dev.xuanji.adapter.qqbot.event.handler.guild;
 import dev.xuanji.core.event.EventHandler;
 import dev.xuanji.core.event.EventMapping;
 import lombok.extern.slf4j.Slf4j;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.ObjectNode;
 import dev.xuanji.api.json.Json;
 import org.springframework.stereotype.Component;
 

@@ -1,6 +1,6 @@
 package dev.xuanji.adapter.onebot.converter;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import dev.xuanji.adapter.onebot.converter.OneBotEventTypes;
 import dev.xuanji.adapter.onebot.converter.OneBotMessageConverter;
 import dev.xuanji.api.adapter.Bot;

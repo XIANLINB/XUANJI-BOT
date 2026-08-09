@@ -1,7 +1,9 @@
 package dev.xuanji.console.controller;
 
+import dev.xuanji.console.service.AuditService;
 import dev.xuanji.core.permission.PermissionService;
 import dev.xuanji.core.web.XuanjiApi;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -20,6 +22,7 @@ import java.util.Map;
 public class ConsolePermissionController {
 
     private final PermissionService permissionService;
+    private final AuditService auditService;
 
     // ==================== 主人（BOT_MASTER） ====================
 
@@ -30,14 +33,17 @@ public class ConsolePermissionController {
     }
 
     @PostMapping("/owner")
-    public Map<String, String> setOwner(@RequestParam String botKey, @RequestParam String ownerOpenid) {
+    public Map<String, String> setOwner(@RequestParam String botKey, @RequestParam String ownerOpenid,
+                                        HttpServletRequest req) {
         permissionService.setOwner(botKey, ownerOpenid);
+        auditService.record("BOT_OWNER_SET", "bot=" + botKey + " 设置主人 openid=" + ownerOpenid, req);
         return Map.of("status", "ok");
     }
 
     @DeleteMapping("/owner")
-    public Map<String, String> clearOwner(@RequestParam String botKey) {
+    public Map<String, String> clearOwner(@RequestParam String botKey, HttpServletRequest req) {
         permissionService.clearOwner(botKey);
+        auditService.record("BOT_OWNER_CLEAR", "bot=" + botKey + " 清除主人", req);
         return Map.of("status", "ok");
     }
 
@@ -53,8 +59,12 @@ public class ConsolePermissionController {
     public Map<String, String> addBlacklist(@RequestParam String botKey,
                                             @RequestParam(required = false, defaultValue = "") String groupId,
                                             @RequestParam String userId,
-                                            @RequestParam(defaultValue = "") String reason) {
+                                            @RequestParam(defaultValue = "") String reason,
+                                            HttpServletRequest req) {
         permissionService.addBlacklist(botKey, groupId, userId, reason);
+        auditService.record("BLACKLIST_ADD",
+                "bot=" + botKey + (groupId.isBlank() ? "" : " group=" + groupId)
+                        + " 拉黑 user=" + userId + (reason.isBlank() ? "" : " 原因=" + reason), req);
         return Map.of("status", "ok");
     }
 
@@ -62,12 +72,17 @@ public class ConsolePermissionController {
     public Map<String, String> removeBlacklist(@RequestParam(required = false, defaultValue = "0") long id,
                                                @RequestParam(required = false) String botKey,
                                                @RequestParam(required = false) String groupId,
-                                               @RequestParam(required = false) String userId) {
+                                               @RequestParam(required = false) String userId,
+                                               HttpServletRequest req) {
         if (id > 0) {
             permissionService.removeBlacklistById(id);
         } else if (botKey != null && groupId != null && userId != null) {
             permissionService.removeBlacklist(botKey, groupId, userId);
         }
+        auditService.record("BLACKLIST_REMOVE",
+                "id=" + id + " bot=" + (botKey == null ? "" : botKey)
+                        + " group=" + (groupId == null ? "" : groupId)
+                        + " user=" + (userId == null ? "" : userId), req);
         return Map.of("status", "ok");
     }
 }

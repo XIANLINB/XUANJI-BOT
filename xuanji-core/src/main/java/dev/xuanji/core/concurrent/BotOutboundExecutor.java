@@ -15,11 +15,11 @@ import java.util.function.LongSupplier;
 import java.util.function.ToLongFunction;
 
 /**
- * 每 bot 出站执行器 — 串行队列 + 节奏控制（P2-E）。
+ * 每 bot 出站执行器 — 并发池 + 节奏控制（P2-E）。
  *
  * <h3>两种用法（共享同一条 per-bot 时间线）</h3>
  * <ul>
- *   <li>{@link #submit(String, Runnable)} — 异步 fire-and-forget：进入 per-bot 单线程队列，出队执行前补亏空睡眠，保证相邻出站间隔 ≥ 配置值</li>
+ *   <li>{@link #submit(String, Runnable)} — 异步 fire-and-forget：进入 per-bot 并发池（线程数 = {@code tune.out_threads_per_bot}，默认 1），出队执行前补亏空睡眠，保证相邻出站间隔 ≥ 配置值</li>
  *   <li>{@link #awaitPace(String)} — 同步等待：当前调用线程补亏空睡眠后立即返回（用于群管/请求处理等有返回值、不能入队的动作）</li>
  * </ul>
  *
@@ -38,12 +38,13 @@ public class BotOutboundExecutor implements DisposableBean {
     private final ToLongFunction<String> paceResolver;
     private final LongSupplier clock;
     private final Sleeper sleeper;
+    private volatile ConfigService configService;
 
     /** 每 key 上次发送时刻（nano）。异步与同步调用共用此时间线。 */
     private final Map<String, Long> lastSendNanos = new ConcurrentHashMap<>();
     /** 每 key 节奏锁：让异步队列线程与任意同步调用线程互斥地读改写 lastSendNanos。 */
     private final Map<String, Object> paceLocks = new ConcurrentHashMap<>();
-    /** 每 key 单线程串行队列（虚拟线程）。 */
+    /** 每 key 出站并发池（虚拟线程，线程数 = tune.out_threads_per_bot，默认 1）。 */
     private final Map<String, ExecutorService> executors = new ConcurrentHashMap<>();
     private final AtomicInteger seq = new AtomicInteger();
 
@@ -57,13 +58,14 @@ public class BotOutboundExecutor implements DisposableBean {
     public BotOutboundExecutor(ConfigService configService) {
         this(configService == null ? (key -> 0L) : (key -> configService.getOutboundPaceMs(key)),
                 System::nanoTime, Thread::sleep);
-        // 注册到监控：出站虚拟线程池（每 bot 一条串行队列）
+        this.configService = configService;
+        // 注册到监控：出站虚拟线程池（每 bot 一个并发池）
         ThreadPoolRegistry.register("出站虚拟线程池(每bot)", () -> {
             int n = executors.size();
             return new ThreadPoolRegistry.PoolInfo(
-                    "出站虚拟线程池(每bot)", "VirtualThread(串行队列)",
+                    "出站虚拟线程池(每bot)", "VirtualThread(每bot并发池)",
                     n, n, -1, n, -1, -1,
-                    "每 bot 1 条串行队列 + pace 节流；poolSize=已创建队列数");
+                    "每 bot 一个并发池（线程数=tune.out_threads_per_bot）+ pace 节流；poolSize=已创建池数");
         });
     }
 
@@ -72,9 +74,10 @@ public class BotOutboundExecutor implements DisposableBean {
         this.paceResolver = paceResolver != null ? paceResolver : key -> 0L;
         this.clock = clock != null ? clock : System::nanoTime;
         this.sleeper = sleeper != null ? sleeper : Thread::sleep;
+        this.configService = null;
     }
 
-    /** 异步提交：入 per-bot 单线程队列，出队执行前按 key 补亏空睡眠。 */
+    /** 异步提交：入 per-bot 并发池，出队执行前按 key 补亏空睡眠。 */
     public void submit(String botId, Runnable task) {
         String key = normalizeKey(botId);
         ExecutorService pool = executors.computeIfAbsent(key, this::newPool);
@@ -94,11 +97,22 @@ public class BotOutboundExecutor implements DisposableBean {
     }
 
     private ExecutorService newPool(String key) {
-        return Executors.newSingleThreadExecutor(r -> {
-            Thread t = Thread.ofVirtual().name("xuanji-out-" + key + "-" + seq.incrementAndGet())
+        // 每 bot 出站并发度：读全局 tune.out_threads_per_bot（默认 1 = 串行，与旧行为一致）
+        int threads = 1;
+        try {
+            String v = configService != null ? configService.getGlobalConfig().get("tune.out_threads_per_bot") : null;
+            if (v != null && !v.isBlank()) {
+                int n = Integer.parseInt(v.trim());
+                if (n >= 1) threads = n;
+            }
+        } catch (Exception ignored) { /* 非法值用默认 1 */ }
+        final int t = threads;
+        log.info("[Outbound] 创建出站池: key={}, threads={}", key, t);
+        return Executors.newFixedThreadPool(t, r -> {
+            Thread th = Thread.ofVirtual().name("xuanji-out-" + key + "-" + seq.incrementAndGet())
                     .factory().newThread(r);
-            t.setDaemon(true);
-            return t;
+            th.setDaemon(true);
+            return th;
         });
     }
 

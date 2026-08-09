@@ -4,9 +4,9 @@ import dev.xuanji.adapter.qqbot.api.MessageSender;
 import dev.xuanji.adapter.qqbot.storage.BotDataQuery;
 import dev.xuanji.adapter.qqbot.storage.QqBotRepository;
 import dev.xuanji.core.concurrent.BotOutboundExecutor;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 import dev.xuanji.sdk.bot.Bot;
 
 /**

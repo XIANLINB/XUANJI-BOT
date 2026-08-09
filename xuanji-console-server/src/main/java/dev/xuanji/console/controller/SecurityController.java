@@ -43,7 +43,7 @@ public class SecurityController {
             String salt = jdbc.queryForObject("SELECT pin_salt FROM xuanji_setup WHERE id=1", String.class);
             String hash = jdbc.queryForObject("SELECT pin_hash FROM xuanji_setup WHERE id=1", String.class);
             if (salt == null || hash == null || !PinCrypto.verify(oldPin == null ? "" : oldPin, salt, hash)) {
-                auditService.record("CHANGE_PIN_FAIL", "旧口令校验失败", ip(req));
+                auditService.record("CHANGE_PIN_FAIL", "旧口令校验失败", req);
                 return Map.of("error", "当前口令不正确");
             }
         } catch (Exception e) {
@@ -53,19 +53,20 @@ public class SecurityController {
         String newSalt = PinCrypto.generateSalt();
         String newHash = PinCrypto.hashPin(newPin, newSalt);
         jdbc.update("UPDATE xuanji_setup SET pin_salt=?, pin_hash=? WHERE id=1", newSalt, newHash);
-        auditService.record("CHANGE_PIN", "访问口令已修改", ip(req));
+        auditService.record("CHANGE_PIN", "访问口令已修改", req);
         return Map.of("status", "ok");
     }
 
-    /** 审计日志（支持筛选：action / ip / keyword / startTime / endTime，倒序）。 */
+    /** 审计日志（支持筛选：action / ip / keyword / deviceType / startTime / endTime，倒序）。 */
     @GetMapping("/audit")
     public Map<String, Object> audit(@RequestParam(defaultValue = "200") int limit,
                                      @RequestParam(required = false) String action,
                                      @RequestParam(required = false) String ip,
                                      @RequestParam(required = false) String keyword,
+                                     @RequestParam(required = false) String deviceType,
                                      @RequestParam(required = false) Long startTime,
                                      @RequestParam(required = false) Long endTime) {
-        List<Map<String, Object>> rows = auditService.list(limit, action, ip, keyword, startTime, endTime);
+        List<Map<String, Object>> rows = auditService.list(limit, action, ip, keyword, startTime, endTime, deviceType);
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("rows", rows);
         m.put("count", rows.size());
@@ -78,9 +79,10 @@ public class SecurityController {
                                               @RequestParam(required = false) String action,
                                               @RequestParam(required = false) String ip,
                                               @RequestParam(required = false) String keyword,
+                                              @RequestParam(required = false) String deviceType,
                                               @RequestParam(required = false) Long startTime,
                                               @RequestParam(required = false) Long endTime) {
-        List<Map<String, Object>> rows = auditService.list(10_000, action, ip, keyword, startTime, endTime);
+        List<Map<String, Object>> rows = auditService.list(10_000, action, ip, keyword, startTime, endTime, deviceType);
         String stamp = new java.text.SimpleDateFormat("yyyyMMdd-HHmmss").format(new java.util.Date());
         String filename = "audit-" + stamp + "." + format;
         byte[] body;
@@ -102,33 +104,22 @@ public class SecurityController {
     /** 审计日志可筛选的动作清单（前端下拉用）。 */
     @GetMapping("/audit/actions")
     public List<Map<String, Object>> auditActions() {
-        try {
-            return jdbc.queryForList(
-                    "SELECT action, COUNT(*) AS cnt FROM xuanji_audit GROUP BY action ORDER BY cnt DESC");
-        } catch (Exception e) {
-            return List.of();
-        }
+        return auditService.actionStats();
     }
 
     /** 清空审计日志。 */
     @PostMapping("/audit/clear")
     public Map<String, Object> clearAudit(HttpServletRequest req) {
         int n = auditService.clear();
-        auditService.record("AUDIT_CLEAR", "清空审计日志 " + n + " 条", ip(req));
+        auditService.record("AUDIT_CLEAR", "清空审计日志 " + n + " 条", req);
         return Map.of("status", "ok", "cleared", n);
-    }
-
-    private static String ip(HttpServletRequest req) {
-        String xff = req.getHeader("X-Forwarded-For");
-        if (xff != null && !xff.isBlank()) return xff.split(",")[0].trim();
-        return req.getRemoteAddr();
     }
 
     // ═══════════════════ 导出序列化 ═══════════════════
 
     private static byte[] toJson(List<Map<String, Object>> rows) {
         try {
-            return new com.fasterxml.jackson.databind.ObjectMapper()
+            return new tools.jackson.databind.ObjectMapper()
                     .writerWithDefaultPrettyPrinter()
                     .writeValueAsBytes(rows);
         } catch (Exception e) {
@@ -139,7 +130,7 @@ public class SecurityController {
     /** CSV：UTF-8 BOM（Excel 直接打开中文不乱码）+ 表头 + 转义行。 */
     private static byte[] toCsv(List<Map<String, Object>> rows) {
         StringBuilder sb = new StringBuilder("\uFEFF"); // UTF-8 BOM
-        sb.append("时间,动作,详情,IP\r\n");
+        sb.append("时间,动作,详情,IP,设备类型,操作系统,浏览器\r\n");
         java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
         for (Map<String, Object> r : rows) {
             long ts = r.get("CREATE_TIME") instanceof Number n ? n.longValue() : 0L;
@@ -147,7 +138,10 @@ public class SecurityController {
             sb.append(csv(time)).append(',')
               .append(csv(String.valueOf(r.getOrDefault("ACTION", "")))).append(',')
               .append(csv(String.valueOf(r.getOrDefault("DETAIL", "")))).append(',')
-              .append(csv(String.valueOf(r.getOrDefault("IP", "")))).append("\r\n");
+              .append(csv(String.valueOf(r.getOrDefault("IP", "")))).append(',')
+              .append(csv(String.valueOf(r.getOrDefault("DEVICE_TYPE", "")))).append(',')
+              .append(csv(String.valueOf(r.getOrDefault("DEVICE_OS", "")))).append(',')
+              .append(csv(String.valueOf(r.getOrDefault("DEVICE_BROWSER", "")))).append("\r\n");
         }
         return sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }

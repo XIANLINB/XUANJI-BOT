@@ -72,7 +72,7 @@ public class BotInfoSync {
         }
     }
 
-    private static String stringOrNull(com.fasterxml.jackson.databind.node.ObjectNode obj, String key) {
+    private static String stringOrNull(tools.jackson.databind.node.ObjectNode obj, String key) {
         if (obj == null || !obj.has(key) || obj.get(key).isNull()) return null;
         String v = obj.get(key).asText();
         return v.isEmpty() ? null : v;

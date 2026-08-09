@@ -1,7 +1,7 @@
 package dev.xuanji.adapter.qqbot.util;
 
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 import dev.xuanji.api.json.Json;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;

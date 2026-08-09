@@ -1,6 +1,6 @@
 package dev.xuanji.api.adapter;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import dev.xuanji.api.event.BotEvent;
 import dev.xuanji.api.message.MessageChain;
 

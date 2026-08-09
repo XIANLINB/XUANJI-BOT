@@ -51,12 +51,12 @@ public class AuthController {
         }
         String pin = body.get("pin");
         if (pin == null || !pinVerifier.verify(pin)) {
-            auditService.record("LOGIN_FAIL", "口令校验失败", ip(request));
+            auditService.record("LOGIN_FAIL", "口令校验失败", request);
             return fail(response, "访问口令错误");
         }
         String token = sessionStore.create();
         response.addHeader("Set-Cookie", buildCookie(token, sessionStore.ttlSeconds(), request.isSecure()));
-        auditService.record("LOGIN_OK", "控制台登录成功", ip(request));
+        auditService.record("LOGIN_OK", "控制台登录成功", request);
         return Map.of("status", "ok", "ttlSeconds", sessionStore.ttlSeconds());
     }
 
@@ -65,7 +65,7 @@ public class AuthController {
         String token = readCookie(request);
         if (token != null) sessionStore.destroy(token);
         response.addHeader("Set-Cookie", buildCookie("", 0, request.isSecure()));
-        auditService.record("LOGOUT", "控制台登出", ip(request));
+        auditService.record("LOGOUT", "控制台登出", request);
         return Map.of("status", "ok");
     }
 

@@ -26,6 +26,11 @@
             <groupId>dev.xuanji</groupId>
             <artifactId>xuanji-scheduler</artifactId>
         </dependency>
+        <!-- AI 能力引擎（LLM 模块），默认打进 jar 开箱即用；裁减体积时删除本依赖即可回到基线 -->
+        <dependency>
+            <groupId>dev.xuanji</groupId>
+            <artifactId>xuanji-llm</artifactId>
+        </dependency>
         <dependency>
             <groupId>dev.xuanji</groupId>
             <artifactId>xuanji-adapter-qqbot</artifactId>
@@ -49,11 +54,7 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
-        <dependency>
-            <groupId>net.logstash.logback</groupId>
-            <artifactId>logstash-logback-encoder</artifactId>
-            <version>8.0</version>
-        </dependency>
+        <!-- 已移除 logstash-logback-encoder（绑定 Jackson 2.x 且体积 ~4MB）：文件日志改用普通文本 pattern（见 logback-spring.xml） -->
 
         <dependency>
             <groupId>com.h2database</groupId>
@@ -80,6 +81,63 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
+
+            <!-- 分平台瘦身：-Pwindows / -Plinux 时，package 后调用 scripts/slim-jar.py
+                 裁剪 Playwright driver-bundle 内非目标平台的 node（jar 227MB → ~66MB）。
+                 不激活 profile 时跳过（产出全平台通用 jar）。 -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.1.1</version>
+                <executions>
+                    <execution>
+                        <id>slim-driver-bundle</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>${slim.python}</executable>
+                            <workingDirectory>${project.basedir}/..</workingDirectory>
+                            <arguments>
+                                <argument>scripts/slim-jar.py</argument>
+                                <argument>${project.build.directory}/${project.build.finalName}.jar</argument>
+                                <argument>--platform</argument>
+                                <argument>${slim.platform}</argument>
+                            </arguments>
+                            <skip>${slim.skip}</skip>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- Windows 专属包：仅保留 win32_x64/node.exe -->
+        <profile>
+            <id>windows</id>
+            <properties>
+                <slim.platform>win</slim.platform>
+                <slim.skip>false</slim.skip>
+                <slim.python>python</slim.python>
+            </properties>
+        </profile>
+        <!-- Linux 专属包：仅保留 linux + linux-arm64 -->
+        <profile>
+            <id>linux</id>
+            <properties>
+                <slim.platform>linux</slim.platform>
+                <slim.skip>false</slim.skip>
+                <slim.python>python3</slim.python>
+            </properties>
+        </profile>
+    </profiles>
+
+    <!-- 默认（无 profile）：不裁剪，产出全平台通用 jar -->
+    <properties>
+        <slim.platform>win</slim.platform>
+        <slim.skip>true</slim.skip>
+        <slim.python>python</slim.python>
+    </properties>
 </project>

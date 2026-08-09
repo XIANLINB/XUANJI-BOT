@@ -64,7 +64,7 @@ public class QqApiModeRefresher {
             boolean isNew = currentIsNewOpenBot();
             qqApiService.setNewOpenBot(isNew);
             wsManager.ifAvailable(ws -> ws.setNewOpenBot(isNew));
-            log.info("[QqApiMode] 开放平台版本: {} ({})",
+            log.debug("[QqApiMode] 开放平台版本: {} ({})",
                     isNew ? "新统一地址" : "老平台（按环境区分）",
                     isNew ? "api.bot.qq.com" : "api.sgroup.qq.com");
         } catch (Exception e) {

@@ -5,6 +5,7 @@ export interface AuditFilter {
   action?: string
   ip?: string
   keyword?: string
+  deviceType?: string
   startTime?: number
   endTime?: number
 }
@@ -12,7 +13,7 @@ export interface AuditFilter {
 export const securityApi = {
   // 修改访问口令：{oldPin, newPin}
   changePin: (oldPin: string, newPin: string) => post('/console/security/pin', { oldPin, newPin }),
-  // 审计日志（筛选：动作/IP/关键词/时间范围）
+  // 审计日志（筛选：动作/IP/关键词/设备类型/时间范围）
   getAudit: (limit = 200, f: AuditFilter = {}) =>
     get('/console/security/audit', { limit, ...f }),
   // 审计动作清单（筛选下拉数据源）

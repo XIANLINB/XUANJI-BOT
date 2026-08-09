@@ -14,8 +14,9 @@
     <description>璇玑框架 - 纯接口与模型（零 Spring 依赖方向演进中）</description>
 
     <dependencies>
+        <!-- Jackson 3（tools.jackson）：与 Boot 4 / Spring 7 默认一致，统一序列化栈 -->
         <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
+            <groupId>tools.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>
         <!-- PF4J：插件需继承 Plugin 基类（provided：运行时由框架核心 ClassLoader 提供） -->

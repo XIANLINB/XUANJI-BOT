@@ -96,30 +96,34 @@ public class ConsolePluginController {
     }
 
     @PostMapping("/plugins/{pluginId}/stop")
-    public Map<String, Object> stopPlugin(@PathVariable String pluginId) {
+    public Map<String, Object> stopPlugin(@PathVariable String pluginId, jakarta.servlet.http.HttpServletRequest req) {
         boolean ok = pluginManager.disablePlugin(pluginId);
         if (!ok) commandRegistry.setPluginEnabled(pluginId, false); // 兜底
+        auditService.record("PLUGIN_DISABLE", "禁用插件 " + pluginId, req);
         return Map.of("status", ok ? "ok" : "noop");
     }
 
     @PostMapping("/plugins/{pluginId}/start")
-    public Map<String, Object> startPlugin(@PathVariable String pluginId) {
+    public Map<String, Object> startPlugin(@PathVariable String pluginId, jakarta.servlet.http.HttpServletRequest req) {
         boolean ok = pluginManager.enablePlugin(pluginId);
         if (!ok) commandRegistry.setPluginEnabled(pluginId, true); // 兜底
+        auditService.record("PLUGIN_ENABLE", "启用插件 " + pluginId, req);
         return Map.of("status", ok ? "ok" : "noop");
     }
 
     /** P3-G：jar 热加载 — 重新加载插件 jar（改插件后不重启框架）。 */
     @PostMapping("/plugins/{pluginId}/reload")
-    public Map<String, Object> reloadPlugin(@PathVariable String pluginId) {
+    public Map<String, Object> reloadPlugin(@PathVariable String pluginId, jakarta.servlet.http.HttpServletRequest req) {
         boolean ok = pluginManager.reloadJar(pluginId);
+        auditService.record("PLUGIN_RELOAD", "热重载插件 jar " + pluginId, req);
         return Map.of("status", ok ? "ok" : "error");
     }
 
     /** 运行时扫描 plugins 目录，加载新添加的插件 jar（不重启框架）。 */
     @PostMapping("/plugins/scan")
-    public Map<String, Object> scanPlugins() {
+    public Map<String, Object> scanPlugins(jakarta.servlet.http.HttpServletRequest req) {
         java.util.List<String> loaded = pluginManager.scanNewPlugins();
+        auditService.record("PLUGIN_LOAD", "扫描并加载新插件: " + (loaded.isEmpty() ? "无" : String.join(", ", loaded)), req);
         return Map.of("status", "ok", "loaded", loaded);
     }
 
@@ -159,16 +163,20 @@ public class ConsolePluginController {
 
     /** 绑定插件到指定 (platform, botKey)。 */
     @PostMapping("/plugins/{pluginId}/bindings")
-    public Map<String, Object> bind(@PathVariable String pluginId, @RequestBody BindRequest req) {
+    public Map<String, Object> bind(@PathVariable String pluginId, @RequestBody BindRequest req,
+                                    jakarta.servlet.http.HttpServletRequest http) {
         bindingService.bind(pluginId, req.platform(), req.botKey());
+        auditService.record("PLUGIN_BIND", "插件 " + pluginId + " 绑定 " + req.platform() + "/" + req.botKey(), http);
         return Map.of("status", "ok");
     }
 
     /** 解绑（恢复全局生效需解绑该插件所有记录）。 */
     @DeleteMapping("/plugins/{pluginId}/bindings")
     public Map<String, Object> unbind(@PathVariable String pluginId,
-                                      @RequestParam String platform, @RequestParam String botKey) {
+                                      @RequestParam String platform, @RequestParam String botKey,
+                                      jakarta.servlet.http.HttpServletRequest http) {
         bindingService.unbind(pluginId, platform, botKey);
+        auditService.record("PLUGIN_UNBIND", "插件 " + pluginId + " 解绑 " + platform + "/" + botKey, http);
         return Map.of("status", "ok");
     }
 
@@ -206,8 +214,10 @@ public class ConsolePluginController {
 
     /** 保存插件配置（只接受 schema 声明的 key）。 */
     @PutMapping("/plugins/{pluginId}/config")
-    public Map<String, Object> saveConfig(@PathVariable String pluginId, @RequestBody Map<String, String> body) {
+    public Map<String, Object> saveConfig(@PathVariable String pluginId, @RequestBody Map<String, String> body,
+                                          jakarta.servlet.http.HttpServletRequest http) {
         pluginConfigService.saveConfig(pluginId, body);
+        auditService.record("PLUGIN_CONFIG_UPDATE", "插件 " + pluginId + " 配置更新 " + body.size() + " 项", http);
         return Map.of("status", "ok");
     }
 
@@ -224,8 +234,10 @@ public class ConsolePluginController {
 
     /** 一键清空插件持久化 KV（测试/重置场景，只清当前插件命名空间，不动配置表）。 */
     @PostMapping("/plugins/{pluginId}/kv/clear")
-    public Map<String, Object> clearPluginKv(@PathVariable String pluginId) {
+    public Map<String, Object> clearPluginKv(@PathVariable String pluginId,
+                                             jakarta.servlet.http.HttpServletRequest http) {
         pluginKvStore.clear(pluginId);
+        auditService.record("PLUGIN_KV_CLEAR", "清空插件持久化数据 " + pluginId, http);
         log.info("[Plugin] 已清空插件持久化数据: {}", pluginId);
         return Map.of("status", "ok", "pluginId", pluginId);
     }

@@ -7,12 +7,14 @@ import {
 import {
   AppsOutline, PeopleOutline, PersonOutline, ChatbubbleOutline,
   TrendingUpOutline, TrendingDownOutline, CubeOutline, PulseOutline,
-  RocketOutline, GridOutline, BarChartOutline, TimeOutline
+  RocketOutline, GridOutline, BarChartOutline, TimeOutline, ShieldCheckmarkOutline,
+  ExtensionPuzzleOutline, HourglassOutline
 } from '@vicons/ionicons5'
 import dayjs from 'dayjs'
 import api from '../api'
 import PageHero from '../components/PageHero.vue'
 import CommonChart from '../components/CommonChart.vue'
+import StatCard from '../components/StatCard.vue'
 import { useDashboardStore } from '../stores/dashboard'
 
 const store = useDashboardStore()
@@ -49,6 +51,12 @@ async function load() {
 
 const cards = computed(() => {
   const v = d.value
+  // 命令数 = 按 命令名|插件|方法 去重后的实际命令数（与命令管理页同源）
+  const cmdTotal = Number(v.commandCount ?? 0)
+  // 消息去重总命中（DB 命中 + 本地降级）
+  const dedupTotal = Number(v.dedup?.dbDedupSuccess ?? 0)
+    + Number(v.dedup?.localFallbackCount ?? 0)
+  const pluginTimeout = Number(v.plugins?.pluginTimeoutCount ?? 0)
   return [
     { key: 'botsOnline', label: '在线机器人', icon: RocketOutline, color: '#18a058', val: v.botsOnline ?? 0 },
     { key: 'botsTotal', label: '机器人总数', icon: AppsOutline, color: '#5b5bd6', val: v.botsTotal ?? 0 },
@@ -62,7 +70,10 @@ const cards = computed(() => {
     { key: 'todayC2cMessages', label: '今日单聊消息数量', icon: ChatbubbleOutline, color: '#2090e0', val: v.todayC2cMessages ?? 0 },
     { key: 'messagesTotal', label: '消息总数量', icon: ChatbubbleOutline, color: '#5b5bd6', val: v.messagesTotal ?? 0 },
     { key: 'eventsTotal', label: '系统事件总数量', icon: PulseOutline, color: '#e58e26', val: v.eventsTotal ?? 0 },
-    { key: 'pluginsLoaded', label: '已加载插件', icon: CubeOutline, color: '#5b5bd6', val: v.pluginsLoaded ?? 0 }
+    { key: 'pluginsLoaded', label: '已加载插件', icon: CubeOutline, color: '#5b5bd6', val: v.pluginsLoaded ?? 0 },
+    { key: 'cmdHandlers', label: '插件命令数', icon: ExtensionPuzzleOutline, color: '#5b5bd6', val: cmdTotal },
+    { key: 'pluginTimeout', label: '插件超时次数', icon: HourglassOutline, color: pluginTimeout > 0 ? '#e5484d' : '#5b5bd6', val: pluginTimeout },
+    { key: 'dedupTotal', label: '消息去重次数', icon: ShieldCheckmarkOutline, color: '#18a058', val: dedupTotal }
   ]
 })
 
@@ -124,17 +135,7 @@ onMounted(async () => {
     <!-- 统计卡 -->
     <NGrid :cols="24" :x-gap="12" :y-gap="12" responsive="screen" item-responsive class="grid">
       <NGi v-for="c in cards" :key="c.key" span="24 s:12 m:8 l:6 xl:4">
-        <NCard hoverable class="stat-card" :content-style="{ padding: '12px 14px' }">
-          <div class="stat-top">
-            <div class="stat-icon" :style="{ background: c.color + '1a', color: c.color }">
-              <NIcon size="18"><component :is="c.icon" /></NIcon>
-            </div>
-            <div class="stat-value" :style="{ color: c.color }">
-              <NNumberAnimation :from="0" :to="Number(c.val) || 0" :duration="900" />
-            </div>
-          </div>
-          <NText depth="3" class="stat-label">{{ c.label }}</NText>
-        </NCard>
+        <StatCard :icon="c.icon" :color="c.color" :value="c.val" :label="c.label" />
       </NGi>
     </NGrid>
 
@@ -204,30 +205,14 @@ onMounted(async () => {
 .grid {
   margin-top: 4px;
 }
-.stat-card {
-  height: 100%;
-}
-.stat-top {
+.trend-card {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.stat-icon {
-  width: 32px;
-  height: 32px;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
   border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.stat-value {
-  font-size: 20px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-}
-.stat-label {
-  font-size: 12px;
+  background: rgba(128, 128, 128, 0.05);
+  height: 100%;
 }
 .trend-card {
   margin-top: 16px;

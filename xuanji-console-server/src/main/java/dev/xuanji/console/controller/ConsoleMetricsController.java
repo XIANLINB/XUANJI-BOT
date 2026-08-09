@@ -10,6 +10,8 @@ import dev.xuanji.core.web.XuanjiApi;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -61,7 +63,12 @@ public class ConsoleMetricsController {
         m.put("qps", Map.of(
                 "current", QpsMeter.current(),
                 "peak60", QpsMeter.peak(60),
-                "avg60", QpsMeter.avg(60)));
+                "avg60", QpsMeter.avg(60),
+                "outCurrent", QpsMeter.currentOut(),
+                "outPeak60", QpsMeter.peakOut(60),
+                "outAvg60", QpsMeter.avgOut(60),
+                "inTotal60", QpsMeter.total(60),
+                "outTotal60", QpsMeter.totalOut(60)));
 
         List<Map<String, Object>> pools = new ArrayList<>(ThreadPoolRegistry.snapshot());
         Map<String, Object> tomcat = tomcatPool();
@@ -88,11 +95,12 @@ public class ConsoleMetricsController {
         return m;
     }
 
-    /** QPS 逐秒曲线（旧→新），默认最近 60 秒。 */
+    /** QPS 逐秒曲线（旧→新），默认最近 60 秒。含入站 + 出站双通道。 */
     @GetMapping("/metrics/qps")
     public Map<String, Object> qps(@RequestParam(defaultValue = "60") int seconds) {
         int n = Math.min(Math.max(seconds, 1), 60);
         long[] vals = QpsMeter.snapshot(n);
+        long[] outVals = QpsMeter.snapshotOut(n);
         long nowSec = System.currentTimeMillis() / 1000L;
         List<String> labels = new ArrayList<>(n);
         for (int i = n - 1; i >= 0; i--) {
@@ -101,9 +109,13 @@ public class ConsoleMetricsController {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("labels", labels);
         m.put("values", vals);
+        m.put("outValues", outVals);
         m.put("current", QpsMeter.current());
         m.put("peak60", QpsMeter.peak(60));
         m.put("avg60", QpsMeter.avg(60));
+        m.put("outCurrent", QpsMeter.currentOut());
+        m.put("outPeak60", QpsMeter.peakOut(60));
+        m.put("outAvg60", QpsMeter.avgOut(60));
         return m;
     }
 
@@ -111,6 +123,33 @@ public class ConsoleMetricsController {
     @GetMapping("/tune/recommend")
     public Map<String, Object> recommend(@RequestParam(defaultValue = "eco") String mode) {
         return tuneAdvisor.recommend(mode);
+    }
+
+    /** 应用指定模板：把模板参数写入全局配置（出站节奏立即生效，线程池参数需重启）。 */
+    @PostMapping("/tune/apply")
+    public Map<String, Object> applyTune(@RequestBody(required = false) Map<String, Object> body) {
+        String mode = body == null ? "eco" : String.valueOf(body.getOrDefault("mode", "eco"));
+        return tuneAdvisor.apply(mode);
+    }
+
+    /** 一键恢复默认：删除所有 tune.* 配置 + 还原 outbound.pace_ms 为 0。
+     *  二次确认（请求体 confirm="RESET"）防误触。线程池参数需重启框架后才回到代码硬编码默认值。 */
+    @PostMapping("/tune/reset")
+    public Map<String, Object> resetTune(@RequestBody(required = false) Map<String, Object> body) {
+        String confirm = body == null ? "" : String.valueOf(body.getOrDefault("confirm", ""));
+        if (!"RESET".equals(confirm)) {
+            Map<String, Object> err = new java.util.LinkedHashMap<>();
+            err.put("status", "error");
+            err.put("msg", "二次确认失败：请求体 {\"confirm\":\"RESET\"} 必须精确输入 RESET");
+            return err;
+        }
+        return tuneAdvisor.reset();
+    }
+
+    /** 当前使用中的模板（从未应用则 mode=none）。 */
+    @GetMapping("/tune/current")
+    public Map<String, Object> currentTune() {
+        return tuneAdvisor.current();
     }
 
     /**
@@ -198,28 +237,38 @@ public class ConsoleMetricsController {
     public Map<String, Object> versionLog() {
         List<Map<String, Object>> versions = new ArrayList<>();
 
-        versions.add(versionEntry("v1.0.0", "2026-08-07", "正式版",
+        // ── v1.0.0 正式版（2026-08-09）──
+        versions.add(versionEntry("v1.0.0", "2026-08-09", "正式版",
                 List.of(
-                        "QQ 官方适配器：群聊/单聊消息、富媒体收发、系统事件（加群/退群/加好友）",
-                        "OneBot 反向 WS 适配器（Napcat 兼容）",
-                        "插件体系：@Command 语法糖、PluginStorage 持久化、PluginConfig 动态配置面板、运行时扫描/卸载",
-                        "控制台：仪表盘（消息趋势 7/15/30 天）、消息监控、群聊/单聊管理、插件市场",
-                        "运行健康：系统资源 / QPS 实时曲线 / 线程池明细 / 经济·性能两套模板推荐",
-                        "安全中心：PIN 修改、审计日志（登录/SQL/备份/卸载留痕）",
-                        "备份恢复：业务库/日志库/全部三选，在线导出 zip + 恢复前自动快照")));
+                        "多平台多机器人：QQ 官方 Bot（WebSocket/Webhook）+ OneBot（Napcat 兼容），一个框架同时管理 N 个机器人",
+                        "AI 能力引擎（LLM）：对话 / 人格角色扮演 / 长期记忆 / 用户画像 / 主动搭话",
+                        "智能工具：@LlmTool 函数调用 / 意图路由（人话→命令）/ 自然语言建定时",
+                        "Agent 自主会话 + MCP 服务桥接（外部工具无缝接入）",
+                        "知识库 RAG / AI 审核 / AI 日报 / 图片理解 / 文生图 / 语音合成（TTS）/ 图文卡片渲染",
+                        "多供应商多模型管理：一页配置 DeepSeek/智谱/小米/Fish 等，按能力（对话/视觉/语音/图像）选模型，支持多 Key 轮询",
+                        "可视化控制台：仪表盘 / 消息监控 / 群聊·单聊管理 / 插件市场 / 定时任务 / 供应商管理 / 全套 AI 能力页",
+                        "插件体系：@Command 语法糖 / PluginStorage 持久化 / 热加载 / 运行时扫描卸载",
+                        "运行健康 + 安全中心 + 备份恢复：系统资源 / QPS / 线程池 / 审计日志 / 在线导出恢复")));
 
-        versions.add(versionEntry("v0.9.0", "2026-08-06", "开发里程碑",
+        // ── v0.2.0 开发版（2026-08-07）──
+        versions.add(versionEntry("v0.2.0", "2026-08-07", "开发版",
                 List.of(
                         "框架骨架：多模块 Maven + JDK25 虚拟线程 + 事件分发管线",
-                        "控制台基座：登录鉴权（PIN+会话 Cookie）、侧边栏导航、亮/暗主题",
-                        "数据库体系：框架库/日志库/每机器人实例库三级 H2 存储")));
+                        "模块基座：xuanji-api（SPI）/ core（内核）/ adapter（平台）/ console（控制台）/ starter（启动器）",
+                        "控制台基座：登录鉴权（PIN + 会话 Cookie）/ 侧边栏导航 / 亮暗主题",
+                        "数据库体系：框架库 / 日志库 / 每机器人实例库 三级 H2 存储",
+                        "QQ 官方适配器：群聊·单聊消息 / 富媒体收发 / 系统事件（加群退群加好友）",
+                        "OneBot 反向 WS 适配器（Napcat 兼容）",
+                        "插件体系：@Command / PluginStorage / PluginConfig 动态面板 / 运行时扫描卸载",
+                        "备份恢复 + 安全中心：业务库/日志库三选导出、恢复前自动快照、PIN 修改与审计留痕")));
 
-        versions.add(versionEntry("Next", "", "规划中",
+        // ── v0.1.0 开发版（2026-07-30）──
+        versions.add(versionEntry("v0.1.0", "2026-07-30", "开发版",
                 List.of(
-                        "定时任务中心（独立 scheduler 模块）",
-                        "数据统计：消息热力图 / 活跃群与用户 TOP",
-                        "对话调试台：模拟消息跑 pipeline",
-                        "插件在线市场")));
+                        "项目初始化：Git 仓库 + 多模块 Maven 工程搭建（api / core / adapter / starter / sdk）",
+                        "框架初始架构：事件模型与统一事件分发管线设计",
+                        "QQ 官方适配器雏形：Bot 接入配置 / WebSocket 连接 / 群消息收发打底",
+                        "控制台最早形态：登录引导 / 基础页面框架")));
 
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("current", "v1.0.0");

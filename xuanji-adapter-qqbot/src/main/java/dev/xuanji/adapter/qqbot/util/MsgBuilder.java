@@ -1,9 +1,9 @@
 package dev.xuanji.adapter.qqbot.util;
 
 import dev.xuanji.adapter.qqbot.dto.SendMessageRequest;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.fasterxml.jackson.databind.node.NullNode;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.NullNode;
 import dev.xuanji.api.json.Json;
 
 import java.util.ArrayList;
@@ -260,8 +260,8 @@ public class MsgBuilder {
          */
         public ObjectNode buildMarkdownJson() {
             ObjectNode mdObj = Json.obj();
-            mdObj.put("custom_template_id", NullNode.instance);
-            mdObj.put("params", NullNode.instance);
+            mdObj.set("custom_template_id", NullNode.instance);
+            mdObj.set("params", NullNode.instance);
             mdObj.put("content", md.toString());
             return mdObj;
         }
@@ -326,7 +326,7 @@ public class MsgBuilder {
             for (ObjectNode kv : kvList) {
                 kvArray.add(kv);
             }
-            ark.put("kv", kvArray);
+            ark.set("kv", kvArray);
             return ark;
         }
 

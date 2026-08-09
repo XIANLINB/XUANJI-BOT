@@ -12,7 +12,8 @@ import {
   SunnyOutline, MoonOutline, ColorPaletteOutline, PulseOutline, SettingsOutline,
   ExtensionPuzzleOutline, ShieldCheckmarkOutline, GitNetworkOutline, LogOutOutline,
   StorefrontOutline, KeyOutline, ArchiveOutline, TimeOutline,
-  StatsChartOutline, TrashOutline, FolderOpenOutline, WarningOutline
+  StatsChartOutline, TrashOutline, FolderOpenOutline, WarningOutline,
+  ChatbubblesOutline, SparklesOutline, LibraryOutline, NewspaperOutline
 } from '@vicons/ionicons5'
 import { routes } from '../router'
 import api from '../api'
@@ -42,19 +43,31 @@ const iconMap: Record<string, Component> = {
   'plugin-admin': ExtensionPuzzleOutline,
   'plugin-market': StorefrontOutline,
   'ops-admin': PulseOutline,
-  'logs-center': DocumentTextOutline,
   events: FlashOutline,
+  audit: ShieldCheckmarkOutline,
   database: ServerOutline,
   permission: ShieldCheckmarkOutline,
   security: KeyOutline,
   backup: ArchiveOutline,
   alert: WarningOutline,
-  risk: ShieldCheckmarkOutline,
   scheduler: TimeOutline,
   onebot: GitNetworkOutline,
   health: PulseOutline,
   settings: SettingsOutline,
-  logs: DocumentTextOutline
+  logs: DocumentTextOutline,
+  tune: StatsChartOutline,
+  monitor: ChatbubblesOutline,
+  'ai-admin': SparklesOutline,
+  'ai-chat': ChatbubblesOutline,
+  'ai-personas': PersonOutline,
+  'ai-usage': StatsChartOutline,
+  'ai-tools': ExtensionPuzzleOutline,
+  'ai-mcp': GitNetworkOutline,
+  'ai-kb': LibraryOutline,
+  'ai-audit': ShieldCheckmarkOutline,
+  'ai-summary': NewspaperOutline,
+  'ai-memory': ArchiveOutline,
+  'ai-providers': ServerOutline
 }
 
 function renderIcon(icon: Component) {
@@ -111,7 +124,7 @@ const menuOptions = computed<MenuOption[]>(() =>
 )
 
 // 分组父菜单 key 集合（点击父级 → 跳转该父级第一个子菜单）
-const groupKeys = new Set(['chat-groups', 'chat-c2c', 'plugin-admin', 'center-admin', 'ops-admin', 'logs-center', 'data-center'])
+const groupKeys = new Set(['chat-groups', 'chat-c2c', 'plugin-admin', 'center-admin', 'ops-admin', 'data-center', 'ai-admin'])
 
 // 菜单默认全部收起（点击父级时才展开对应分组）
 const expandedKeys = ref<string[]>([])

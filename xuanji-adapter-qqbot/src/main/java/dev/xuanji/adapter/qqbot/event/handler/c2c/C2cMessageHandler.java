@@ -8,8 +8,8 @@ import dev.xuanji.adapter.qqbot.api.MessageSender;
 import dev.xuanji.core.event.EventHandler;
 import dev.xuanji.core.event.EventMapping;
 import lombok.extern.slf4j.Slf4j;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.ObjectMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -26,14 +26,12 @@ public class C2cMessageHandler implements EventHandler {
     private final CommandRegistry commandRegistry;
     private final XuanjiRobotProperties robotProperties;
     private final JdbcTemplate jdbc;
-    private final dev.xuanji.core.storage.log.MessageLogService logSvc;
     private final dev.xuanji.adapter.qqbot.bot.QqBotFactory botFactory;
     private final dev.xuanji.adapter.qqbot.storage.QqBotRepository qqBotRepository;
     private final dev.xuanji.core.config.ConfigService configService;
 
     public C2cMessageHandler(MessageSender messageSender, CommandRegistry commandRegistry,
                              XuanjiRobotProperties robotProperties, JdbcTemplate jdbc,
-                             dev.xuanji.core.storage.log.MessageLogService logSvc,
                              dev.xuanji.adapter.qqbot.bot.QqBotFactory botFactory,
                              dev.xuanji.adapter.qqbot.storage.QqBotRepository qqBotRepository,
                              dev.xuanji.core.config.ConfigService configService) {
@@ -41,7 +39,6 @@ public class C2cMessageHandler implements EventHandler {
         this.commandRegistry = commandRegistry;
         this.robotProperties = robotProperties;
         this.jdbc = jdbc;
-        this.logSvc = logSvc;
         this.configService = configService;
         this.botFactory = botFactory;
         this.qqBotRepository = qqBotRepository;
@@ -120,6 +117,9 @@ public class C2cMessageHandler implements EventHandler {
                     bot.reply(result);
                     dev.xuanji.core.storage.log.MessageLogger.c2cMessage("OUT",
                             appId, openid, outboundType(result), result, "");
+                } else {
+                    // 命令未命中 → @OnMessage 全量监听器（非命令场景）
+                    commandRegistry.dispatchOnMessage(false);
                 }
             } finally {
                 CommandRegistry.clearContext();

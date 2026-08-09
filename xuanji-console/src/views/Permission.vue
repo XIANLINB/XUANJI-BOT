@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { ref, onMounted, h } from 'vue'
 import {
-  NButton, NCard, NDataTable, NInput, NForm, NFormItem, NSelect, NSpace, NTag, NText, useMessage
+  NButton, NCard, NDataTable, NInput, NForm, NFormItem, NSelect, NSpace, NTag, NText, useMessage,
+  NGrid, NGi, NIcon, NTooltip, NNumberAnimation
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
-import { ShieldCheckmarkOutline } from '@vicons/ionicons5'
+import { ShieldCheckmarkOutline, BanOutline, RefreshOutline, TimeOutline } from '@vicons/ionicons5'
 import PageHero from '../components/PageHero.vue'
 import api from '../api'
+import dayjs from 'dayjs'
+import { groupName, userName } from '../utils/names'
 
 const message = useMessage()
 const bots = ref<any[]>([])
@@ -20,6 +23,34 @@ const userId = ref('')
 const reason = ref('')
 const blacklist = ref<any[]>([])
 const loading = ref(false)
+
+// 黑名单统计（全局，来自风控数据源）
+const risk = ref<Record<string, any>>({ blacklist: {}, block: {} })
+const timeline = ref<any[]>([])
+const showTimeline = ref(false)
+const riskLoading = ref(false)
+
+async function loadRisk() {
+  riskLoading.value = true
+  try {
+    const [o, t] = await Promise.all([api.riskOverview(), api.riskTimeline()])
+    risk.value = o || {}
+    timeline.value = t?.rows ?? []
+  } catch { /* 统计失败不影响主流程 */ }
+  finally { riskLoading.value = false }
+}
+
+function fmtTime(t: number): string {
+  return t > 0 ? dayjs(t * 1000).format('YYYY-MM-DD HH:mm:ss') : '—'
+}
+
+const timelineCols = [
+  { title: '时间', key: 'createTime', width: 160, render: (r: any) => fmtTime(r.createTime) },
+  { title: '动作', key: 'action', width: 80, render: (r: any) => h(NTag, { size: 'small', bordered: false, type: r.action === 'ADD' ? 'error' : 'success' }, { default: () => r.action === 'ADD' ? '拉黑' : '解除' }) },
+  { title: '群', key: 'groupId', minWidth: 180, render: (r: any) => h('span', groupName(r)) },
+  { title: '用户', key: 'userId', minWidth: 180, render: (r: any) => h('span', userName(r)) },
+  { title: '原因', key: 'reason', minWidth: 160, ellipsis: { tooltip: true }, render: (r: any) => h('span', r.reason || '—') }
+]
 
 async function loadBots() {
   try {
@@ -131,7 +162,7 @@ const blackColumns: DataTableColumns<any> = [
   }
 ]
 
-onMounted(loadBots)
+onMounted(() => { loadBots(); loadRisk() })
 </script>
 
 <template>
@@ -180,6 +211,46 @@ onMounted(loadBots)
     </div>
 
     <NCard :bordered="false" class="card" style="margin-top: 14px">
+      <!-- 黑名单统计行 -->
+      <NGrid :cols="24" :x-gap="12" :y-gap="12" responsive="screen" item-responsive style="margin-bottom: 14px">
+        <NGi span="24 s:12 m:6">
+          <div class="risk-stat">
+            <div class="risk-icon" style="background: #854F0B1a; color: #854F0B"><NIcon size="16"><ShieldCheckmarkOutline /></NIcon></div>
+            <div class="risk-info">
+              <NNumberAnimation :from="0" :to="Number(risk.blacklist?.total ?? 0)" :duration="600" class="risk-val" />
+              <div class="risk-label">黑名单总数（全局）</div>
+            </div>
+          </div>
+        </NGi>
+        <NGi span="24 s:12 m:6">
+          <div class="risk-stat">
+            <div class="risk-icon" style="background: #e5484d1a; color: #e5484d"><NIcon size="16"><BanOutline /></NIcon></div>
+            <div class="risk-info">
+              <NNumberAnimation :from="0" :to="Number(risk.block?.blocks ?? 0)" :duration="600" class="risk-val" style="color: #e5484d" />
+              <div class="risk-label">累计拦截次数（黑名单命中）</div>
+            </div>
+          </div>
+        </NGi>
+        <NGi span="24 s:12 m:6">
+          <div class="risk-stat">
+            <div class="risk-icon" style="background: #18a0581a; color: #18a058"><NIcon size="16"><RefreshOutline /></NIcon></div>
+            <div class="risk-info">
+              <NNumberAnimation :from="0" :to="Number(risk.blacklist?.add24h ?? 0)" :duration="600" class="risk-val" />
+              <div class="risk-label">近 24h 拉黑</div>
+            </div>
+          </div>
+        </NGi>
+        <NGi span="24 s:12 m:6">
+          <div class="risk-stat">
+            <div class="risk-icon" style="background: #2090e01a; color: #2090e0"><NIcon size="16"><RefreshOutline /></NIcon></div>
+            <div class="risk-info">
+              <NNumberAnimation :from="0" :to="Number(risk.blacklist?.remove24h ?? 0)" :duration="600" class="risk-val" />
+              <div class="risk-label">近 24h 解除</div>
+            </div>
+          </div>
+        </NGi>
+      </NGrid>
+
       <NDataTable
         :columns="blackColumns"
         :data="blacklist"
@@ -188,8 +259,23 @@ onMounted(loadBots)
         :bordered="false"
       />
       <NText depth="3" style="font-size: 12px; display: block; margin-top: 10px">
-        黑名单为全局闸门：命中即拒绝所有命令（优先级高于主人放行）。
+        黑名单为全局闸门：命中即拒绝所有命令（优先级高于主人放行）。「累计拦截次数」= 黑名单用户在 Pipeline 权限检查阶段被拒绝的事件总数。
       </NText>
+
+      <!-- 操作时间线折叠区 -->
+      <NButton size="small" secondary style="margin-top: 14px" :loading="riskLoading" @click="showTimeline = !showTimeline">
+        <template #icon><NIcon size="14"><TimeOutline /></NIcon></template>
+        {{ showTimeline ? '收起操作记录' : `查看黑名单操作记录（${timeline.length} 条）` }}
+      </NButton>
+      <NDataTable
+        v-if="showTimeline"
+        :columns="timelineCols"
+        :data="timeline"
+        :bordered="false"
+        size="small"
+        style="margin-top: 10px"
+        :row-key="(r: any) => r.id"
+      />
     </NCard>
   </div>
 </template>
@@ -198,4 +284,25 @@ onMounted(loadBots)
 .card {
   border-radius: 14px;
 }
+.risk-stat {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(128, 128, 128, 0.05);
+  border-radius: 10px;
+  height: 100%;
+}
+.risk-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.risk-info { min-width: 0; }
+.risk-val { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.risk-label { font-size: 11.5px; color: var(--n-text-color-3); }
 </style>

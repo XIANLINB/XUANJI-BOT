@@ -27,9 +27,27 @@ public class CommandRegistry {
     private final List<HandlerEntry> privateMsgHandlers = new CopyOnWriteArrayList<>();
     private final List<HandlerEntry> groupEventHandlers = new CopyOnWriteArrayList<>();
     private final List<HandlerEntry> privateEventHandlers = new CopyOnWriteArrayList<>();
+    /** @OnMessage 全量消息监听器（非命令场景，如自动回复/日志/风控）。 */
+    private final List<HandlerEntry> messageListeners = new CopyOnWriteArrayList<>();
     private final Map<String, Long> rateLimitMap = new ConcurrentHashMap<>();
     private final java.util.Set<String> disabledPlugins = ConcurrentHashMap.newKeySet();
     private final java.util.concurrent.atomic.AtomicLong rateLimitHits = new java.util.concurrent.atomic.AtomicLong();
+    /** 命令执行次数（风控中心：@GroupMessage/@PrivateMessage 处理器成功执行数）。 */
+    private final java.util.concurrent.atomic.AtomicLong commandExecCount = new java.util.concurrent.atomic.AtomicLong();
+    /** 命令执行异常次数（风控中心：处理器抛异常数）。 */
+    private final java.util.concurrent.atomic.AtomicLong commandFailCount = new java.util.concurrent.atomic.AtomicLong();
+    /** @OnMessage 监听器成功执行数（含非命令消息）。 */
+    private final java.util.concurrent.atomic.AtomicLong onMessageExecCount = new java.util.concurrent.atomic.AtomicLong();
+
+    /**
+     * 本次事件「命令是否命中」标记（每事件处理前需 reset）。
+     *
+     * <p>供 LlmChatStage 等「命令未命中才兜底」的场景判断：dispatch 时若有命令 handler
+     * 命中并执行，置 true；事件处理链内后续 stage 可读 {@link #isCommandHitInCurrentEvent()}。
+     * 线程模型：群/私聊消息事件在各自处理线程内串行，ThreadLocal 安全。
+     */
+    private final ThreadLocal<Boolean> commandHitInEvent = ThreadLocal.withInitial(() -> false);
+
     private final dev.xuanji.core.plugin.PluginBotBindingService bindingService;
 
     /** 插件持久化服务（方法参数 PluginStorage 自动注入）。 */
@@ -39,6 +57,10 @@ public class CommandRegistry {
     /** 插件配置服务（方法参数 PluginConfig 自动注入）。 */
     @Autowired(required = false)
     private PluginConfigService pluginConfigService;
+
+    /** 多轮会话（方法参数 ConversationSession 自动注入）。 */
+    @Autowired(required = false)
+    private dev.xuanji.api.action.ConversationSession conversationSession;
 
     public CommandRegistry(dev.xuanji.core.plugin.PluginBotBindingService bindingService) {
         this.bindingService = bindingService;
@@ -59,7 +81,21 @@ public class CommandRegistry {
         m.put("groupEventHandlers", groupEventHandlers.size());
         m.put("privateEventHandlers", privateEventHandlers.size());
         m.put("disabledPlugins", disabledPlugins.size());
+        // 命令级限速命中总次数（@Command rateLimit 拦截计数）。历史曾误命名为 pluginTimeoutCount，
+        // 前端字段已同步修正为 rateLimitHits；保留旧键兼容旧前端。
+        m.put("rateLimitHits", rateLimitHits.get());
         m.put("pluginTimeoutCount", rateLimitHits.get());
+        m.put("commandExecCount", commandExecCount.get());
+        m.put("commandFailCount", commandFailCount.get());
+        return m;
+    }
+
+    /** 命令执行统计（风控中心：执行次数 / 异常次数）。 */
+    public Map<String, Object> getCommandStats() {
+        Map<String, Object> m = new java.util.LinkedHashMap<>();
+        m.put("commandExecCount", commandExecCount.get());
+        m.put("commandFailCount", commandFailCount.get());
+        m.put("onMessageExecCount", onMessageExecCount.get());
         return m;
     }
 
@@ -130,8 +166,9 @@ public class CommandRegistry {
                 MessageFilter cf = new CommandFilter(command);
                 int order = command.order();
                 HandlerEntry entry = new HandlerEntry(m, pluginInstance, cf,
-                        order, rateLimit, roles(m), pluginId, methodPlatforms(m, pluginPlatforms));
-                switch (command.scope()) {
+                        order, rateLimit, roles(m), pluginId, methodPlatforms(m, pluginPlatforms),
+                        scopeOf(m, command.scope()));
+                switch (scopeOf(m, command.scope())) {
                     case GROUP -> groupMsgHandlers.add(entry);
                     case PRIVATE -> privateMsgHandlers.add(entry);
                     case BOTH -> { groupMsgHandlers.add(entry); privateMsgHandlers.add(entry); }
@@ -145,27 +182,47 @@ public class CommandRegistry {
             MessageFilter filter = m.getAnnotation(MessageFilter.class);
             // 平台白名单：handler 级注解优先，插件级 @XuanjiPlugin(platforms=) 兜底；两者皆空 = 全平台。
             java.util.Set<String> methodPlatforms = resolvePlatforms(m, pluginPlatforms);
+            // 场景限制：@GroupOnly 仅群、@PrivateOnly 仅私聊、都不标 = 两者（兼容原生注解 scope）
+            boolean gOnly = m.isAnnotationPresent(GroupOnly.class);
+            boolean pOnly = m.isAnnotationPresent(PrivateOnly.class);
 
-            if (m.isAnnotationPresent(GroupMessage.class)) {
+            if (m.isAnnotationPresent(GroupMessage.class) && !pOnly) {
                 groupMsgHandlers.add(new HandlerEntry(m, pluginInstance, filter,
-                        m.getAnnotation(GroupMessage.class).order(), rateLimit, roles(m), pluginId, methodPlatforms));
+                        m.getAnnotation(GroupMessage.class).order(), rateLimit, roles(m), pluginId, methodPlatforms, Scope.GROUP));
                 log.info("[Handler] 注册群聊消息: {}.{} (rateLimit={}s, platforms={})", pluginInstance.getClass().getSimpleName(), m.getName(), rateLimit, methodPlatforms);
             }
-            if (m.isAnnotationPresent(PrivateMessage.class)) {
-                privateMsgHandlers.add(new HandlerEntry(m, pluginInstance, filter, m.getAnnotation(PrivateMessage.class).order(), rateLimit, roles(m), pluginId, methodPlatforms));
+            if (m.isAnnotationPresent(PrivateMessage.class) && !gOnly) {
+                privateMsgHandlers.add(new HandlerEntry(m, pluginInstance, filter, m.getAnnotation(PrivateMessage.class).order(), rateLimit, roles(m), pluginId, methodPlatforms, Scope.PRIVATE));
                 log.info("[Handler] 注册私聊消息: {}.{} (rateLimit={}s, platforms={})", pluginInstance.getClass().getSimpleName(), m.getName(), rateLimit, methodPlatforms);
             }
             if (m.isAnnotationPresent(GroupEvent.class)) {
-                groupEventHandlers.add(new HandlerEntry(m, pluginInstance, null, m.getAnnotation(GroupEvent.class).order(), rateLimit, roles(m), pluginId, methodPlatforms));
+                groupEventHandlers.add(new HandlerEntry(m, pluginInstance, null, m.getAnnotation(GroupEvent.class).order(), rateLimit, roles(m), pluginId, methodPlatforms, Scope.GROUP));
                 log.info("[Handler] 注册群事件: {}.{} (platforms={})", pluginInstance.getClass().getSimpleName(), m.getName(), methodPlatforms);
             }
             if (m.isAnnotationPresent(PrivateEvent.class)) {
-                privateEventHandlers.add(new HandlerEntry(m, pluginInstance, null, m.getAnnotation(PrivateEvent.class).order(), rateLimit, roles(m), pluginId, methodPlatforms));
+                privateEventHandlers.add(new HandlerEntry(m, pluginInstance, null, m.getAnnotation(PrivateEvent.class).order(), rateLimit, roles(m), pluginId, methodPlatforms, Scope.PRIVATE));
                 log.info("[Handler] 注册私聊事件: {}.{} (platforms={})", pluginInstance.getClass().getSimpleName(), m.getName(), methodPlatforms);
+            }
+            if (m.isAnnotationPresent(OnMessage.class)) {
+                OnMessage om = m.getAnnotation(OnMessage.class);
+                Scope sc = om.privateOnly() ? Scope.PRIVATE : om.groupOnly() ? Scope.GROUP : Scope.BOTH;
+                messageListeners.add(new HandlerEntry(m, pluginInstance, null, om.priority(), rateLimit, roles(m), pluginId, methodPlatforms, sc));
+                log.info("[Handler] 注册@OnMessage: {}.{} scope={} priority={} block={}",
+                        pluginInstance.getClass().getSimpleName(), m.getName(), sc, om.priority(), om.block());
             }
         }
         groupMsgHandlers.sort(Comparator.comparingInt(e -> e.order));
         privateMsgHandlers.sort(Comparator.comparingInt(e -> e.order));
+        messageListeners.sort(Comparator.comparingInt(e -> e.order));
+    }
+
+    /** @Command 方法结合 @GroupOnly/@PrivateOnly 解析最终作用域（注解限制优先于 Command.scope）。 */
+    private static Scope scopeOf(Method m, Command.Scope cs) {
+        boolean gOnly = m.isAnnotationPresent(GroupOnly.class);
+        boolean pOnly = m.isAnnotationPresent(PrivateOnly.class);
+        if (pOnly) return Scope.PRIVATE;
+        if (gOnly) return Scope.GROUP;
+        return cs == Command.Scope.GROUP ? Scope.GROUP : cs == Command.Scope.PRIVATE ? Scope.PRIVATE : Scope.BOTH;
     }
 
     /** @Command 方法的平台白名单（与原生注解共用解析逻辑）。 */
@@ -194,6 +251,7 @@ public class CommandRegistry {
         privateMsgHandlers.removeIf(h -> h.instance == pluginInstance);
         groupEventHandlers.removeIf(h -> h.instance == pluginInstance);
         privateEventHandlers.removeIf(h -> h.instance == pluginInstance);
+        messageListeners.removeIf(h -> h.instance == pluginInstance);
         log.info("[Handler] 已注销: {}", pluginInstance.getClass().getSimpleName());
     }
 
@@ -270,15 +328,61 @@ public class CommandRegistry {
                 }
                 if (!checkRateLimit(e)) continue;
                 if (!checkRole(e)) continue;  // @RequireRole
+                commandHitInEvent.set(true);  // 命令 handler 命中：本事件后续不再触发 LLM 闲聊等兜底
                 String argsAfter = argsAfterCommand(trimmed, e.filter);
                 Object[] ma = resolveArgs(e.method, argsAfter, groupEventDtoTL.get(), e.pluginId);
                 Object result = e.method.invoke(e.instance, ma);
+                commandExecCount.incrementAndGet();
                 if (result != null) return result.toString();
             } catch (Exception ex) {
+                commandFailCount.incrementAndGet();
                 log.warn("[Handler] {}: {}", e.method.getName(), ex.getMessage());
             }
         }
         return null;
+    }
+
+    /**
+     * 执行 @OnMessage 全量监听器（非命令场景）：命令路由未命中时调用。
+     * 按优先级排序，block=true 的监听器处理后立即返回（阻断后续监听器）。
+     */
+    public void dispatchOnMessage(boolean isGroup) {
+        String currentPlatform = currentPlatformTL.get();
+        List<HandlerEntry> ordered = new java.util.ArrayList<>(messageListeners);
+        ordered.sort(Comparator.comparingInt((HandlerEntry e) -> e.order)
+                .thenComparingInt(e -> platformPriority(e, currentPlatform)));
+        for (HandlerEntry e : ordered) {
+            try {
+                if (!e.platforms.isEmpty() && !e.platforms.contains(currentPlatform)) continue;
+                if (!isPluginEnabled(e.pluginId)) continue;
+                // 场景限制：@OnMessage 的 groupOnly/privateOnly
+                if (e.scope == Scope.GROUP && !isGroup) continue;
+                if (e.scope == Scope.PRIVATE && isGroup) continue;
+                // @OnMessage 无命令过滤：所有消息都进
+                if (bindingService != null) {
+                    String curBotKey = getCurrentBotKey();
+                    if (curBotKey != null && !bindingService.isAllowedForBot(e.pluginId, currentPlatform, curBotKey)) continue;
+                }
+                Object[] ma = resolveArgs(e.method, "", groupEventDtoTL.get(), e.pluginId);
+                e.method.invoke(e.instance, ma);
+                onMessageExecCount.incrementAndGet();
+                // 获取注解 block 标记（通过反射读取，避免记录额外字段）
+                OnMessage om = e.method.getAnnotation(OnMessage.class);
+                if (om != null && om.block()) return;
+            } catch (Exception ex) {
+                log.warn("[OnMessage] {}: {}", e.method.getName(), ex.getMessage());
+            }
+        }
+    }
+
+    /** 每事件处理开始前调用，重置「命令命中」标记（保证事件间不串扰）。 */
+    public void resetCommandHitFlag() {
+        commandHitInEvent.set(false);
+    }
+
+    /** 当前事件是否已有命令 handler 命中执行（LLM 闲聊等兜底逻辑读取）。 */
+    public boolean isCommandHitInCurrentEvent() {
+        return Boolean.TRUE.equals(commandHitInEvent.get());
     }
 
     /** 平台优先级：显式命中当前平台=0，默认全平台(兜底)=1，其他平台=2（会被白名单拦截） */
@@ -388,6 +492,11 @@ public class CommandRegistry {
                         ? pluginConfigService.view(pluginId) : null;
                 continue;
             }
+            // 多轮会话：注入全局会话管理器（按当前事件上下文定位用户）
+            if (dev.xuanji.api.action.ConversationSession.class.isAssignableFrom(type)) {
+                values[i] = conversationSession;
+                continue;
+            }
             Arg arg = params[i].getAnnotation(Arg.class);
             if (arg != null) {
                 String raw = argCursor < argParts.length ? argParts[argCursor++] : null;
@@ -434,7 +543,10 @@ public class CommandRegistry {
 
     private record HandlerEntry(Method method, Object instance, MessageFilter filter,
                                 int order, int rateLimit, java.util.Set<String> requiredRole,
-                                String pluginId, java.util.Set<String> platforms) {}
+                                String pluginId, java.util.Set<String> platforms, Scope scope) {}
+
+    /** 命令响应场景：GROUP 仅群聊 / PRIVATE 仅私聊 / BOTH 两者都响应。 */
+    private enum Scope { GROUP, PRIVATE, BOTH }
 
     /** 提取 @RequireRole 要求的角色 */
     private static java.util.Set<String> roles(Method m) {

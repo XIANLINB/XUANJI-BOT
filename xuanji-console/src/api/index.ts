@@ -18,6 +18,9 @@ import { schedulerApi } from './scheduler'
 import { dataApi } from './data'
 import { alertApi } from './alert'
 import { riskApi } from './risk'
+import { systemApi } from './system'
+import { chatApi } from './chat'
+import { llmApi } from './llm'
 import { getActuatorMetric } from './http'
 
 export default {
@@ -38,5 +41,8 @@ export default {
   ...dataApi,
   ...alertApi,
   ...riskApi,
+  ...chatApi,
+  llmApi,
+  systemApi,
   getActuatorMetric
 }

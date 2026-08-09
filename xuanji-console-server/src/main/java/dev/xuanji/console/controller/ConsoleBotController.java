@@ -1,9 +1,11 @@
 package dev.xuanji.console.controller;
 
+import dev.xuanji.console.service.AuditService;
 import dev.xuanji.console.service.ConsoleQueryService;
 import dev.xuanji.core.config.XuanjiRobotProperties;
 import dev.xuanji.core.storage.PlatformDataProvider;
 import dev.xuanji.core.web.XuanjiApi;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
@@ -28,10 +30,13 @@ public class ConsoleBotController {
 
     private final ConsoleQueryService queryService;
     private final XuanjiRobotProperties robotProperties;
+    private final AuditService auditService;
 
-    public ConsoleBotController(ConsoleQueryService queryService, XuanjiRobotProperties robotProperties) {
+    public ConsoleBotController(ConsoleQueryService queryService, XuanjiRobotProperties robotProperties,
+                                AuditService auditService) {
         this.queryService = queryService;
         this.robotProperties = robotProperties;
+        this.auditService = auditService;
     }
 
     /** 机器人列表（卡片页数据源）。 */
@@ -166,7 +171,8 @@ public class ConsoleBotController {
     /** 切换连接方式（websocket ↔ webhook）：校验 → 更新配置 → stop+start 重连。 */
     @PutMapping("/bots/{botKey}/conn-mode")
     public Map<String, Object> updateConnMode(@PathVariable String botKey,
-                                               @RequestParam String mode) {
+                                               @RequestParam String mode,
+                                               HttpServletRequest req) {
         if (mode == null || (!mode.equalsIgnoreCase("websocket") && !mode.equalsIgnoreCase("webhook"))) {
             return Map.of("error", "mode 必须是 websocket 或 webhook");
         }
@@ -206,6 +212,8 @@ public class ConsoleBotController {
             p.startBot(appId, env);
 
             log.info("[Console] 切换机器人连接方式: botKey={}, appId={}, mode={}", botKey, appId, normalized);
+            auditService.record("BOT_CONN_MODE_CHANGE",
+                    "appId=" + appId + " 切换连接方式 → " + normalized, req);
             return Map.of("ok", true, "msg", "已切换到 " + normalized + "，连接已重启");
         } catch (Exception e) {
             log.error("[Console] 切换连接方式失败: {}", e.getMessage(), e);
@@ -215,7 +223,7 @@ public class ConsoleBotController {
 
     /** 停止机器人连接（WebSocket 断开 / Webhook 标记停用）。 */
     @PostMapping("/bots/{botKey}/stop")
-    public Map<String, Object> stopBot(@PathVariable String botKey) {
+    public Map<String, Object> stopBot(@PathVariable String botKey, HttpServletRequest req) {
         String appId = queryService.resolveAppId(botKey);
         if (appId == null || appId.isBlank()) return Map.of("error", "Bot not found");
         String platform = queryService.resolvePlatform(appId);
@@ -224,6 +232,7 @@ public class ConsoleBotController {
         try {
             p.stopBot(appId);
             log.info("[Console] 停止机器人: appId={}, platform={}", appId, platform);
+            auditService.record("BOT_STOP", "appId=" + appId + " (" + platform + ") 停止连接", req);
             return Map.of("ok", true);
         } catch (Exception e) {
             log.error("[Console] 停止机器人失败: appId={}, {}", appId, e.getMessage(), e);
@@ -231,9 +240,38 @@ public class ConsoleBotController {
         }
     }
 
+    /** 群变动数据（今日/昨日新增群 + 活跃成员）。统计卡「群变动 / 成员变动」用。 */
+    @GetMapping("/bots/{botKey}/group-variation")
+    public Map<String, Object> groupVariation(@PathVariable String botKey) {
+        String appId = queryService.resolveAppId(botKey);
+        if (appId == null) return Map.of("error", "Bot not found");
+        String platform = queryService.resolvePlatform(appId);
+        PlatformDataProvider p = queryService.providerFor(platform);
+        if (p == null) return Map.of("error", "unsupported platform: " + platform);
+        long now = java.time.Instant.now().getEpochSecond();
+        long today0 = ConsoleQueryService.todayStartEpochSeconds();
+        long yday0 = today0 - 86400L;
+        // 接口签名 Map<String,Long>，Controller 暴露 Map<String,Object>，强转
+        return (Map<String, Object>) (Map) p.groupVariation(appId, today0, yday0, now);
+    }
+
+    /** 单聊用户变动数据（今日/昨日新增用户 + 活跃用户）。统计卡「用户变动」用。 */
+    @GetMapping("/bots/{botKey}/friend-variation")
+    public Map<String, Object> friendVariation(@PathVariable String botKey) {
+        String appId = queryService.resolveAppId(botKey);
+        if (appId == null) return Map.of("error", "Bot not found");
+        String platform = queryService.resolvePlatform(appId);
+        PlatformDataProvider p = queryService.providerFor(platform);
+        if (p == null) return Map.of("error", "unsupported platform: " + platform);
+        long now = java.time.Instant.now().getEpochSecond();
+        long today0 = ConsoleQueryService.todayStartEpochSeconds();
+        long yday0 = today0 - 86400L;
+        return (Map<String, Object>) (Map) p.friendVariation(appId, today0, yday0, now);
+    }
+
     /** 启动机器人连接。envType 取自数据库配置（SANDBOX / PRODUCTION）。 */
     @PostMapping("/bots/{botKey}/start")
-    public Map<String, Object> startBot(@PathVariable String botKey) {
+    public Map<String, Object> startBot(@PathVariable String botKey, HttpServletRequest req) {
         String appId = queryService.resolveAppId(botKey);
         if (appId == null || appId.isBlank()) return Map.of("error", "Bot not found");
         String platform = queryService.resolvePlatform(appId);
@@ -247,6 +285,7 @@ public class ConsoleBotController {
         try {
             p.startBot(appId, env);
             log.info("[Console] 启用机器人: appId={}, platform={}, env={}", appId, platform, env);
+            auditService.record("BOT_START", "appId=" + appId + " (" + platform + ") 启动连接 env=" + env, req);
             return Map.of("ok", true);
         } catch (Exception e) {
             log.error("[Console] 启用机器人失败: appId={}, {}", appId, e.getMessage(), e);

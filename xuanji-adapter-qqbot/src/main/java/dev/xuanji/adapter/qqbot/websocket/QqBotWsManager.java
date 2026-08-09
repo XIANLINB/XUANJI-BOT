@@ -61,6 +61,21 @@ public class QqBotWsManager {
 
     /** 平台库 Repository（注入到客户端，upsertBotInfo 写入 qqbot_botinfo） */
     private final dev.xuanji.adapter.qqbot.storage.QqBotRepository qqBotRepository;
+    /** 全局配置（tune.* 模板参数读取：ws_core/ws_max/heartbeat_pool，未配置用代码默认值）。 */
+    private final dev.xuanji.core.config.ConfigService configService;
+
+    /** 读全局配置整数（key 不存在/非法时用默认值）。 */
+    private int cfgInt(String key, int def) {
+        try {
+            Map<String, String> g = configService != null ? configService.getGlobalConfig() : Map.of();
+            String v = g.get(key);
+            if (v != null && !v.isBlank()) {
+                int n = Integer.parseInt(v.trim());
+                if (n > 0) return n;
+            }
+        } catch (Exception ignored) { /* 解析失败用默认值 */ }
+        return def;
+    }
 
     /**
      * 默认的事件订阅意图位掩码
@@ -108,12 +123,14 @@ public class QqBotWsManager {
                            GatewayService gatewayService,
                            AccessTokenService accessTokenService,
                            dev.xuanji.adapter.qqbot.api.QqApiService qqApiService,
-                           dev.xuanji.adapter.qqbot.storage.QqBotRepository qqBotRepository) {
+                           dev.xuanji.adapter.qqbot.storage.QqBotRepository qqBotRepository,
+                           dev.xuanji.core.config.ConfigService configService) {
         this.botPipeline = botPipeline;
         this.gatewayService = gatewayService;
         this.accessTokenService = accessTokenService;
         this.qqApiService = qqApiService;
         this.qqBotRepository = qqBotRepository;
+        this.configService = configService;
     }
 
     /**
@@ -124,17 +141,19 @@ public class QqBotWsManager {
      */
     @PostConstruct
     public void init() {
-        // 心跳调度池：核心线程数 = max(2, CPU 核心数)
-        int heartbeatThreads = Math.max(2, Runtime.getRuntime().availableProcessors());
+        // 心跳调度池：核心线程数 = 读 tune.heartbeat_pool，未配置默认 max(2, CPU 核心数)
+        int heartbeatThreads = cfgInt("tune.heartbeat_pool", Math.max(2, Runtime.getRuntime().availableProcessors()));
         heartbeatScheduler = Executors.newScheduledThreadPool(heartbeatThreads, r -> {
             Thread t = new Thread(r, "ws-heartbeat-shared");
             t.setDaemon(true);
             return t;
         });
 
-        // 连接池：核心 4 线程，最大 16 线程，队列 200，满时由调用线程执行
+        // 连接池：核心/最大读 tune.ws_core / tune.ws_max，未配置默认 4/16；队列 200，满时由调用线程执行
+        int wsCore = cfgInt("tune.ws_core", 4);
+        int wsMax = cfgInt("tune.ws_max", 16);
         connectExecutor = new ThreadPoolExecutor(
-                4, 16, 60L, TimeUnit.SECONDS,
+                wsCore, wsMax, 60L, TimeUnit.SECONDS,
                 new LinkedBlockingQueue<>(200),
                 r -> {
                     Thread t = new Thread(r, "ws-connect-shared");
@@ -144,7 +163,7 @@ public class QqBotWsManager {
                 new ThreadPoolExecutor.CallerRunsPolicy() // 队列满时由调用线程执行，避免丢弃任务
         );
 
-        log.info("[BotWS Manager] 初始化完成，线程池就绪");
+        log.info("[BotWS Manager] 初始化完成：心跳池={}, 连接池={}/{}", heartbeatThreads, wsCore, wsMax);
 
         // 注册到监控：连接/重连线程池 + 心跳调度池实时状态
         ThreadPoolRegistry.register("QQ-WS连接池(共享)", () -> {
@@ -189,7 +208,7 @@ public class QqBotWsManager {
      */
     public void setNewOpenBot(boolean isNewOpenBot) {
         this.isNewOpenBot = isNewOpenBot;
-        log.info("[BotWS Manager] 设置开放平台版本: isNewOpenBot={}", isNewOpenBot);
+        log.debug("[BotWS Manager] 设置开放平台版本: isNewOpenBot={}", isNewOpenBot);
     }
 
     /**

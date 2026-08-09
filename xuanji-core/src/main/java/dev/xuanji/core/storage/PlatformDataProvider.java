@@ -128,6 +128,22 @@ public interface PlatformDataProvider {
         return List.of();
     }
 
+    /**
+     * 群变动数据（默认空实现）。控制台「群变动 / 成员变动」统计卡用。
+     * 返回 key：todayNewGroups / ydayNewGroups / todayActiveMembers / ydayActiveMembers（皆 Long）。
+     */
+    default Map<String, Long> groupVariation(String instanceId, long today0, long yday0, long now) {
+        return new java.util.LinkedHashMap<>();
+    }
+
+    /**
+     * 单聊用户变动数据（默认空实现）。控制台「用户变动」统计卡用。
+     * 返回 key：todayNewFriends / ydayNewFriends / todayActiveUsers / ydayActiveUsers（皆 Long）。
+     */
+    default Map<String, Long> friendVariation(String instanceId, long today0, long yday0, long now) {
+        return new java.util.LinkedHashMap<>();
+    }
+
     // ==================== 生命周期 ====================
 
     void startBot(String instanceId, String envType);

@@ -8,7 +8,7 @@ import dev.xuanji.adapter.qqbot.registry.RobotRegistry;
 import dev.xuanji.api.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.ObjectNode;
 import dev.xuanji.api.json.Json;
 import org.springframework.stereotype.Service;
 

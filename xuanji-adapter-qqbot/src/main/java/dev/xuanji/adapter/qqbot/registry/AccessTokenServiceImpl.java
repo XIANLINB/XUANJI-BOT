@@ -3,7 +3,7 @@ package dev.xuanji.adapter.qqbot.registry;
 import dev.xuanji.adapter.qqbot.config.QqPlatformConfig;
 
 import lombok.extern.slf4j.Slf4j;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.ObjectNode;
 import dev.xuanji.api.json.Json;
 import org.springframework.stereotype.Service;
 

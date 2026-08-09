@@ -13,7 +13,7 @@ import dev.xuanji.api.event.BotEvent;
 import dev.xuanji.adapter.qqbot.converter.QqEventConverter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.ObjectNode;
 import dev.xuanji.api.json.Json;
 import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Service;

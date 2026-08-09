@@ -1,11 +1,11 @@
 package dev.xuanji.adapter.qqbot.api;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import dev.xuanji.adapter.qqbot.dto.SendMessageRequest;
 import dev.xuanji.adapter.qqbot.model.Robot;
 import dev.xuanji.adapter.qqbot.registry.RobotRegistry;
 import lombok.extern.slf4j.Slf4j;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.ObjectNode;
 import dev.xuanji.api.json.Json;
 import org.springframework.stereotype.Component;
 
@@ -167,8 +167,8 @@ public class MessageSender {
                                        Object markdown, Object keyboard, String msgId) {
         ObjectNode body = Json.obj();
         body.put("msg_type", 2);
-        body.put("markdown", toJsonObject(markdown));
-        if (keyboard != null) body.put("keyboard", toJsonObject(keyboard));
+        body.set("markdown", toJsonObject(markdown));
+        if (keyboard != null) body.set("keyboard", toJsonObject(keyboard));
         if (msgId != null) body.put("msg_id", msgId);
 
         try {
@@ -185,7 +185,7 @@ public class MessageSender {
     public ObjectNode sendC2cArk(String robotId, String envType, String openid, Object ark, String msgId) {
         ObjectNode body = Json.obj();
         body.put("msg_type", 3);
-        body.put("ark", toJsonObject(ark));
+        body.set("ark", toJsonObject(ark));
         if (msgId != null) body.put("msg_id", msgId);
 
         try {
@@ -203,7 +203,7 @@ public class MessageSender {
     public ObjectNode sendC2cMedia(String robotId, String envType, String openid, Object media, String msgId) {
         ObjectNode body = Json.obj();
         body.put("msg_type", 7);
-        body.put("media", toJsonObject(media));
+        body.set("media", toJsonObject(media));
         if (msgId != null) body.put("msg_id", msgId);
 
         try {
@@ -254,8 +254,8 @@ public class MessageSender {
                                          Object markdown, Object keyboard, String msgId) {
         ObjectNode body = Json.obj();
         body.put("msg_type", 2);
-        body.put("markdown", toJsonObject(markdown));
-        if (keyboard != null) body.put("keyboard", toJsonObject(keyboard));
+        body.set("markdown", toJsonObject(markdown));
+        if (keyboard != null) body.set("keyboard", toJsonObject(keyboard));
         if (msgId != null) body.put("msg_id", msgId);
 
         try {
@@ -274,7 +274,7 @@ public class MessageSender {
     public ObjectNode sendGroupArk(String robotId, String envType, String groupOpenid, Object ark, String msgId) {
         ObjectNode body = Json.obj();
         body.put("msg_type", 3);
-        body.put("ark", toJsonObject(ark));
+        body.set("ark", toJsonObject(ark));
         if (msgId != null) body.put("msg_id", msgId);
 
         try {
@@ -293,7 +293,7 @@ public class MessageSender {
     public ObjectNode sendGroupMedia(String robotId, String envType, String groupOpenid, Object media, String msgId) {
         ObjectNode body = Json.obj();
         body.put("msg_type", 7);
-        body.put("media", toJsonObject(media));
+        body.set("media", toJsonObject(media));
         if (msgId != null) body.put("msg_id", msgId);
 
         try {
@@ -350,7 +350,7 @@ public class MessageSender {
             // 发送媒体消息
             ObjectNode sendBody = Json.obj();
             sendBody.put("msg_type", 7);
-            sendBody.put("media", Json.obj().put("file_info", fileInfo));
+            sendBody.set("media", Json.obj().put("file_info", fileInfo));
             if (msgId != null) sendBody.put("msg_id", msgId);
 
             ObjectNode result = qqApiService.post(robotId, envType,
@@ -363,6 +363,8 @@ public class MessageSender {
                 default -> "媒体";
             };
             log.info("[发送群聊消息成功][群{}] [{}]", groupOpenid, typeName);
+            // 出站事件计数（运行监控 QPS 出站曲线数据源）
+            dev.xuanji.core.metric.QpsMeter.hitOut();
             // OUT 落库（per-bot qqbot_message，富媒体回复在消息监控显示「发送」方向）
             try {
                 String msgType = switch (fileType) {
@@ -380,6 +382,144 @@ public class MessageSender {
             return result;
         } catch (Exception e) {
             log.error("[发送群聊媒体失败][群{}] {}", groupOpenid, e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
+     * 上传语音（base64 file_data，无需公网 URL）并发送语音消息。
+     *
+     * <p>QQ 开放平台富媒体上传支持 {@code file_data}（base64 二进制数据）字段，
+     * 免去公网 URL 依赖；语音格式支持 wav/mp3/flac/silk（file_type=3）。
+     */
+    public ObjectNode uploadAndSendGroupVoice(String robotId, String envType, String groupOpenid,
+                                              byte[] audioData, String msgId) {
+        ObjectNode uploadBody = Json.obj();
+        uploadBody.put("file_type", 3);
+        uploadBody.put("file_data", java.util.Base64.getEncoder().encodeToString(audioData));
+        uploadBody.put("srv_send_msg", false);
+        try {
+            ObjectNode uploadResult = qqApiService.post(robotId, envType,
+                    "/v2/groups/" + groupOpenid + "/files", uploadBody);
+            String fileInfo = uploadResult.path("file_info").asText();
+            if (fileInfo == null || fileInfo.isEmpty()) {
+                log.error("[上传群聊语音失败][群{}] 未获取到 file_info", groupOpenid);
+                return null;
+            }
+            ObjectNode sendBody = Json.obj();
+            sendBody.put("msg_type", 7);
+            sendBody.set("media", Json.obj().put("file_info", fileInfo));
+            if (msgId != null) sendBody.put("msg_id", msgId);
+            ObjectNode result = qqApiService.post(robotId, envType,
+                    "/v2/groups/" + groupOpenid + "/messages", sendBody);
+            log.info("[发送群聊语音成功][群{}] {}B", groupOpenid, audioData.length);
+            dev.xuanji.core.metric.QpsMeter.hitOut();
+            try {
+                qqRepo.insertMessage(robotId, "group", groupOpenid, robotId,
+                        "OUT", "voice", "tts-" + audioData.length + "B", msgId, null, null, null,
+                        dev.xuanji.core.util.TimeUtils.nowEpochSeconds());
+            } catch (Exception ex) {
+                log.debug("[OUT落库] 失败: {}", ex.getMessage());
+            }
+            return result;
+        } catch (Exception e) {
+            log.error("[发送群聊语音失败][群{}] {}", groupOpenid, e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
+     * 上传群聊媒体（base64 file_data 方式，无需公网 URL）并发送。
+     *
+     * <p>QQ 富媒体上传对图片/语音均支持 {@code file_data}（base64 二进制）字段：
+     * file_type=1 图片 / 2 视频 / 3 语音。本地渲染的卡片/表情包走此通道。
+     */
+    public ObjectNode uploadAndSendGroupMediaData(String robotId, String envType, String groupOpenid,
+                                                  int fileType, byte[] fileData, String msgId) {
+        ObjectNode uploadBody = Json.obj();
+        uploadBody.put("file_type", fileType);
+        uploadBody.put("file_data", java.util.Base64.getEncoder().encodeToString(fileData));
+        uploadBody.put("srv_send_msg", false);
+        try {
+            ObjectNode uploadResult = qqApiService.post(robotId, envType,
+                    "/v2/groups/" + groupOpenid + "/files", uploadBody);
+            String fileInfo = uploadResult.path("file_info").asText();
+            if (fileInfo == null || fileInfo.isEmpty()) {
+                log.error("[上传群聊媒体失败][群{}] 未获取到 file_info", groupOpenid);
+                return null;
+            }
+            ObjectNode sendBody = Json.obj();
+            sendBody.put("msg_type", 7);
+            sendBody.set("media", Json.obj().put("file_info", fileInfo));
+            if (msgId != null) sendBody.put("msg_id", msgId);
+            ObjectNode result = qqApiService.post(robotId, envType,
+                    "/v2/groups/" + groupOpenid + "/messages", sendBody);
+            log.info("[发送群聊媒体成功][群{}] fileType={} {}B", groupOpenid, fileType, fileData.length);
+            dev.xuanji.core.metric.QpsMeter.hitOut();
+            try {
+                String typeName = switch (fileType) {
+                    case 1 -> "image";
+                    case 2 -> "video";
+                    case 3 -> "voice";
+                    default -> "media";
+                };
+                qqRepo.insertMessage(robotId, "group", groupOpenid, robotId,
+                        "OUT", typeName, fileType + "-" + fileData.length + "B", msgId, null, null, null,
+                        dev.xuanji.core.util.TimeUtils.nowEpochSeconds());
+            } catch (Exception ex) {
+                log.debug("[OUT落库] 失败: {}", ex.getMessage());
+            }
+            return result;
+        } catch (Exception e) {
+            log.error("[发送群聊媒体失败][群{}] {}", groupOpenid, e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
+     * 上传单聊媒体（base64 file_data 方式，无需公网 URL）并发送。
+     *
+     * <p>与 {@link #uploadAndSendGroupMediaData} 对应，目标为用户 openid：
+     * POST /v2/users/{openid}/files + file_data base64 → file_info → msg_type=7 发送。
+     */
+    public ObjectNode uploadAndSendC2cMediaData(String robotId, String envType, String openid,
+                                                int fileType, byte[] fileData, String msgId) {
+        ObjectNode uploadBody = Json.obj();
+        uploadBody.put("file_type", fileType);
+        uploadBody.put("file_data", java.util.Base64.getEncoder().encodeToString(fileData));
+        uploadBody.put("srv_send_msg", false);
+        try {
+            ObjectNode uploadResult = qqApiService.postWithTimeout(robotId, envType,
+                    "/v2/users/" + openid + "/files", uploadBody, 60);
+            String fileInfo = uploadResult.path("file_info").asText();
+            if (fileInfo == null || fileInfo.isEmpty()) {
+                log.error("[上传单聊媒体失败][用户{}] 未获取到 file_info", openid);
+                return null;
+            }
+            ObjectNode sendBody = Json.obj();
+            sendBody.put("msg_type", 7);
+            sendBody.set("media", Json.obj().put("file_info", fileInfo));
+            if (msgId != null) sendBody.put("msg_id", msgId);
+            ObjectNode result = qqApiService.post(robotId, envType,
+                    "/v2/users/" + openid + "/messages", sendBody);
+            log.info("[发送单聊媒体成功][用户{}] fileType={} {}B", openid, fileType, fileData.length);
+            dev.xuanji.core.metric.QpsMeter.hitOut();
+            try {
+                String typeName = switch (fileType) {
+                    case 1 -> "image";
+                    case 2 -> "video";
+                    case 3 -> "voice";
+                    default -> "media";
+                };
+                qqRepo.insertMessage(robotId, "c2c", openid, robotId,
+                        "OUT", typeName, fileType + "-" + fileData.length + "B", msgId, null, null, null,
+                        dev.xuanji.core.util.TimeUtils.nowEpochSeconds());
+            } catch (Exception ex) {
+                log.debug("[OUT落库] 失败: {}", ex.getMessage());
+            }
+            return result;
+        } catch (Exception e) {
+            log.error("[发送单聊媒体失败][用户{}] {}", openid, e.getMessage());
             throw e;
         }
     }
@@ -406,7 +546,7 @@ public class MessageSender {
 
             ObjectNode sendBody = Json.obj();
             sendBody.put("msg_type", 7);
-            sendBody.put("media", Json.obj().put("file_info", fileInfo));
+            sendBody.set("media", Json.obj().put("file_info", fileInfo));
             if (msgId != null) sendBody.put("msg_id", msgId);
 
             ObjectNode result = qqApiService.post(robotId, envType,
@@ -419,6 +559,8 @@ public class MessageSender {
                 default -> "媒体";
             };
             log.info("[发送单聊消息成功][用户{}] [{}]", openid, typeName);
+            // 出站事件计数（运行监控 QPS 出站曲线数据源）
+            dev.xuanji.core.metric.QpsMeter.hitOut();
             // OUT 落库（per-bot qqbot_message，富媒体回复在消息监控显示「发送」方向）
             try {
                 String msgType = switch (fileType) {
@@ -473,7 +615,7 @@ public class MessageSender {
         }
         ObjectNode sendBody = Json.obj();
         sendBody.put("msg_type", 7);
-        sendBody.put("media", Json.obj().put("file_info", fileInfo));
+        sendBody.set("media", Json.obj().put("file_info", fileInfo));
         if (msgId != null) sendBody.put("msg_id", msgId);
 
         String path = "group".equals(chatType)
@@ -489,6 +631,8 @@ public class MessageSender {
         };
         log.info("[发送{}消息成功][{}] [{}]", "group".equals(chatType) ? "群聊" : "单聊",
                 "group".equals(chatType) ? groupOpenid : userOpenid, typeName);
+        // 出站事件计数（运行监控 QPS 出站曲线数据源）
+        dev.xuanji.core.metric.QpsMeter.hitOut();
         // OUT 落库（per-bot qqbot_message，聊天窗口显示「发送」方向）
         try {
             String msgType = switch (fileType) {
@@ -613,6 +757,8 @@ public class MessageSender {
      */
     private void recordOutbound(String robotId, String chatType, String targetId,
                                 String msgType, String content, String msgId, String rawJson) {
+        // 出站事件计数（运行监控 QPS 出站曲线数据源）：所有发送成功路径都会经过这里
+        dev.xuanji.core.metric.QpsMeter.hitOut();
         try {
             qqRepo.insertMessage(robotId, chatType, targetId, robotId,
                     "OUT", msgType, content, msgId, null, null, rawJson,

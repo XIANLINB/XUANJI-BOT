@@ -1,7 +1,7 @@
 package dev.xuanji.adapter.qqbot.websocket;
 
 import lombok.Data;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.ObjectNode;
 import dev.xuanji.api.json.Json;
 
 /**

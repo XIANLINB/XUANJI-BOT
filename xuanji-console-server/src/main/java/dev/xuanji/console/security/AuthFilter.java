@@ -35,7 +35,9 @@ public class AuthFilter extends OncePerRequestFilter {
     private static final Set<String> WHITELIST_PREFIXES = Set.of(
             API_PREFIX + "/setup",
             API_PREFIX + "/auth",
-            API_PREFIX + "/console/health"
+            API_PREFIX + "/console/health",
+            // 内置演示 MCP server（JSON-RPC，仅暴露无副作用演示工具，供 McpClient 连接验收）
+            API_PREFIX + "/console/llm/mcp-demo"
     );
 
     private final SessionStore sessionStore;

@@ -10,6 +10,7 @@ import {
   PlayOutline, StopOutline
 } from '@vicons/ionicons5'
 import PageHero from '../components/PageHero.vue'
+import StatCard from '../components/StatCard.vue'
 import api from '../api'
 
 const router = useRouter()
@@ -18,6 +19,15 @@ const rows = ref<any[]>([])
 const keyword = ref('')
 const loading = ref(false)
 const scanning = ref(false)
+
+// 命令执行统计（风控数据源）
+const cmdStat = ref<Record<string, any>>({ execCount: 0, failCount: 0, successRate: 100, rateLimitHits: 0 })
+async function loadCmdStat() {
+  try {
+    const o = await api.riskOverview()
+    cmdStat.value = { ...o.command, rateLimitHits: o.rateLimit?.commandHits ?? 0 }
+  } catch { /* 统计失败不影响列表 */ }
+}
 
 const filtered = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
@@ -106,7 +116,7 @@ function openPage(p: any) {
   router.push('/plugins/p/' + p.id)
 }
 
-onMounted(load)
+onMounted(() => { load(); loadCmdStat() })
 </script>
 
 <template>
@@ -124,6 +134,22 @@ onMounted(load)
     </PageHero>
 
     <NEmpty v-if="!loading && !filtered.length" description="暂无插件，点「扫描新插件」或把 jar 放入 plugins/ 目录" style="padding: 60px 0" />
+
+    <!-- 插件执行统计（来自框架命令注册表） -->
+    <NGrid :cols="24" :x-gap="12" :y-gap="12" responsive="screen" item-responsive style="margin-bottom: 16px">
+      <NGi span="24 s:12 m:8 l:6">
+        <StatCard :icon="PlayOutline" color="#5b5bd6" :value="Number(cmdStat.execCount ?? 0)" label="命令执行次数（进程累计）" />
+      </NGi>
+      <NGi span="24 s:12 m:8 l:6">
+        <StatCard :icon="StopOutline" color="#e5484d" :value="Number(cmdStat.failCount ?? 0)" label="命令执行异常" />
+      </NGi>
+      <NGi span="24 s:12 m:8 l:6">
+        <StatCard :icon="PlayOutline" color="#18a058" :value="(cmdStat.successRate ?? 100) + '%'" label="命令成功率" :animate="false" />
+      </NGi>
+      <NGi span="24 s:12 m:8 l:6">
+        <StatCard :icon="SettingsOutline" color="#f0a020" :value="Number(cmdStat.rateLimitHits ?? 0)" label="命令限速命中（@Command rateLimit）" />
+      </NGi>
+    </NGrid>
 
     <NGrid :cols="24" :x-gap="16" :y-gap="16" responsive="screen" item-responsive class="grid">
       <NGi v-for="p in filtered" :key="p.id" span="24 m:12 l:8 xl:6">
