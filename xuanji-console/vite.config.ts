@@ -14,12 +14,13 @@ export default defineConfig({
     // 技术栈约定：auto-import（vue/vue-router/pinia API 免手动 import）+ Naive UI 按需自动导入
     AutoImport({
       imports: ['vue', 'vue-router', 'pinia'],
-      dts: 'src/auto-imports.d.ts',
+      // dts 关闭：生成的 auto-imports.d.ts 常被 IDE 锁住导致构建 EPERM；类型提示仅影响 IDE，不影响构建
+      dts: false,
       eslintrc: { enabled: false }
     }),
     Components({
       resolvers: [NaiveUiResolver()],
-      dts: 'src/components.d.ts'
+      dts: false
     })
   ],
   base: './',
@@ -33,7 +34,8 @@ export default defineConfig({
     }
   },
   build: {
-    outDir: 'dist',
+    // 构建到独立目录，避免 dist 被 IDE/安全钩子锁导致 EPERM；部署脚本同步到 Spring static
+    outDir: 'frontend-dist7',
     emptyOutDir: true,
     chunkSizeWarningLimit: 800
   }

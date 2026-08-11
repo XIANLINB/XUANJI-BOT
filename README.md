@@ -2,7 +2,7 @@
 
 > 🚀 一个开箱即用的 **多平台 · 多机器人 · 自带 AI 能力**的机器人框架
 >
-> QQ 官方 Bot · OneBot · 插件化 · 可视化控制台 · LLM 智能引擎
+> QQ 官方 Bot · 插件化 · 可视化控制台 · LLM 智能引擎
 
 ![Version](https://img.shields.io/badge/版本-v1.0.0-blue)
 ![Java](https://img.shields.io/badge/Java-25-orange)
@@ -27,7 +27,7 @@
 
 璇玑（XuanJi）是一个基于 **Java 25 + Spring Boot 4** 的机器人开发框架，目标是「**小白能直接用，开发者好扩展，还能让 AI 真正会聊天**」：
 
-- **多平台多机器人**：QQ 官方 Bot（WebSocket / Webhook 双模式）+ OneBot（NapCat / Lagrange 等），一个框架同时管理 N 个机器人，互相独立、各自落库
+- **多平台多机器人**：QQ 官方 Bot（WebSocket / Webhook 双模式），一个框架同时管理 N 个机器人，互相独立、各自落库
 - **可视化控制台**：内置 Web 管理后台，机器人 / 消息 / 插件 / 权限 / 数据 / AI 全部可视化，全中文界面
 - **AI 能力引擎**：内建 LLM 智能模块——AI 对话、人格角色扮演、长期记忆、工具调用、Agent 自主会话、知识库问答……让机器人不只是"查命令"，而是"会聊天、会办事"
 - **插件化**：`@Command` 注解一行注册命令，支持**热加载**（改插件不重启）
@@ -40,7 +40,7 @@
 
 ### 框架核心
 
-- ✅ 多平台适配：QQ 官方 API（WS + Webhook）+ OneBot v11（反向 WS）
+- ✅ 多平台适配：QQ 官方 API（WS + Webhook）
 - ✅ 多机器人：一个框架管理 N 个机器人，独立落库、独立配置
 - ✅ 事件分发管线：统一事件模型 + 阶段化 Pipeline（鉴权 / 限速 / 去重 / 审核 / 分发）
 - ✅ 三级配置：全局 / 机器人 / 群 三个粒度，改完即时生效
@@ -180,7 +180,6 @@ xuanji/
 ├── xuanji-llm/              # AI 能力引擎（LLM / 工具 / Agent / MCP / 记忆 / RAG / 多模态）
 ├── xuanji-scheduler/        # 定时任务中心
 ├── xuanji-adapter-qqbot/    # QQ 官方适配器（WS + Webhook）
-├── xuanji-adapter-onebot/   # OneBot 适配器
 ├── xuanji-console-server/   # 控制台后端 API
 ├── xuanji-console/          # 控制台前端（Vue3 + Naive UI）
 ├── xuanji-starter/          # 启动器（主类）
