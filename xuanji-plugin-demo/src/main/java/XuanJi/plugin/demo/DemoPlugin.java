@@ -103,10 +103,10 @@ public class DemoPlugin extends XuanJiPluginBase {
         public String botInfo(MessageEvent e, PluginServices svc, Bot bot) {
             if (!(e instanceof GroupMessageEvent g)) return "该命令需要在群里使用";
             try {
-                Map<String, Object> info = svc.getLocalGroupInfo(bot.selfId(), g.getGroupId());
-                boolean found = info != null && Boolean.TRUE.equals(info.get("found"));
-                String gn = found ? String.valueOf(info.get("group_name")) : "未知";
-                String mc = found ? String.valueOf(info.get("member_count")) : "?";
+                GroupInfo info = svc.getLocalGroupInfo(bot.selfId(), g.getGroupId());
+                boolean found = info != null && info.found();
+                String gn = found ? info.groupName() : "未知";
+                String mc = found ? String.valueOf(info.memberCount()) : "?";
                 // 主动发一条群消息演示（PluginServices.sendToGroup）
                 svc.sendToGroup(bot.selfId(), g.getGroupId(), XuanJiMessage.text("（这是主动发送的演示消息）"));
                 return "群信息：名称=" + gn + "，成员数=" + mc + "（PluginServices 演示）";

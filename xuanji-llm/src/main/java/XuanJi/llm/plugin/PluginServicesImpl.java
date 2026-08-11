@@ -7,9 +7,15 @@ import XuanJi.api.context.BotContext;
 import XuanJi.api.llm.LlmChatOptions;
 import XuanJi.api.llm.LlmMessage;
 import XuanJi.api.message.XuanJiMessage;
+import XuanJi.api.plugin.BotGroupState;
+import XuanJi.api.plugin.GroupBotRole;
+import XuanJi.api.plugin.GroupInfo;
+import XuanJi.api.plugin.GroupMember;
+import XuanJi.api.plugin.GroupMuteStatus;
 import XuanJi.api.plugin.JoinRequestList;
 import XuanJi.api.plugin.OpResult;
 import XuanJi.api.plugin.PluginServices;
+import XuanJi.api.plugin.UserInfo;
 import XuanJi.api.sender.XuanJiMessageSender;
 import XuanJi.api.sender.XuanJiSendReceipt;
 import XuanJi.api.sender.XuanJiTarget;
@@ -181,15 +187,15 @@ public class PluginServicesImpl implements PluginServices {
     // ──────────── 平台信息查询（统一动作协议） ────────────
 
     @Override
-    public Map<String, Object> getGroupInfo(String botKey, String groupOpenid) {
-        return actionData(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_INFO,
-                Map.of("groupOpenid", groupOpenid)));
+    public GroupInfo getGroupInfo(String botKey, String groupOpenid) {
+        return GroupInfo.from(actionData(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_INFO,
+                Map.of("groupOpenid", groupOpenid))));
     }
 
     @Override
-    public Map<String, Object> getLocalGroupInfo(String botKey, String groupOpenid) {
-        return actionData(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_LOCAL_INFO,
-                Map.of("groupOpenid", groupOpenid)));
+    public GroupInfo getLocalGroupInfo(String botKey, String groupOpenid) {
+        return GroupInfo.from(actionData(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_LOCAL_INFO,
+                Map.of("groupOpenid", groupOpenid))));
     }
 
     @Override
@@ -200,37 +206,45 @@ public class PluginServicesImpl implements PluginServices {
     }
 
     @Override
-    public Map<String, Object> getBotGroupState(String botKey, String groupOpenid) {
-        return actionData(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_BOT_STATE,
-                Map.of("groupOpenid", groupOpenid)));
+    public BotGroupState getBotGroupState(String botKey, String groupOpenid) {
+        return BotGroupState.from(actionData(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_BOT_STATE,
+                Map.of("groupOpenid", groupOpenid))));
     }
 
     @Override
-    public Map<String, Object> getGroupMuteStatus(String botKey, String groupOpenid) {
-        return actionData(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_MUTE_STATUS,
-                Map.of("groupOpenid", groupOpenid)));
+    public GroupMuteStatus getGroupMuteStatus(String botKey, String groupOpenid) {
+        return GroupMuteStatus.from(actionData(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_MUTE_STATUS,
+                Map.of("groupOpenid", groupOpenid))));
     }
 
     @Override
-    public List<Map<String, Object>> listGroupMembers(String botKey, String groupOpenid) {
-        return actionList(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_MEMBER_LIST,
-                Map.of("groupOpenid", groupOpenid)));
+    public List<GroupMember> listGroupMembers(String botKey, String groupOpenid) {
+        List<Map<String, Object>> rows = actionList(actionHub.dispatch(effectiveBotKey(botKey),
+                PlatformActions.GROUP_MEMBER_LIST, Map.of("groupOpenid", groupOpenid)));
+        if (rows == null) return List.of();
+        return rows.stream().map(GroupMember::from).filter(java.util.Objects::nonNull).toList();
     }
 
     @Override
-    public List<Map<String, Object>> listGroups(String botKey) {
-        return actionList(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_LIST, Map.of()));
+    public List<GroupInfo> listGroups(String botKey) {
+        List<Map<String, Object>> rows = actionList(actionHub.dispatch(effectiveBotKey(botKey),
+                PlatformActions.GROUP_LIST, Map.of()));
+        if (rows == null) return List.of();
+        return rows.stream().map(GroupInfo::from).filter(java.util.Objects::nonNull).toList();
     }
 
     @Override
-    public Map<String, Object> getGroupBotRole(String botKey, String groupOpenid) {
-        return actionData(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_BOT_ROLE,
-                Map.of("groupOpenid", groupOpenid)));
+    public GroupBotRole getGroupBotRole(String botKey, String groupOpenid) {
+        return GroupBotRole.from(actionData(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_BOT_ROLE,
+                Map.of("groupOpenid", groupOpenid))));
     }
 
     @Override
-    public List<Map<String, Object>> listUsers(String botKey) {
-        return actionList(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.USER_LIST, Map.of()));
+    public List<UserInfo> listUsers(String botKey) {
+        List<Map<String, Object>> rows = actionList(actionHub.dispatch(effectiveBotKey(botKey),
+                PlatformActions.USER_LIST, Map.of()));
+        if (rows == null) return List.of();
+        return rows.stream().map(UserInfo::from).filter(java.util.Objects::nonNull).toList();
     }
 
     // ──────────── 工具 ────────────

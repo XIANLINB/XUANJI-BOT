@@ -4,7 +4,6 @@ import XuanJi.api.message.XuanJiMessage;
 import XuanJi.api.sender.XuanJiSendReceipt;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * 插件能力门面 — 插件访问框架服务（LLM / 群管 / 主动发送）的统一入口。
@@ -55,15 +54,10 @@ public interface PluginServices {
                               boolean approve, String reason);
 
     /**
-     * 入群申请列表（平台原始报文转 Map）。
+     * 入群申请列表（类型化返回）。
      *
      * @param botKey      机器人标识
      * @param groupOpenid 目标群 openid
-     * @return 平台原始 data 字段；平台不支持或失败时返回 null
-     */
-    /**
-     * 入群申请列表（类型化返回）。
-     *
      * @return 入群申请列表（含 next_cursor）；平台不支持或失败时返回空列表
      * @see JoinRequestList JoinRequestList
      */
@@ -117,61 +111,62 @@ public interface PluginServices {
     // ──────────── 平台信息查询 ────────────
 
     /**
-     * 查询群基本信息（平台原始报文转 Map）。
+     * 查询群基本信息（远程平台接口，实时）。
      *
      * @param botKey       机器人标识（空串回退第一个机器人）
      * @param groupOpenid  目标群 openid
-     * @return 平台原始 data 字段；平台不支持或失败时返回 null
+     * @return 群信息；平台不支持或失败时返回 null
      */
-    Map<String, Object> getGroupInfo(String botKey, String groupOpenid);
+    GroupInfo getGroupInfo(String botKey, String groupOpenid);
 
     /**
      * 查询群本地档案（查平台库，不调远程接口，避免限频）。
-     * 适用于高频场景（如入群/退群提示）；返回 {@code {found, group_name, member_count}}。
+     * 适用于高频场景（如入群/退群提示）。
+     *
+     * @return 群信息（{@code found=false} 表示本地无档案）
      */
-    Map<String, Object> getLocalGroupInfo(String botKey, String groupOpenid);
+    GroupInfo getLocalGroupInfo(String botKey, String groupOpenid);
 
     /**
-     * 查询机器人在群内的状态（平台原始报文转 Map）。
+     * 查询机器人在群内的状态（远程平台接口）。
      *
-     * @param botKey       机器人标识（空串回退第一个机器人）
-     * @param groupOpenid  目标群 openid
-     * @return 平台原始 data 字段；平台不支持或失败时返回 null
+     * @return 机器人群内状态（{@code botState}: 1=正常 2=被移出 3=群解散 4=被禁言；
+     *         {@code isOnline()} 即 botState==1）；平台不支持或失败时返回 null
      */
-    Map<String, Object> getBotGroupState(String botKey, String groupOpenid);
+    BotGroupState getBotGroupState(String botKey, String groupOpenid);
 
     /**
-     * 查询群禁言状态（restrict_chat_setting 原始报文转 Map）。
+     * 查询群禁言状态（restrict_chat_setting 接口）。
      *
-     * @return 平台原始 data 字段；平台不支持或失败时返回 null
+     * @return 群禁言状态（{@code isMuted()} 快速判断）；平台不支持或失败时返回 null
      */
-    Map<String, Object> getGroupMuteStatus(String botKey, String groupOpenid);
+    GroupMuteStatus getGroupMuteStatus(String botKey, String groupOpenid);
 
     /**
      * 列出群成员（查本地库，不调远程接口，避免限频）。
      *
-     * @return 成员档案列表；平台不支持或失败时返回 null
+     * @return 成员列表；平台不支持或失败时返回空列表
      */
-    List<Map<String, Object>> listGroupMembers(String botKey, String groupOpenid);
+    List<GroupMember> listGroupMembers(String botKey, String groupOpenid);
 
     /**
      * 列出机器人所在群（查本地库）。
      *
-     * @return 群档案列表；平台不支持或失败时返回 null
+     * @return 群列表；平台不支持或失败时返回空列表
      */
-    List<Map<String, Object>> listGroups(String botKey);
+    List<GroupInfo> listGroups(String botKey);
 
     /**
-     * 查询机器人在群内的角色（查本地库，如 member/owner/admin…）。
+     * 查询机器人在群内的角色（查本地库；owner/admin/member）。
      *
-     * @return 含 role 字段的 Map；平台不支持或失败时返回 null
+     * @return 机器人角色（{@code isManager()/isOwner()/isAdmin()} 便捷判断）；平台不支持或失败时返回 null
      */
-    Map<String, Object> getGroupBotRole(String botKey, String groupOpenid);
+    GroupBotRole getGroupBotRole(String botKey, String groupOpenid);
 
     /**
      * 列出单聊用户（查本地库）。
      *
-     * @return 用户档案列表；平台不支持或失败时返回 null
+     * @return 用户列表；平台不支持或失败时返回空列表
      */
-    List<Map<String, Object>> listUsers(String botKey);
+    List<UserInfo> listUsers(String botKey);
 }

@@ -222,10 +222,10 @@ public class GroupNotifyPlugin extends XuanJiPluginBase {
             String groupName = "";
             String memberCount = "";
             try {
-                Map<String, Object> info = svc.getLocalGroupInfo(botId, e.getGroupId());
-                if (info != null && Boolean.TRUE.equals(info.get("found"))) {
-                    groupName = info.get("group_name") == null ? "" : String.valueOf(info.get("group_name"));
-                    memberCount = info.get("member_count") == null ? "" : String.valueOf(info.get("member_count"));
+                GroupInfo info = svc.getLocalGroupInfo(botId, e.getGroupId());
+                if (info != null && info.found()) {
+                    groupName = info.groupName();
+                    memberCount = info.memberCount() == null ? "" : String.valueOf(info.memberCount());
                 }
             } catch (Exception ignored) { }
 

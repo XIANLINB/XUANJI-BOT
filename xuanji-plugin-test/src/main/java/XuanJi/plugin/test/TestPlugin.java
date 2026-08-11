@@ -5,6 +5,8 @@ import XuanJi.api.annotation.Command;
 import XuanJi.api.annotation.XuanJiPlugin;
 import XuanJi.api.json.Json;
 import XuanJi.api.message.XuanJiMessage;
+import XuanJi.api.plugin.BotGroupState;
+import XuanJi.api.plugin.GroupInfo;
 import XuanJi.api.plugin.JoinRequest;
 import XuanJi.api.plugin.JoinRequestList;
 import XuanJi.api.plugin.OpResult;
@@ -49,20 +51,20 @@ public class TestPlugin extends XuanJiPluginBase {
         @Command(value = "一键测试", scope = Command.Scope.GROUP)
         public void oneClickTest(GroupMessageEvent e, PluginServices svc) {
             String groupId = e.getGroupId();
-            Map<String, Object> groupInfo = svc.getGroupInfo("", groupId);
-            Map<String, Object> botState = svc.getBotGroupState("", groupId);
+            GroupInfo groupInfo = svc.getGroupInfo("", groupId);
+            BotGroupState botState = svc.getBotGroupState("", groupId);
 
             String md = buildMarkdown(groupId, groupInfo, botState);
             svc.sendToGroup("", groupId, XuanJiMessage.builder().markdown(md).build());
         }
 
-        private String buildMarkdown(String groupId, Map<String, Object> groupInfo, Map<String, Object> botState) {
+        private String buildMarkdown(String groupId, GroupInfo groupInfo, BotGroupState botState) {
             return "## 一键接口测试\n\n"
                     + "**群**：`" + groupId + "`\n\n"
                     + "### 群基本信息（原始报文）\n"
-                    + codeBlock(groupInfo) + "\n"
+                    + codeBlock(groupInfo == null ? null : groupInfo.raw()) + "\n"
                     + "### 机器人群内状态（原始报文）\n"
-                    + codeBlock(botState);
+                    + codeBlock(botState == null ? null : botState.raw());
         }
 
         /**
