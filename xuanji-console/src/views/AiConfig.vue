@@ -112,7 +112,7 @@ const tabFields: Record<string, string[]> = {
   capabilities: ['chatBindings', 'visionBindings', 'imageBindings', 'ttsBindings', 'videoBindings', 'videoGenBindings', 'voiceCloneBindings', 'visionEnabled', 'imageGenEnabled', 'videoUnderstandEnabled', 'videoGenEnabled', 'ttsEnabled', 'voiceCloneEnabled', 'toolCallingEnabled', 'toolConfirmRequired', 'mcpEnabled'],
   voice: ['ttsVoice', 'ttsAudioFormat', 'ttsStylePrompt', 'fishVoice', 'fishStylePrompt', 'fishSpeed'],
   insight: ['profileEnabled', 'profileExtractHours', 'profileExtractMsgThreshold', 'proactiveEnabled', 'proactiveDailyLimit', 'proactiveCooldownMinutes', 'proactiveIdleMinutes', 'proactiveTimeStart', 'proactiveTimeEnd'],
-  advanced: ['intentRouting', 'aiAudit', 'dailyReportEnabled', 'renderEnabled']
+  advanced: ['intentRouting', 'aiAudit', 'dailyReportEnabled', 'renderEnabled', 'encryptBaseUrl']
 }
 
 const dirty = computed(() =>
@@ -168,6 +168,7 @@ async function load() {
       if (!config.value.fishStylePrompt) config.value.fishStylePrompt = '清冷低沉、疏离慵懒的少女御姐音，语速偏慢，声线平稳克制，尾音气声收束，藏着一丝温柔倦意'
       if (!config.value.fishSpeed) config.value.fishSpeed = 1.0
       if (config.value.renderEnabled === undefined || config.value.renderEnabled === null) config.value.renderEnabled = true
+      if (config.value.encryptBaseUrl == null) config.value.encryptBaseUrl = false
       // AI 能力总开关兜底（旧配置 JSON 无这些字段 → 默认 true；工具确认默认 true）
       if (config.value.toolCallingEnabled == null) config.value.toolCallingEnabled = true
       if (config.value.toolConfirmRequired == null) config.value.toolConfirmRequired = true
@@ -634,6 +635,21 @@ onMounted(load)
                       <div class="field">
                         <NSwitch v-model:value="config.renderEnabled" />
                         <div class="hint">图文日报 / render_card 卡片渲染（Playwright Chromium）。关闭后不启动浏览器，相关功能提示未启用。</div>
+                      </div>
+                    </NFormItem>
+                  </NGi>
+                </NGrid>
+              </NForm>
+            </NCard>
+
+            <NCard title="凭据加密" :bordered="true" class="card card--detail">
+              <NForm label-placement="left" label-width="150" label-align="right">
+                <NGrid :cols="2" :x-gap="24" responsive="screen">
+                  <NGi>
+                    <NFormItem label="加密供应商 base_url">
+                      <div class="field">
+                        <NSwitch v-model:value="config.encryptBaseUrl" />
+                        <div class="hint">开启后供应商 base_url 入库加密、读出解密。注意：base_url 为公开 API 端点、本非机密，默认关闭；api_key 始终加密不受此开关影响。旧明文 base_url 升级后仍能正常读取。</div>
                       </div>
                     </NFormItem>
                   </NGi>

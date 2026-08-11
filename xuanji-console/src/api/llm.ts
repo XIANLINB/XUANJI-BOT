@@ -58,6 +58,8 @@ export interface LlmConfig {
   fishSpeed: number
   // 图文卡片渲染（Playwright，可选）
   renderEnabled: boolean
+  // base_url 是否落库加密（公开端点，默认不加密）
+  encryptBaseUrl?: boolean
   // AI 能力总开关（高级页）
   toolCallingEnabled?: boolean
   toolConfirmRequired?: boolean

@@ -149,6 +149,11 @@ public class LlmConfig {
      *  默认 64 宽松值，正常流量无感；≤0 视为未配置，回退默认。 */
     private int maxConcurrency = 64;
 
+    // ──────────── 凭据加密开关（#406 增强） ────────────
+    /** 是否对供应商 base_url 落库加密。默认 false：base_url 为公开 API 端点、非机密，
+     *  通常不加密；开启后入库加密、读出解密。api_key 始终加密不受此开关影响。 */
+    private boolean encryptBaseUrl = false;
+
     // ──────────── 多模态行为参数（凭据已迁至「供应商管理」+「能力选择」绑定） ────────────
     /** TTS 默认音色（人格未指定音色时用）：冰糖/茉莉/苏打/白桦/Mia/Chloe/Milo/Dean/mimo_default */
     private String ttsVoice = "冰糖";

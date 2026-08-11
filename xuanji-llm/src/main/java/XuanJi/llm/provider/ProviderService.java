@@ -2,6 +2,7 @@ package XuanJi.llm.provider;
 
 import XuanJi.api.llm.LlmCapability;
 import XuanJi.api.llm.LlmCredentials;
+import XuanJi.llm.config.LlmConfigStore;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -30,9 +31,11 @@ import java.util.Set;
 public class ProviderService {
 
     private final JdbcTemplate jdbc;
+    private final LlmConfigStore configStore;
 
-    public ProviderService(JdbcTemplate jdbc) {
+    public ProviderService(JdbcTemplate jdbc, LlmConfigStore configStore) {
         this.jdbc = jdbc;
+        this.configStore = configStore;
     }
 
     // ════════════ 供应商 ════════════
@@ -73,8 +76,10 @@ public class ProviderService {
 
     public long saveProvider(Long id, String name, String providerType, String baseUrl, String apiKey, Integer status) {
         int st = status == null ? 1 : status;
-        String encBaseUrl = LlmCredentialCipher.encrypt(baseUrl);
+        // api_key 始终加密；base_url 是否加密受配置开关 encryptBaseUrl 控制（默认不加密，其为公开端点）
         String encApiKey = LlmCredentialCipher.encrypt(apiKey);
+        boolean encBase = configStore.get().isEncryptBaseUrl();
+        String encBaseUrl = encBase ? LlmCredentialCipher.encrypt(baseUrl) : baseUrl;
         if (id != null && id > 0) {
             jdbc.update("""
                 UPDATE xuanji_llm_provider SET name=?, provider_type=?, base_url=?, api_key=?, status=? WHERE id=?
