@@ -72,6 +72,20 @@ public interface PluginServices {
      */
     OpResult muteMember(String botKey, String groupOpenid, String memberOpenid, int minutes);
 
+    /**
+     * 批量群成员禁言（支持多个目标：可传 {@code Mention} 列表的 userId，
+     * 或插件自己收集的 memberOpenid 列表）。
+     *
+     * <p>每个目标独立执行（一个失败不影响其它），返回汇总结果：
+     * 成功 N 人、失败明细（成员 + 原因）。已解除/机器人类目标的过滤由调用方（插件）
+     * 按消息字段自行处理，框架只负责执行与结果汇总。
+     *
+     * @param memberOpenids 目标成员 openid 列表（非空；单个目标请用 {@link #muteMember}）
+     * @param minutes       禁言分钟数（&lt;=0 解除禁言）
+     * @return 汇总结果（含成功数与失败明细）
+     */
+    OpResult muteMembers(String botKey, String groupOpenid, List<String> memberOpenids, int minutes);
+
     /** 撤回群消息。 */
     OpResult recallMessage(String botKey, String groupOpenid, String msgId);
 

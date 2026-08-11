@@ -98,12 +98,39 @@ public class PluginServicesImpl implements PluginServices {
 
     @Override
     public OpResult muteMember(String botKey, String groupOpenid, String memberOpenid, int minutes) {
-        Map<String, Object> params = new LinkedHashMap<>();
-        params.put("groupOpenid", groupOpenid);
-        params.put("memberOpenid", memberOpenid);
-        params.put("minutes", minutes); // 分钟，适配器内部换算成秒
+        return muteMembers(botKey, groupOpenid, memberOpenid == null ? List.of() : List.of(memberOpenid), minutes);
+    }
+
+    @Override
+    public OpResult muteMembers(String botKey, String groupOpenid, List<String> memberOpenids, int minutes) {
+        if (memberOpenids == null || memberOpenids.isEmpty()) {
+            return OpResult.fail("禁言失败：未指定目标成员");
+        }
         String successMsg = minutes > 0 ? "已禁言 " + minutes + " 分钟" : "已解除禁言";
-        return opResult(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_MUTE, params), successMsg);
+        int ok = 0;
+        List<String> fails = new ArrayList<>();
+        for (String mid : memberOpenids) {
+            if (mid == null || mid.isBlank()) continue;
+            Map<String, Object> params = new LinkedHashMap<>();
+            params.put("groupOpenid", groupOpenid);
+            params.put("memberOpenid", mid);
+            params.put("minutes", minutes); // 分钟，适配器内部换算成秒
+            OpResult r = opResult(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_MUTE, params), successMsg);
+            if (r.ok()) {
+                ok++;
+            } else {
+                fails.add(mid + "(" + r.message() + ")");
+            }
+        }
+        StringBuilder sb = new StringBuilder();
+        if (ok > 0) {
+            sb.append("已禁言 ").append(ok).append(" 人").append(minutes > 0 ? " " + minutes + " 分钟" : "");
+        }
+        if (!fails.isEmpty()) {
+            if (sb.length() > 0) sb.append("；");
+            sb.append("失败 ").append(fails.size()).append(" 人：").append(String.join("；", fails));
+        }
+        return fails.isEmpty() ? OpResult.ok(sb.toString()) : OpResult.fail(sb.toString());
     }
 
     @Override
