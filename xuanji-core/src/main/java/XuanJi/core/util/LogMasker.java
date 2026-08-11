@@ -6,23 +6,23 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * 日志脱敏工具：只打码「敏感 key」的值，不动其它内容（保证日志可读性）。
+ * 日志脱敏工具：只打码「真正的秘密凭据」的值，其余内容（群号、用户标识、手机号、邮箱等）一律原样，
+ * 保证日志可读性。
  *
- * <p>用于把原始报文 / 用户标识等送入日志前脱敏，避免 openid、api_key、token 等明文落盘。
- * 与 {@code TraceContext} 配合：调试时若需看原始报文，开 DEBUG 级别，且此处已脱敏敏感字段。
+ * <p>用于把原始报文送入日志前脱敏。脱敏范围刻意保持最小：仅供应商 api_key、PIN 及等价的凭据类字段
+ * （token / password / secret / authorization / credential）。群号、openid、user_id、手机号、邮箱等
+ * 属于业务标识/联系方式，不属于需保护的秘密，不做打码，以免日志不可读。
  */
 public final class LogMasker {
 
     /** 需要脱敏的敏感字段名（小写匹配）。仅这些 key 的值会被替换为 {@code ***}。 */
     private static final Set<String> SENSITIVE = Set.of(
-            "openid", "member_openid", "user_id", "userid",
             "api_key", "apikey", "token", "password", "passwd",
-            "secret", "session", "authorization", "credential",
-            "phone", "email", "cookie");
+            "secret", "authorization", "credential", "pin");
 
     /** JSON 字符串中敏感 key 的字符串值脱敏：保留引号，值替换为 ***。 */
     private static final Pattern SENSITIVE_JSON = Pattern.compile(
-            "(?i)(\"(?:openid|member_openid|user_id|userid|api_key|apikey|token|password|passwd|secret|session|authorization|credential|phone|email|cookie)\"\\s*:\\s*\")([^\"]*)(\")");
+            "(?i)(\"(?:api_key|apikey|token|password|passwd|secret|authorization|credential|pin)\"\\s*:\\s*\")([^\"]*)(\")");
 
     private LogMasker() {}
 
