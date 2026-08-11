@@ -135,6 +135,12 @@ public class QqPlatformDataProvider implements PlatformDataProvider {
     }
 
     @Override
+    public List<Map<String, Object>> listOpLogs(String instanceId, String opType, String status,
+                                                String groupId, String keyword, int limit) {
+        return repo.listOpLogs(instanceId, opType, status, groupId, keyword, limit);
+    }
+
+    @Override
     public List<Map<String, Object>> messageTrend(String instanceId, long sinceEpochSeconds) {
         return repo.messageTrend(instanceId, sinceEpochSeconds);
     }

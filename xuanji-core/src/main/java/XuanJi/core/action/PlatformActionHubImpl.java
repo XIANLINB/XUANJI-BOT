@@ -3,6 +3,7 @@ package XuanJi.core.action;
 import XuanJi.api.action.PlatformActionHandler;
 import XuanJi.api.action.PlatformActionHub;
 import XuanJi.api.action.PlatformActionProvider;
+import XuanJi.api.action.OperationAuditSink;
 import XuanJi.api.adapter.BotContextBinder;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
@@ -26,6 +27,11 @@ public class PlatformActionHubImpl implements PlatformActionHub {
 
     private final Map<String, PlatformActionProvider> providers = new LinkedHashMap<>();
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
+    private final ObjectProvider<OperationAuditSink> auditSinkProvider;
+
+    public PlatformActionHubImpl(ObjectProvider<OperationAuditSink> auditSinkProvider) {
+        this.auditSinkProvider = auditSinkProvider;
+    }
 
     @Override
     public void register(PlatformActionProvider provider) {
@@ -75,12 +81,25 @@ public class PlatformActionHubImpl implements PlatformActionHub {
                 out.put("ok", true);
                 out.put("data", result);
             }
+            audit(action, p, out);
             return out;
         } catch (Exception e) {
             out.put("ok", false);
             out.put("error", e.getMessage() == null ? e.toString() : e.getMessage());
+            audit(action, p, out);
             return out;
         }
+    }
+
+    /** 管理操作审计回调：存在 OperationAuditSink 实现时记录（成功/失败/被拒全记，异常不阻断）。 */
+    private void audit(String action, Map<String, Object> params, Map<String, Object> result) {
+        try {
+            OperationAuditSink sink = auditSinkProvider.getIfAvailable();
+            if (sink != null) {
+                String botKey = params == null ? null : String.valueOf(params.get("_botKey"));
+                sink.record(botKey, action, params, result);
+            }
+        } catch (Exception ignored) { /* 审计失败不影响主流程 */ }
     }
 
     @Override

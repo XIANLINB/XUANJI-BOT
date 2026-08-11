@@ -79,6 +79,15 @@ public interface PlatformDataProvider {
 
     List<Map<String, Object>> listEvents(String instanceId, int limit);
 
+    /**
+     * 管理操作日志（禁言/撤回/审批等出站审计流水，含失败与被拒记录）。
+     * 默认空实现；平台适配器按需覆盖。filter 可含 opType / status / groupId / keyword。
+     */
+    default List<Map<String, Object>> listOpLogs(String instanceId, String opType, String status,
+                                                 String groupId, String keyword, int limit) {
+        return List.of();
+    }
+
     long countGroups(String instanceId);
 
     long countFriends(String instanceId);

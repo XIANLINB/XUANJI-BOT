@@ -7,6 +7,7 @@ const Bots = () => import('../views/Bots.vue')
 const Groups = () => import('../views/Groups.vue')
 const Friends = () => import('../views/Friends.vue')
 const GroupMessages = () => import('../views/GroupMessages.vue')
+const OpLog = () => import('../views/OpLog.vue')
 const C2cMessages = () => import('../views/C2cMessages.vue')
 const Events = () => import('../views/Events.vue')
 const Monitor = () => import('../views/Monitor.vue')
@@ -75,7 +76,8 @@ export const routes = [
     meta: { title: '群聊管理' },
     children: [
       { path: 'list', name: 'groups', component: Groups, meta: { title: '群聊列表' } },
-      { path: 'messages', name: 'group-messages', component: GroupMessages, meta: { title: '群聊消息' } }
+      { path: 'messages', name: 'group-messages', component: GroupMessages, meta: { title: '群聊消息' } },
+      { path: 'op-log', name: 'group-op-log', component: OpLog, meta: { title: '操作日志' } }
     ]
   },
   {

@@ -650,6 +650,60 @@ public class QqBotRepository {
         """, botId, eventType, groupId, userId, rawJson, createTime);
     }
 
+    // ==================== qqbot_op_log（管理操作审计：禁言/撤回/审批等） ====================
+
+    /** 写入一条管理操作日志（成功/失败/被拒全记，append-only）。失败静默不阻断业务。 */
+    public void insertOpLog(String appId, String opType, String action, String groupId, String userId,
+                            String targetMsgId, Long durationSec, String operatorId, String operatorName,
+                            String operatorRole, String source, String status, String errorMsg,
+                            String detailJson, Long createTime) {
+        try {
+            Long botId = resolveBotId(appId);
+            if (botId == null) return;
+            logJdbc(appId).update("""
+                INSERT INTO qqbot_op_log (bot_id, op_type, action, group_id, user_id, target_msg_id,
+                    duration_sec, operator_id, operator_name, operator_role, source, status, error_msg,
+                    detail_json, create_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, botId, opType, action, groupId, userId, targetMsgId, durationSec,
+                    operatorId, operatorName, operatorRole, source, status, errorMsg, detailJson, createTime);
+        } catch (Exception e) {
+            log.warn("[QqRepo] 写入操作日志失败 appId={}, op={}/{}, err={}", appId, opType, action, e.getMessage());
+        }
+    }
+
+    /**
+     * 查询某实例的管理操作日志（倒序），支持类型/状态/群/关键字筛选，内存分页。
+     *
+     * @param keyword 关键字，匹配操作人昵称/openid、目标 openid、被撤回消息 id（null/空 = 不限）
+     */
+    public List<Map<String, Object>> listOpLogs(String appId, String opType, String status, String groupId,
+                                                String keyword, int limit) {
+        try {
+            StringBuilder sql = new StringBuilder("""
+                SELECT id, op_type, action, group_id, user_id, target_msg_id, duration_sec,
+                       operator_id, operator_name, operator_role, source, status, error_msg,
+                       detail_json, create_time
+                FROM qqbot_op_log WHERE 1=1
+            """);
+            List<Object> args = new java.util.ArrayList<>();
+            if (opType != null && !opType.isBlank()) { sql.append(" AND op_type = ?"); args.add(opType); }
+            if (status != null && !status.isBlank()) { sql.append(" AND status = ?"); args.add(status); }
+            if (groupId != null && !groupId.isBlank()) { sql.append(" AND group_id = ?"); args.add(groupId); }
+            if (keyword != null && !keyword.isBlank()) {
+                sql.append(" AND (operator_name LIKE ? OR operator_id LIKE ? OR user_id LIKE ? OR target_msg_id LIKE ?)");
+                String kw = "%" + keyword + "%";
+                args.add(kw); args.add(kw); args.add(kw); args.add(kw);
+            }
+            sql.append(" ORDER BY create_time DESC LIMIT ?");
+            args.add(Math.min(Math.max(limit, 1), 500));
+            return logJdbc(appId).queryForList(sql.toString(), args.toArray());
+        } catch (Exception e) {
+            log.debug("[QqRepo] 查询操作日志失败 appId={}: {}", appId, e.getMessage());
+            return List.of();
+        }
+    }
+
     // ==================== 控制台聚合查询（原表全部字段，SELECT * 透传） ====================
 
     /**

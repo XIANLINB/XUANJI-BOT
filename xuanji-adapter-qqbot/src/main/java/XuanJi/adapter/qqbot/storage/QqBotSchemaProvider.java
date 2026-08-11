@@ -152,7 +152,7 @@ public class QqBotSchemaProvider implements BotSchemaProvider {
     }
 
     /**
-     * per-bot 日志库：消息 / 事件 2 张流水表（与业务数据分库自治）。
+     * per-bot 日志库：消息 / 事件 / 操作日志 3 张流水表（与业务数据分库自治）。
      *
      * <p>日志库路径 {@code data/qqbot/{appid}/log/{appid}.log.mv.db}，由
      * {@code QqBotRepository.logJdbc(appId)} 惰性初始化。bot_id 逻辑关联平台库 qqbot_bot.id。
@@ -206,6 +206,34 @@ public class QqBotSchemaProvider implements BotSchemaProvider {
         """);
         jdbc.execute("""
             CREATE INDEX IF NOT EXISTS idx_qqbot_event_bt ON qqbot_event (bot_id, event_type, create_time)
+        """);
+
+        // 管理操作日志（出站审计：禁言/撤回/审批等执行留痕，含失败与被本地校验拒绝）
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS qqbot_op_log (
+                id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+                bot_id        BIGINT        NOT NULL,
+                op_type       VARCHAR(32)   NOT NULL,
+                action        VARCHAR(16)   NOT NULL,
+                group_id      VARCHAR(64),
+                user_id       VARCHAR(64),
+                target_msg_id VARCHAR(255),
+                duration_sec  BIGINT,
+                operator_id   VARCHAR(64),
+                operator_name VARCHAR(128),
+                operator_role VARCHAR(16),
+                source        VARCHAR(16)   NOT NULL,
+                status        VARCHAR(16)   NOT NULL,
+                error_msg     VARCHAR(512),
+                detail_json   CLOB,
+                create_time   BIGINT        NOT NULL
+            )
+        """);
+        jdbc.execute("""
+            CREATE INDEX IF NOT EXISTS idx_qqbot_oplog_bo ON qqbot_op_log (bot_id, op_type, create_time)
+        """);
+        jdbc.execute("""
+            CREATE INDEX IF NOT EXISTS idx_qqbot_oplog_bg ON qqbot_op_log (bot_id, group_id, create_time)
         """);
     }
 }
