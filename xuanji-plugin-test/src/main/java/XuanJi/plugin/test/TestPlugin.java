@@ -2,6 +2,7 @@ package XuanJi.plugin.test;
 
 import XuanJi.api.annotation.Arg;
 import XuanJi.api.annotation.Command;
+import XuanJi.api.annotation.GroupEvent;
 import XuanJi.api.annotation.XuanJiPlugin;
 import XuanJi.api.json.Json;
 import XuanJi.api.message.XuanJiMessage;
@@ -61,6 +62,23 @@ public class TestPlugin extends XuanJiPluginBase {
                     + codeBlock(groupInfo) + "\n"
                     + "### 机器人群内状态（原始报文）\n"
                     + codeBlock(botState);
+        }
+
+        /**
+         * 监听用户申请加群事件（GROUP_JOIN_REQUEST），收到后调用入群申请列表接口
+         * 并打印接口原始返回，供排查接口字段/数据结构。
+         */
+        @GroupEvent(order = 10)
+        public void onGroupJoinRequest(GroupMessageEvent e, PluginServices svc) {
+            if (!"GROUP_JOIN_REQUEST".equals(e.getEventType())) return;
+            String groupId = e.getGroupId();
+            String memberId = e.getSenderId();
+            String memberName = e.getSenderName();
+            System.out.println("[TestPlugin] 收到入群申请事件: 群=" + groupId
+                    + ", 申请者=" + memberId + "(" + memberName + ")");
+            // 调入群申请列表接口，查看原始返回信息（字段结构）
+            Map<String, Object> list = svc.listGroupJoinRequests(e.getBotId(), groupId);
+            System.out.println("[TestPlugin] 入群申请列表接口返回: " + list);
         }
 
         /** 原始报文 → ```json 代码块；null 时给出平台不支持/查询失败提示。 */
