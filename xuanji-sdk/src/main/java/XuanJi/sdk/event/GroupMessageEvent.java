@@ -9,8 +9,15 @@ import java.util.*;
  */
 public class GroupMessageEvent implements MessageEvent {
 
-    /** 被 @ 的群成员（userId=openid；bot=是否机器人；isYou=是否机器人自己）。 */
-    public record Mention(String userId, boolean bot, boolean isYou) {}
+    /**
+     * 被 @ 的群成员。
+     *
+     * @param userId 成员 openid
+     * @param bot    是否为机器人
+     * @param isYou  是否为机器人自己
+     * @param role   成员角色（owner/admin/member，平台未知时为 null）
+     */
+    public record Mention(String userId, boolean bot, boolean isYou, String role) {}
 
     private final String messageId;
     private final String content;
@@ -57,11 +64,24 @@ public class GroupMessageEvent implements MessageEvent {
     public String getSenderName() { return senderName; }
     public String getSenderRole() { return senderRole; }
     public boolean isAtBot() { return atBot; }
-    /** 被 @ 的群成员列表（含是否机器人，供命令按消息字段判断）。 */
-    public List<Mention> getMentionedUsers() { return mentionedUsers; }
-    /** 被 @ 的群成员 openid 列表（兼容简写）。 */
+    /**
+     * 可操作目标（已过滤）：排除机器人与机器人自己，适合禁言/@等管理命令直接使用。
+     * 框架负责解析与过滤，插件无需自行判断 bot/isYou。
+     */
+    public List<Mention> getMentionedUsers() {
+        return mentionedUsers.stream()
+                .filter(m -> !m.bot() && !m.isYou())
+                .toList();
+    }
+
+    /** 可操作目标 openid 列表（已过滤，见 {@link #getMentionedUsers()}）。 */
     public List<String> getMentionedUserIds() {
-        return mentionedUsers.stream().map(Mention::userId).toList();
+        return getMentionedUsers().stream().map(Mention::userId).toList();
+    }
+
+    /** 原始被 @ 列表（含机器人与自己），需要完整信息时使用。 */
+    public List<Mention> getAllMentions() {
+        return mentionedUsers;
     }
     public String getPlatform() { return platform; }
     /** 已解析消息链（OneBot 直塞；QQ 侧为 null 时调用方自行解析）。 */
