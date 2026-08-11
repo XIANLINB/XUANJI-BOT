@@ -2,6 +2,7 @@ package XuanJi.adapter.qqbot.event.handler.group;
 
 import XuanJi.adapter.qqbot.service.GroupProfileSync;
 import XuanJi.adapter.qqbot.service.GroupRobotStateSyncService;
+import XuanJi.api.json.Json;
 import XuanJi.core.event.EventHandler;
 import XuanJi.core.event.EventMapping;
 import XuanJi.core.config.XuanJiRobotProperties;
@@ -10,6 +11,8 @@ import lombok.extern.slf4j.Slf4j;
 import tools.jackson.databind.node.ObjectNode;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+
+import java.util.Map;
 
 /**
  * 群聊系统事件处理器 — 机器人入群/退群、成员进退群、消息通知开关。
@@ -136,19 +139,43 @@ public class GroupSystemEventHandler implements EventHandler {
             String botId = robotProperties.getRobots() != null && robotProperties.getRobots().get(
                     robotProperties.findBotKeyByRobotId(robotId)) != null
                     ? robotProperties.getRobots().get(robotProperties.findBotKeyByRobotId(robotId)).getAppId() : robotId;
-            XuanJi.sdk.event.GroupMessageEvent ev = new XuanJi.sdk.event.GroupMessageEvent.Builder()
+            XuanJi.sdk.event.GroupMessageEvent.Builder b = new XuanJi.sdk.event.GroupMessageEvent.Builder()
                     .groupId(groupId)
                     .senderId(memberId)
                     .senderName(data.path("username").asText(""))
                     .senderRole(data.path("member_role").asText(""))
                     .platform("qq")
                     .eventType(eventType)
-                    .botId(botId)
-                    .build();
-            commandRegistry.dispatchGroupEvent(ev);
+                    .botId(botId);
+            // 入群申请：把完整字段（原始 verify_info + 解析后的 verifyParsed）下发给插件，由插件自行审批
+            if ("GROUP_JOIN_REQUEST".equals(eventType)) {
+                b.joinRequestInfo(buildJoinRequestInfo(data));
+            }
+            commandRegistry.dispatchGroupEvent(b.build());
         } catch (Exception ex) {
             log.debug("[群事件] 插件分发失败 {}: {}", eventType, ex.getMessage());
         }
+    }
+
+    /**
+     * 构造入群申请完整信息（框架只负责解析下发，审批判定由插件完成）：
+     * {@code memberOpenid / username / applyAt / applySource / joinRequestId /
+     * verifyInfo(原始 Map) / verifyParsed(解析后: method/verifyMessage/question/answer/qaMode)}。
+     */
+    private Map<String, Object> buildJoinRequestInfo(ObjectNode data) {
+        Map<String, Object> info = new java.util.LinkedHashMap<>();
+        info.put("memberOpenid", data.path("member_openid").asText(""));
+        info.put("username", data.path("username").asText(""));
+        info.put("applyAt", data.path("apply_at").asText(""));
+        info.put("applySource", data.path("apply_source").asText(""));
+        info.put("joinRequestId", data.path("join_request_id").asText(""));
+        if (data.path("verify_info").isObject()) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> vi = Json.mapper().convertValue(data.path("verify_info"), Map.class);
+            info.put("verifyInfo", vi);
+            info.put("verifyParsed", XuanJi.adapter.qqbot.sender.QqXuanJiMessageSender.parseVerifyInfo(vi));
+        }
+        return info;
     }
 
     /** 入群申请解析结果（字段全 nullable，防御式多候选键取值）。 */

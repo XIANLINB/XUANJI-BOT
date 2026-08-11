@@ -53,21 +53,6 @@ public interface PluginServices {
                               boolean approve, String reason);
 
     /**
-     * 入群申请自动审批（框架封装完整链路：拉列表 → 找该成员申请 → 解析验证信息 → 判断答案 → 审批）。
-     *
-     * <p>规则：
-     * <ul>
-     *   <li>未设置入群问题（qaMode=false）→ 自动通过</li>
-     *   <li>设置了入群问题（qaMode=true）→ 比对申请人答案与 {@code expectedAnswer}（忽略大小写/首尾空白），
-     *       一致通过、不一致拒绝</li>
-     *   <li>{@code expectedAnswer} 为空且设置了问题 → 拒绝（未配置正确答案，避免误放行）</li>
-     * </ul>
-     *
-     * @param expectedAnswer 入群问题的正确答案（如问题「1+1=？」答案是 "2"）；无入群问题时可不传
-     */
-    OpResult autoApproveGroupJoin(String botKey, String groupOpenid, String memberOpenid, String expectedAnswer);
-
-    /**
      * 入群申请列表（平台原始报文转 Map）。
      *
      * @param botKey      机器人标识

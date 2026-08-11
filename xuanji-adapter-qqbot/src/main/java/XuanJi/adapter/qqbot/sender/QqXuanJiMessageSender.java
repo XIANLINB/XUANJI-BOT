@@ -370,7 +370,7 @@ public class QqXuanJiMessageSender implements XuanJiMessageSender, XuanJi.api.ad
      * <p>解析优先级：① review_qa_list 非空（列表拉取的问题）→ ② 正则匹配「问题：…\n答案：…」
      * （事件推送的问题）→ ③ 无入群问题（verify_message 即用户答案，qaMode=false）。
      */
-    static Map<String, Object> parseVerifyInfo(Map<?, ?> vim) {
+    public static Map<String, Object> parseVerifyInfo(Map<?, ?> vim) {
         String method = vim.get("method") == null ? "" : String.valueOf(vim.get("method"));
         String message = vim.get("verify_message") == null ? "" : String.valueOf(vim.get("verify_message"));
         java.util.Map<String, Object> out = new LinkedHashMap<>();

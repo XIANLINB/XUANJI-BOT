@@ -36,6 +36,12 @@ public class GroupMessageEvent implements MessageEvent {
     private final String eventType;
     /** 事件所属机器人 ID（appId）。 */
     private final String botId;
+    /**
+     * 群事件附加信息（入群申请等系统事件的完整字段，由框架解析后下发）：
+     * 含 memberOpenid / username / applyAt / applySource / joinRequestId / verifyInfo(原始) /
+     * verifyParsed(解析后：method/verifyMessage/question/answer/qaMode)。普通消息为 null。
+     */
+    private final Map<String, Object> joinRequestInfo;
 
     private GroupMessageEvent(Builder b) {
         this.messageId = b.messageId;
@@ -53,6 +59,7 @@ public class GroupMessageEvent implements MessageEvent {
         this.hasAttachments = b.hasAttachments;
         this.eventType = b.eventType;
         this.botId = b.botId;
+        this.joinRequestInfo = b.joinRequestInfo;
     }
 
     public String getMessageId() { return messageId; }
@@ -97,6 +104,8 @@ public class GroupMessageEvent implements MessageEvent {
     public String getEventType() { return eventType == null ? "" : eventType; }
     /** 事件所属机器人 ID（appId），用于 bot 级配置。 */
     public String getBotId() { return botId == null ? "" : botId; }
+    /** 群事件附加信息（入群申请等系统事件的完整字段，框架解析后下发；普通消息为 null）。 */
+    public Map<String, Object> getJoinRequestInfo() { return joinRequestInfo; }
     public Object raw() { return this; }
 
     public static class Builder {
@@ -107,6 +116,7 @@ public class GroupMessageEvent implements MessageEvent {
         XuanJiMessage chain;
         boolean hasAttachments;
         String eventType, botId;
+        Map<String, Object> joinRequestInfo;
 
         public Builder messageId(String v) { messageId = v; return this; }
         public Builder content(String v) { content = v; return this; }
@@ -125,6 +135,8 @@ public class GroupMessageEvent implements MessageEvent {
         public Builder hasAttachments(boolean v) { hasAttachments = v; return this; }
         public Builder eventType(String v) { eventType = v; return this; }
         public Builder botId(String v) { botId = v; return this; }
+        /** 群事件附加信息（入群申请等系统事件完整字段，由框架解析后注入）。 */
+        public Builder joinRequestInfo(Map<String, Object> v) { joinRequestInfo = v; return this; }
         public GroupMessageEvent build() { return new GroupMessageEvent(this); }
     }
 }

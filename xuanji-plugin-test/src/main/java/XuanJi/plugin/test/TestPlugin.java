@@ -65,24 +65,38 @@ public class TestPlugin extends XuanJiPluginBase {
         }
 
         /**
-         * 监听用户申请加群事件（GROUP_JOIN_REQUEST），实现自动审批：
-         * <ul>
-         *   <li>未设置入群问题（仅验证消息）→ 自动通过</li>
-         *   <li>设置了入群问题（如「1+1=？」答案 2）→ 比对答案，正确自动通过、错误拒绝</li>
-         * </ul>
-         * 框架层完成拉列表/解析验证信息/答案判断/审批全链路，插件只需传事件里的群与成员。
+         * 监听用户申请加群事件（GROUP_JOIN_REQUEST），由<b>插件</b>实现审批。
+         *
+         * <p>框架只负责把入群申请的完整字段下发给插件（{@link GroupMessageEvent#getJoinRequestInfo()}）：
+         * {@code memberOpenid / username / applyAt / applySource / joinRequestId /
+         * verifyInfo(原始) / verifyParsed(解析后: method/verifyMessage/question/answer/qaMode)}，
+         * 审批判定逻辑由插件自行实现。
          */
         @GroupEvent(order = 10)
         public void onGroupJoinRequest(GroupMessageEvent e, PluginServices svc) {
             if (!"GROUP_JOIN_REQUEST".equals(e.getEventType())) return;
             String groupId = e.getGroupId();
-            String memberId = e.getSenderId();
-            String memberName = e.getSenderName();
-            System.out.println("[TestPlugin] 收到入群申请事件: 群=" + groupId
-                    + ", 申请者=" + memberId + "(" + memberName + ")");
-            // 自动审批：正确答案按群设置的入群问题传入（此处示例问题「1+1=？」答案 2）
-            OpResult r = svc.autoApproveGroupJoin(e.getBotId(), groupId, memberId, "2");
-            System.out.println("[TestPlugin] 自动审批结果: " + r.message());
+            Map<String, Object> req = e.getJoinRequestInfo();
+            System.out.println("[TestPlugin] 收到入群申请事件: 群=" + groupId + ", 完整字段=" + req);
+            if (req == null) return;
+            String memberId = String.valueOf(req.get("memberOpenid"));
+            // 解析后的验证信息（框架已解析：method/verifyMessage/question/answer/qaMode）
+            @SuppressWarnings("unchecked")
+            Map<String, Object> vp = req.get("verifyParsed") instanceof Map<?, ?> m
+                    ? (Map<String, Object>) m : java.util.Map.of();
+            boolean qaMode = Boolean.TRUE.equals(vp.get("qaMode"));
+            String answer = vp.get("answer") == null ? "" : String.valueOf(vp.get("answer"));
+            // 插件自定审批规则：无入群问题 → 通过；有问题 → 答案等于 2 才通过
+            boolean pass;
+            String reason = null;
+            if (!qaMode) {
+                pass = true; // 未设置入群问题（仅验证消息）→ 自动通过
+            } else {
+                pass = "2".equalsIgnoreCase(answer.trim());
+                if (!pass) reason = "入群问题答案不正确";
+            }
+            OpResult r = svc.approveGroupJoin(e.getBotId(), groupId, memberId, pass, reason);
+            System.out.println("[TestPlugin] 审批结果: " + (pass ? "通过" : "拒绝") + " → " + r.message());
         }
 
         /** 原始报文 → ```json 代码块；null 时给出平台不支持/查询失败提示。 */
