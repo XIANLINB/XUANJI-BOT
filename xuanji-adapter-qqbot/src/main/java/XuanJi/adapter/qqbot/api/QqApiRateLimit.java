@@ -150,6 +150,7 @@ public class QqApiRateLimit {
         if (path.startsWith("/v2/groups/")) {
             if (path.contains("/messages/")) return Category.RECALL_MSG;
             if (path.contains("/messages")) return Category.SEND_GROUP_MSG;
+            if (path.contains("/restrict_chat_setting")) return Category.MUTE_SET;
             if (path.contains("/approval_join_requests")) return Category.JOIN_REQUEST_APPROVE;
             if (path.contains("/join_requests")) return Category.JOIN_REQUEST_LIST;
             if (path.contains("/join_approval_strategy")) return Category.APPROVAL_STRATEGY;

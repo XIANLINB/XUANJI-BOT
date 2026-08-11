@@ -17,6 +17,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.node.ObjectNode;
 
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -111,15 +115,17 @@ public class QqXuanJiMessageSender implements XuanJiMessageSender, XuanJi.api.ad
         // 机器人在群内的状态（原始报文转 Map）
         m.put(PlatformActions.GROUP_BOT_STATE,
                 p -> safeGet(() -> toMap(messageSender.getBotGroupState(str(p, "groupOpenid")))));
-        // 群成员禁言（seconds<=0 解除）
+        // 群成员禁言（seconds<=0 解除；memberOpenid 为被禁言成员）
         m.put(PlatformActions.GROUP_MUTE, p -> {
             String group = str(p, "groupOpenid");
+            String member = str(p, "memberOpenid");
             int seconds = intOf(p, "seconds");
-            long now = System.currentTimeMillis() / 1000;
-            long end = seconds > 0 ? now + seconds : now;
-            long limit = seconds > 0 ? seconds : 2592000L;
-            ObjectNode resp = messageSender.setGroupRestrictSetting(
-                    messageSender.currentRobotId(), messageSender.currentEnvType(), group, now, end, limit);
+            String op = seconds > 0 ? "add" : "del";
+            String expire = seconds > 0
+                    ? fmtRfc3339(System.currentTimeMillis() / 1000 + seconds)
+                    : "";
+            ObjectNode resp = messageSender.setGroupMute(
+                    messageSender.currentRobotId(), messageSender.currentEnvType(), group, member, op, expire);
             return Map.of("data", (Object) toMap(resp));
         });
         // 入群申请审批
@@ -404,16 +410,23 @@ public class QqXuanJiMessageSender implements XuanJiMessageSender, XuanJi.api.ad
         try {
             String robotId = messageSender.currentRobotId();
             String envType = messageSender.currentEnvType();
-            long now = System.currentTimeMillis() / 1000;
-            long end = seconds > 0 ? now + seconds : now;
-            long limit = seconds > 0 ? seconds : 2592000L;
-            ObjectNode resp = messageSender.setGroupRestrictSetting(robotId, envType,
-                    group.groupOpenid(), now, end, limit);
+            String op = seconds > 0 ? "add" : "del";
+            String expire = seconds > 0
+                    ? fmtRfc3339(System.currentTimeMillis() / 1000 + seconds)
+                    : "";
+            ObjectNode resp = messageSender.setGroupMute(
+                    robotId, envType, group.groupOpenid(), userId, op, expire);
             return receipt(resp, t0);
         } catch (Exception e) {
             log.warn("[QQ发送] 禁言失败: {}", e.getMessage());
             return XuanJiSendReceipt.fail(e.getMessage(), System.currentTimeMillis() - t0);
         }
+    }
+
+    /** epoch 秒 → RFC3339 带时区字符串（restrict_chat_setting 的 mute_expire_at 格式）。 */
+    private static String fmtRfc3339(long epochSec) {
+        return OffsetDateTime.ofInstant(Instant.ofEpochSecond(epochSec), ZoneId.systemDefault())
+                .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
     }
 
     /**

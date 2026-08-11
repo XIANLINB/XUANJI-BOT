@@ -902,26 +902,25 @@ public class MessageSender {
     }
 
     /**
-     * 设置群成员禁言（当前机器人上下文）。
+     * 设置群成员禁言（POST /v2/groups/{openid}/restrict_chat_setting，60 QPM）。
      *
-     * @param groupOpenid   群 openid
-     * @param restrictStart 禁言起始时间（Unix 秒）
-     * @param restrictEnd   禁言结束时间（Unix 秒）
-     * @param restrictLimit 禁言上限（秒），一般取 2592000（30 天）
+     * <p>官方请求体为 {@code members[]}（单次最多 10 个），每项：{@code op}
+     * （add 增加禁言 / update 更新到期时间 / del 解除禁言）、{@code member_openid}
+     * （被禁言成员，仅能操作普通成员，不能是群主/管理员/机器人）、{@code mute_expire_at}
+     * （禁言到期时间 RFC3339 格式；op=del 时传空串表示立即解除）。
+     *
+     * @param memberOpenid 被禁言成员 openid
+     * @param op           add / update / del
+     * @param muteExpireAt 禁言到期时间（RFC3339）；del 时传空串立即解除
      */
-    public ObjectNode setGroupRestrictSetting(String groupOpenid, long restrictStart,
-                                              long restrictEnd, long restrictLimit) {
-        return setGroupRestrictSetting(currentRobotId(), currentEnvType(),
-                groupOpenid, restrictStart, restrictEnd, restrictLimit);
-    }
-
-    /** 设置群成员禁言（全参）。 */
-    public ObjectNode setGroupRestrictSetting(String robotId, String envType, String groupOpenid,
-                                              long restrictStart, long restrictEnd, long restrictLimit) {
+    public ObjectNode setGroupMute(String robotId, String envType, String groupOpenid,
+                                   String memberOpenid, String op, String muteExpireAt) {
+        ObjectNode member = Json.obj();
+        member.put("op", op);
+        member.put("member_openid", memberOpenid);
+        member.put("mute_expire_at", muteExpireAt == null ? "" : muteExpireAt);
         ObjectNode body = Json.obj();
-        body.put("restrict_start", restrictStart);
-        body.put("restrict_end", restrictEnd);
-        body.put("restrict_limit", restrictLimit);
+        body.putArray("members").add(member);
         return qqApiService.post(robotId, envType,
                 "/v2/groups/" + groupOpenid + "/restrict_chat_setting", body);
     }
