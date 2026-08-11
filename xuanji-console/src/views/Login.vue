@@ -49,7 +49,7 @@ const features = [
   { icon: RocketOutline, text: '多机器人统一管控' },
   { icon: FlashOutline, text: '实时事件处理流水' },
   { icon: ServerOutline, text: '权限/黑名单/审计' },
-  { icon: GitNetworkOutline, text: 'QQ + OneBot 双协议' }
+  { icon: GitNetworkOutline, text: 'QQ 官方开放平台协议' }
 ]
 </script>
 

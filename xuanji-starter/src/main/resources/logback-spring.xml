@@ -22,7 +22,7 @@
     </appender>
 
     <!-- 框架日志 -->
-    <logger name="dev.xuanji" level="DEBUG" additivity="false">
+    <logger name="XuanJi" level="DEBUG" additivity="false">
         <appender-ref ref="CONSOLE"/>
         <appender-ref ref="FILE"/>
     </logger>

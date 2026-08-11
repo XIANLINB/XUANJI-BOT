@@ -710,7 +710,8 @@ onMounted(async () => {
 }
 .tab-pane-inner {
   padding: 18px 4px 8px 4px;
-  max-width: 1200px;
+  max-width: 100%;
+  width: 100%;
 }
 .tab-desc {
   font-size: 13px;

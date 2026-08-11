@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, h } from 'vue'
+import { ref, computed, onMounted, watch, h } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   NCard, NButton, NSpace, NIcon, NText, NTag, NDataTable, NInput,
@@ -203,6 +203,8 @@ function exportKv(format: 'csv' | 'json') {
 }
 
 onMounted(load)
+// 同一路由 record 复用组件：切换插件（:pluginId 变化）时重新加载，避免页面不刷新
+watch(pluginId, () => load())
 </script>
 
 <template>

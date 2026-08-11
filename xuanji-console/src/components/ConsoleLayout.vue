@@ -13,7 +13,8 @@ import {
   ExtensionPuzzleOutline, ShieldCheckmarkOutline, GitNetworkOutline, LogOutOutline,
   StorefrontOutline, KeyOutline, ArchiveOutline, TimeOutline,
   StatsChartOutline, TrashOutline, FolderOpenOutline, WarningOutline,
-  ChatbubblesOutline, SparklesOutline, LibraryOutline, NewspaperOutline
+  ChatbubblesOutline, SparklesOutline, LibraryOutline, NewspaperOutline,
+  BookOutline
 } from '@vicons/ionicons5'
 import { routes } from '../router'
 import api from '../api'
@@ -51,7 +52,6 @@ const iconMap: Record<string, Component> = {
   backup: ArchiveOutline,
   alert: WarningOutline,
   scheduler: TimeOutline,
-  onebot: GitNetworkOutline,
   health: PulseOutline,
   settings: SettingsOutline,
   logs: DocumentTextOutline,
@@ -96,6 +96,12 @@ const marketItem: MenuOption = {
   icon: renderIcon(StorefrontOutline)
 }
 
+const guideItem: MenuOption = {
+  label: '开发指南',
+  key: 'plugin-guide',
+  icon: renderIcon(BookOutline)
+}
+
 // 注意：必须 computed——pluginMenuItems 更新后菜单要能重新构建（否则扫描出新插件菜单不刷新）
 const menuOptions = computed<MenuOption[]>(() =>
   routes
@@ -108,7 +114,7 @@ const menuOptions = computed<MenuOption[]>(() =>
       }
       // 插件管理：子菜单 = 插件市场 + 每个插件一个页面（扫描入口已移到市场页）
       if (r.name === 'plugin-admin') {
-        item.children = [marketItem, ...pluginMenuItems.value]
+        item.children = [marketItem, guideItem, ...pluginMenuItems.value]
         return item
       }
       const children = r.children?.filter((c) => c.name && c.meta?.title)

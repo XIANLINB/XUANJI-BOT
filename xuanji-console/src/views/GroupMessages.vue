@@ -3,7 +3,7 @@ import { ref, onMounted, computed, h, watch } from 'vue'
 import {
   NDataTable, NButton, NAlert, NSpace, NIcon, NText, NSelect, NInput, NTag,
   NCard, NGrid, NGi, NNumberAnimation, NGradientText, NDatePicker, NImage,
-  NTooltip, NPagination, type DataTableColumns
+  NTooltip, NPagination, useMessage, type DataTableColumns
 } from 'naive-ui'
 import {
   ChatbubbleOutline, SearchOutline, ArrowDownOutline, ArrowUpOutline,
@@ -27,6 +27,33 @@ const bots = ref<{ appId: string; name: string }[]>([])
 const botNameMap = computed(
   () => new Map((bots.value || []).map((b) => [String(b.appId), b.name || `Bot #${b.appId}`]))
 )
+
+const message = useMessage()
+
+/** 发送超过 2 分钟的消息不可撤回（QQ 平台限制）。 */
+const TWO_MIN_MS = 2 * 60 * 1000
+function isMsgExpired(row: any): boolean {
+  const t = Number(row.CREATE_TIME)
+  if (!Number.isFinite(t) || t <= 0) return false
+  const ts = t <= 9999999999 ? t * 1000 : t
+  return Date.now() - ts > TWO_MIN_MS
+}
+
+/** 撤回群消息：机器人自己发的（OUT）免角色校验；他人消息后端会校验机器人本群是否管理员。 */
+async function recallMsg(row: any) {
+  if (!row.MSG_ID) { message.warning('该消息没有消息 ID，无法撤回'); return }
+  if (isMsgExpired(row)) { message.warning('发送超过 2 分钟的消息不可撤回'); return }
+  try {
+    const r: any = await api.recallGroupMessage({
+      appId: String(row.BOT_APPID || ''),
+      groupOpenid: String(row.GROUP_ID || ''),
+      msgId: String(row.MSG_ID),
+      isOwn: row.DIRECTION === 'OUT'
+    })
+    if (r?.error) message.error(r.error)
+    else { message.success('已撤回'); await load() }
+  } catch (e: any) { message.error('撤回失败：' + (e?.message ?? e)) }
+}
 
 async function loadBots() { try { bots.value = (await api.getBots()) || [] } catch { bots.value = [] } }
 async function load() {
@@ -153,7 +180,25 @@ const columns: DataTableColumns = [
   { title: '内容', key: 'CONTENT', width: 300, ellipsis: { tooltip: true }, render: (row) => renderContent(row) },
   { title: '群号', key: 'GROUP_ID', width: 140, ellipsis: { tooltip: true }, render: (row) => h('span', { style: 'font-variant-numeric: tabular-nums' }, String(row.GROUP_ID || '—')) },
   { title: '用户 ID', key: 'USER_ID', width: 160, ellipsis: { tooltip: true }, render: (row) => h('span', { style: 'font-variant-numeric: tabular-nums' }, String(row.USER_ID || '—')) },
-  { title: '消息 ID', key: 'MSG_ID', width: 180, ellipsis: { tooltip: true }, render: (row) => h('span', { style: 'font-variant-numeric: tabular-nums; color: #86909c' }, String(row.MSG_ID || '—')) }
+  { title: '消息 ID', key: 'MSG_ID', width: 180, ellipsis: { tooltip: true }, render: (row) => h('span', { style: 'font-variant-numeric: tabular-nums; color: #86909c' }, String(row.MSG_ID || '—')) },
+  {
+    title: '操作', key: 'ACTION', width: 110, fixed: 'right',
+    render: (row) => {
+      if (Number(row.RETRACTED) === 1) {
+        return h(NTag, { size: 'small', type: 'default', bordered: false }, () => '已撤回')
+      }
+      const expired = isMsgExpired(row)
+      const btn = h(NButton, {
+        size: 'small', type: 'warning', secondary: true,
+        disabled: !row.MSG_ID || expired,
+        onClick: () => recallMsg(row)
+      }, () => expired ? '超2分钟' : '撤回')
+      return h(NTooltip, { disabled: !expired }, {
+        trigger: () => btn,
+        default: () => '发送超过 2 分钟的消息不可撤回'
+      })
+    }
+  }
 ]
 
 // ---------- 分页 ----------

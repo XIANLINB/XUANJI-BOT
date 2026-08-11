@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import {
   darkTheme,
   lightTheme,
+  zhCN, dateZhCN,
   NConfigProvider,
   NMessageProvider,
   NDialogProvider,
@@ -28,13 +29,22 @@ const isDark = ref(false)
 const theme = computed(() => (isDark.value ? darkTheme : lightTheme))
 const overrides = computed(() => (isDark.value ? darkOverrides : lightOverrides))
 
+// naive-ui 全局中文 locale（影响 NDatePicker/NCalendar/NTimePicker 等所有日期组件的"日一二三四五六"与按钮文案）
+const locale = computed(() => (isDark.value ? null : zhCN))
+const dateLocale = computed(() => (isDark.value ? null : dateZhCN))
+
 function toggleTheme() {
   isDark.value = !isDark.value
 }
 </script>
 
 <template>
-  <NConfigProvider :theme="theme" :theme-overrides="overrides">
+  <NConfigProvider
+    :theme="theme"
+    :theme-overrides="overrides"
+    :locale="locale"
+    :date-locale="dateLocale"
+  >
     <NLoadingBarProvider>
       <NMessageProvider>
         <NDialogProvider>

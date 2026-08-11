@@ -90,6 +90,18 @@ function fmtTime(v: unknown): string {
   return dayjs(n <= 9999999999 ? n * 1000 : n).format('YYYY-MM-DD HH:mm')
 }
 
+/** 群标签（存 JSON 数组字符串，如 ["a","b"]）→ 逗号文本展示。 */
+function fmtTags(v: unknown): string {
+  if (v == null || v === '') return '—'
+  const s = String(v).trim()
+  if (!s.startsWith('[')) return s
+  try {
+    const arr = JSON.parse(s)
+    if (Array.isArray(arr) && arr.length) return arr.join('、')
+    return '—'
+  } catch { return s }
+}
+
 const columns = computed<DataTableColumns>(() => [
   {
     title: '机器人名称', key: 'BOT_NAME', width: 130,
@@ -97,11 +109,21 @@ const columns = computed<DataTableColumns>(() => [
   },
   { title: '群号', key: 'GROUP_ID', width: 180, ellipsis: { tooltip: true }, render: (row) => h('span', { style: 'font-variant-numeric: tabular-nums' }, String(row.GROUP_ID || '—')) },
   { title: '群名称', key: 'GROUP_NAME', width: 140, ellipsis: { tooltip: true }, render: (row) => h('span', groupName(row)) },
+  { title: '群备注', key: 'GROUP_FINGER_MEMO', width: 140, ellipsis: { tooltip: true }, render: (row) => h('span', String(row.GROUP_FINGER_MEMO || '—')) },
+  { title: '群分类', key: 'GROUP_CLASS_TEXT', width: 90, render: (row) => h('span', String(row.GROUP_CLASS_TEXT || '—')) },
+  { title: '群标签', key: 'GROUP_TAGS', width: 140, ellipsis: { tooltip: true }, render: (row) => h('span', fmtTags(row.GROUP_TAGS)) },
   { title: '群主 ID', key: 'OWNER_ID', width: 140, ellipsis: { tooltip: true }, render: (row) => h('span', String(row.OWNER_ID || '—')) },
   {
-    title: '成员数', key: 'MEMBER_COUNT', width: 80,
-    render: (row) => h('span', { style: 'font-variant-numeric: tabular-nums; color: #722ed1; font-weight: 600' }, String(row.MEMBER_COUNT ?? '—'))
+    title: '成员数', key: 'MEMBER_COUNT', width: 110,
+    render: (row) => {
+      // 展示 已有成员数/真实成员数（真实数为空时只显示已有数）
+      const real = row.MEMBER_COUNT
+      const saved = row.MEMBER_COUNT_SAVED
+      const text = (real != null && real !== '') ? `${saved ?? '—'}/${real}` : (saved ?? '—')
+      return h('span', { style: 'font-variant-numeric: tabular-nums; color: #722ed1; font-weight: 600' }, String(text))
+    }
   },
+  { title: '群最大人数', key: 'MEMBER_MAX', width: 100, render: (row) => h('span', String(row.MEMBER_MAX ?? '—')) },
   { title: '加入时间', key: 'JOIN_TIME', width: 150, ellipsis: { tooltip: true }, render: (row) => h('span', fmtTime(row.JOIN_TIME)) },
   {
     title: '状态', key: 'STATUS', width: 80,
@@ -112,6 +134,13 @@ const columns = computed<DataTableColumns>(() => [
       if (raw === 'removed') return h(NTag, { size: 'small', type: 'error', bordered: false }, () => '已退出')
       return h(NTag, { size: 'small', type: 'warning', bordered: false }, () => row.STATUS || '—')
     }
+  },
+  {
+    title: '操作', key: 'ACTION', width: 80, fixed: 'right',
+    render: (row) => h(NButton, {
+      size: 'small', type: 'primary', secondary: true,
+      onClick: (e: MouseEvent) => { e.stopPropagation(); openRobotStates(row) }
+    }, () => '详情')
   }
 ])
 
@@ -134,6 +163,25 @@ async function openMembers(g: any) {
     members.value = all.filter((m) => String(m.BOT_APPID) === String(g.BOT_APPID))
   } catch { members.value = [] }
   showMembers.value = true
+}
+
+// ---------- 机器人在群内状态 ----------
+const robotStates = ref<any[]>([])
+const showRobotStates = ref(false)
+const robotStateGroup = ref('')
+async function openRobotStates(g: any) {
+  robotStateGroup.value = String(g.GROUP_ID || '')
+  try {
+    robotStates.value = (await api.getGroupRobotStates(String(g.GROUP_ID || ''))) || []
+  } catch { robotStates.value = [] }
+  showRobotStates.value = true
+}
+
+function robotRoleTag(role: unknown) {
+  const r = String(role || 'member').toLowerCase()
+  if (r === 'owner') return h(NTag, { size: 'small', type: 'warning', bordered: false }, () => '群主')
+  if (r === 'admin') return h(NTag, { size: 'small', type: 'primary', bordered: false }, () => '管理员')
+  return h(NTag, { size: 'small', type: 'default', bordered: false }, () => '成员')
 }
 
 const memberColumns: DataTableColumns = [
@@ -236,6 +284,31 @@ const memberColumns: DataTableColumns = [
         <NEmpty v-if="!members.length" :description="'暂无成员'" style="padding: 40px 0" />
       </NDrawerContent>
     </NDrawer>
+
+    <!-- 机器人在群内状态详情 -->
+    <NDrawer v-model:show="showRobotStates" :width="640" placement="right">
+      <NDrawerContent :title="`机器人在群内状态 · ${robotStateGroup}`" closable>
+        <NEmpty v-if="!robotStates.length" description="暂无记录（机器人入群或定时同步后自动补全）" style="padding: 40px 0" />
+        <NSpace vertical :size="12" v-else>
+          <NCard v-for="(s, i) in robotStates" :key="i" size="small" :bordered="true">
+            <template #header>
+              <NSpace align="center" :size="8">
+                <NText strong>{{ botNameMap.get(String(s.BOT_APPID)) || `Bot #${s.BOT_APPID}` }}</NText>
+                <NText depth="3" style="font-size: 12px">({{ s.BOT_APPID }})</NText>
+                {{ robotRoleTag(s.MEMBER_ROLE) }}
+              </NSpace>
+            </template>
+            <div class="rs-grid">
+              <div class="rs-item"><span class="rs-label">机器人在群 openid</span><span class="rs-value">{{ s.ROBOT_OPENID || '—' }}</span></div>
+              <div class="rs-item"><span class="rs-label">允许主动消息</span><span class="rs-value">{{ s.ALLOW_PROACTIVE_MSG ? '是' : (s.ALLOW_PROACTIVE_MSG === 0 ? '否' : '—') }}</span></div>
+              <div class="rs-item"><span class="rs-label">消息接收设置</span><span class="rs-value">{{ s.RECV_MSG_SETTING || '—' }}</span></div>
+              <div class="rs-item"><span class="rs-label">入群时间</span><span class="rs-value">{{ fmtTime(s.JOINED_AT) }}</span></div>
+              <div class="rs-item"><span class="rs-label">最后同步时间</span><span class="rs-value">{{ fmtTime(s.UPDATED_AT) }}</span></div>
+            </div>
+          </NCard>
+        </NSpace>
+      </NDrawerContent>
+    </NDrawer>
   </div>
 </template>
 
@@ -252,4 +325,10 @@ const memberColumns: DataTableColumns = [
 
 /* 统一 widget 风格（NCard 包裹 StatCard 4 卡） */
 .grid { margin-top: 4px; }
+
+/* 机器人在群内状态字段网格 */
+.rs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 20px; }
+.rs-item { display: flex; flex-direction: column; gap: 2px; }
+.rs-label { font-size: 12px; color: #86909c; }
+.rs-value { font-size: 13px; color: #1d2129; word-break: break-all; }
 </style>

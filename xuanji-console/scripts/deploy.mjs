@@ -5,11 +5,14 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const root = resolve(__dirname, '..')
-const dist = resolve(root, 'dist')
+// vite.config.ts 配置 outDir 为 frontend-dist7，但历史上也用过 dist/，
+// 这里优先找 frontend-dist7，回退到 dist，避免构建产物目录改名后部署脚本永远失败。
+const candidateDirs = ['frontend-dist7', 'dist']
+const dist = candidateDirs.map(d => resolve(root, d)).find(existsSync) || null
 const target = resolve(root, '../xuanji-starter/src/main/resources/static/xuanji/console')
 
-if (!existsSync(dist)) {
-  console.error('找不到 dist/，请先运行 npm run build')
+if (!dist) {
+  console.error('找不到构建产物（frontend-dist7/ 或 dist/），请先运行 npm run build')
   process.exit(1)
 }
 

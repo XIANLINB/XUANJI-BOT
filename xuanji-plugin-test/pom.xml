@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>dev.xuanji</groupId>
+        <artifactId>xuanji-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>xuanji-plugin-test</artifactId>
+    <name>XuanJi Plugin Test</name>
+    <description>接口测试插件 — 一键测试群基本信息和机器人群内状态</description>
+    <dependencies>
+        <dependency>
+            <groupId>dev.xuanji</groupId>
+            <artifactId>xuanji-sdk</artifactId>
+            <version>${project.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>dev.xuanji</groupId>
+            <artifactId>xuanji-api</artifactId>
+            <version>${project.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.pf4j</groupId>
+            <artifactId>pf4j</artifactId>
+            <version>3.15.0</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <archive>
+                        <manifestEntries>
+                            <Plugin-Id>test-plugin</Plugin-Id>
+                            <Plugin-Class>XuanJi.plugin.test.TestPlugin</Plugin-Class>
+                            <Plugin-Origin>official</Plugin-Origin>
+                            <Plugin-Category>tool</Plugin-Category>
+                            <Plugin-Version>${project.version}</Plugin-Version>
+                            <Plugin-Provider>XuanJi Team</Plugin-Provider>
+                            <Plugin-Description>一键测试群基本信息和机器人群内状态</Plugin-Description>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

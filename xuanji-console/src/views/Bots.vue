@@ -21,7 +21,7 @@ import {
   ArrowBackOutline, RefreshOutline, Power, StopCircleOutline, TrashOutline, RadioOutline,
   PeopleOutline, PersonOutline, ChatbubblesOutline, ServerOutline,
   CheckmarkCircleOutline, CloseCircleOutline, DownloadOutline,
-  PlanetOutline, RibbonOutline, TimeOutline
+  PlanetOutline, RibbonOutline, TimeOutline, ArchiveOutline
 } from '@vicons/ionicons5'
 import api from '../api'
 import PageHero from '../components/PageHero.vue'
@@ -210,8 +210,31 @@ async function confirmDelete(b: any) {
   try {
     const r: any = await api.deleteBot(b.appId)
     if (r.error) message.error(r.error)
-    else { message.success('已删除'); await load() }
+    else { message.success('已删除并归档（30 天内可在回收站恢复）'); await load() }
   } catch (e: any) { message.error('删除失败：' + (e?.message ?? e)) }
+}
+
+// ============ 回收站（删除并归档，30 天可恢复） ============
+const archives = ref<any[]>([])
+const showArchive = ref(false)
+const archiveLoading = ref(false)
+async function openArchives() {
+  showArchive.value = true
+  archiveLoading.value = true
+  try { archives.value = await api.archives() }
+  catch (e: any) { message.error('加载回收站失败：' + (e?.message ?? e)) }
+  finally { archiveLoading.value = false }
+}
+async function restoreBot(rec: any) {
+  try {
+    const r: any = await api.restoreBot(rec.id)
+    if (r.error) message.error(r.error)
+    else {
+      message.success('已恢复 ' + (rec.bot_name || rec.instance_id))
+      archives.value = await api.archives()
+      await load()
+    }
+  } catch (e: any) { message.error('恢复失败：' + (e?.message ?? e)) }
 }
 
 // ============ 添加机器人 ============
@@ -255,16 +278,48 @@ async function onAdd() {
 
 <template>
   <div>
-    <PageHero title="QQBOT" subtitle="查看与管理已注册的 QQ/OneBot 机器人实例（详情请进入单独页面）" :icon="RocketOutline">
+    <PageHero title="QQBOT" subtitle="查看与管理已注册的 QQ 机器人实例（详情请进入单独页面）" :icon="RocketOutline">
       <NButton secondary :loading="loading" @click="load">
         <template #icon><NIcon><RocketOutline /></NIcon></template>
         刷新
+      </NButton>
+      <NButton secondary @click="openArchives">
+        <template #icon><NIcon><ArchiveOutline /></NIcon></template>
+        回收站
       </NButton>
       <NButton type="primary" @click="openAdd">
         <template #icon><NIcon><AddOutline /></NIcon></template>
         添加机器人
       </NButton>
     </PageHero>
+
+    <!-- 回收站（删除并归档，30 天可恢复） -->
+    <NModal v-model:show="showArchive" preset="card" title="回收站（已删除机器人，30 天内可恢复）"
+      style="width: 640px">
+      <NAlert type="info" style="margin-bottom: 12px">
+        删除机器人会将数据目录移入归档，保留 30 天。到期未恢复将自动清理；恢复后档案与数据完整还原。
+      </NAlert>
+      <div v-if="archiveLoading" style="text-align:center;padding:24px"><NSpin /></div>
+      <NEmpty v-else-if="!archives.length" description="回收站为空" />
+      <div v-else style="max-height:420px;overflow:auto">
+        <NCard v-for="a in archives" :key="a.id" size="small" style="margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <b>{{ a.bot_name || a.instance_id }}</b>
+              <div style="color:#888;font-size:12px;margin-top:4px">
+                {{ a.platform }} / {{ a.instance_id }}
+                <NDivider vertical />
+                删除于 {{ a.archive_time }}
+                <NDivider vertical />
+                {{ a.data_size > 0 ? (a.data_size / 1024 / 1024).toFixed(1) + ' MB' : '无数据' }}
+              </div>
+              <div style="color:#999;font-size:12px;margin-top:2px">过期时间 {{ a.expire_at }}（超过后自动清除）</div>
+            </div>
+            <NButton type="primary" size="small" @click="restoreBot(a)">恢复</NButton>
+          </div>
+        </NCard>
+      </div>
+    </NModal>
 
     <NAlert v-if="err" type="error" :title="'加载失败'" style="margin-bottom: 16px">{{ err }}</NAlert>
 
@@ -355,7 +410,7 @@ async function onAdd() {
                     删除
                   </NButton>
                 </template>
-                确认删除机器人 {{ b.name || b.botKey }}（AppID {{ b.appId }}）？此操作不可恢复。
+                确认删除机器人 {{ b.name || b.botKey }}（AppID {{ b.appId }}）？删除后进入回收站，30 天内可恢复。
               </NPopconfirm>
             </NSpace>
           </div>

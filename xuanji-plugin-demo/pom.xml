@@ -46,7 +46,9 @@
                     <archive>
                         <manifestEntries>
                             <Plugin-Id>demo-plugin</Plugin-Id>
-                            <Plugin-Class>dev.xuanji.plugin.demo.DemoPlugin</Plugin-Class>
+                            <Plugin-Class>XuanJi.plugin.demo.DemoPlugin</Plugin-Class>
+                            <Plugin-Origin>official</Plugin-Origin>
+                            <Plugin-Category>other</Plugin-Category>
                             <Plugin-Version>${project.version}</Plugin-Version>
                             <Plugin-Provider>XuanJi Team</Plugin-Provider>
                             <Plugin-Description>璇玑演示插件，展示 @Command 指令开发</Plugin-Description>

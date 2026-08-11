@@ -28,7 +28,6 @@ function sourceLabel(s: string): string {
   if (s === 'log') return '框架级 · 日志库'
   if (s.endsWith(':shared')) return `Bot 级 · ${s.slice(0, s.indexOf(':'))} 平台共享库`
   if (s.startsWith('qqbot:')) return `Bot 级 · QQ 机器人 ${s.slice('qqbot:'.length)}`
-  if (s.startsWith('onebot:')) return `Bot 级 · OneBot ${s.slice('onebot:'.length)}`
   return s
 }
 

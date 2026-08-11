@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+    background: #EDEFF3;
+    padding: 28px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .card {
+    width: 800px;
+    background: #fff;
+    border-radius: 20px;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(60, 70, 100, .12);
+  }
+  .head {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #fff;
+    padding: 28px 32px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+  .head-left h1 { font-size: 26px; font-weight: 700; letter-spacing: 1px; }
+  .head-left .sub { margin-top: 6px; font-size: 14px; opacity: .85; }
+  .head-right { text-align: right; }
+  .head-right .date { font-size: 18px; font-weight: 600; }
+  .head-right .weekday { font-size: 13px; opacity: .85; margin-top: 2px; }
+
+  .stats {
+    display: flex;
+    padding: 22px 32px;
+    gap: 16px;
+  }
+  .stat {
+    flex: 1;
+    background: #F6F7FB;
+    border-radius: 14px;
+    padding: 16px 20px;
+    text-align: center;
+  }
+  .stat .num { font-size: 30px; font-weight: 800; color: #5B6BDB; }
+  .stat .label { margin-top: 4px; font-size: 13px; color: #8A93A6; }
+
+  .section { padding: 0 32px 20px; }
+  .section-title {
+    font-size: 14px; font-weight: 600; color: #5B6BDB;
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 12px;
+  }
+  .section-title::before {
+    content: ''; width: 4px; height: 14px; border-radius: 2px;
+    background: linear-gradient(180deg, #667eea, #764ba2);
+  }
+
+  .users { display: flex; flex-wrap: wrap; gap: 10px; }
+  .user {
+    display: flex; align-items: center; gap: 8px;
+    background: #F6F7FB; border-radius: 22px; padding: 6px 14px 6px 6px;
+  }
+  .avatar {
+    width: 34px; height: 34px; border-radius: 50%;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: #fff; display: flex; align-items: center; justify-content: center;
+    font-size: 15px; font-weight: 600;
+  }
+  .user .name { font-size: 13px; color: #333; }
+  .user .cnt { font-size: 12px; color: #8A93A6; }
+
+  .summary {
+    background: #F6F7FB; border-radius: 14px;
+    padding: 16px 18px; font-size: 15px; line-height: 1.75; color: #3A4152;
+  }
+  .mem {
+    margin-top: 12px; padding: 12px 16px; border-left: 3px solid #667eea;
+    background: #F0F2FB; border-radius: 0 10px 10px 0;
+    font-size: 13px; color: #6B7280; line-height: 1.6;
+  }
+  .mem b { color: #5B6BDB; }
+  .foot {
+    padding: 16px 32px; border-top: 1px solid #F0F1F4;
+    font-size: 12px; color: #B0B7C6;
+    display: flex; justify-content: space-between;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="head">
+      <div class="head-left">
+        <h1 id="groupName">群聊日报</h1>
+        <div class="sub" id="groupId"></div>
+      </div>
+      <div class="head-right">
+        <div class="date" id="date"></div>
+        <div class="weekday" id="weekday"></div>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="num" id="msgCount">0</div><div class="label">今日消息</div></div>
+      <div class="stat"><div class="num" id="activeUserCount">0</div><div class="label">活跃成员</div></div>
+      <div class="stat"><div class="num" id="memberCount">-</div><div class="label">群成员</div></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">今日活跃成员</div>
+      <div class="users" id="users"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">今日总结</div>
+      <div class="summary" id="summary"></div>
+      <div class="mem" id="mem" style="display:none"></div>
+    </div>
+
+    <div class="foot">
+      <span id="generatedAt"></span>
+      <span>由 璇玑 AI 生成</span>
+    </div>
+  </div>
+
+<script>
+  window.RENDER_DATA = {{DATA}};
+  (function () {
+    var d = window.RENDER_DATA || {};
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+      });
+    }
+    document.getElementById('groupName').textContent = d.groupName || '群聊日报';
+    document.getElementById('groupId').textContent = d.groupId ? ('群号 ' + d.groupId) : '';
+    document.getElementById('date').textContent = d.date || '';
+    document.getElementById('weekday').textContent = d.weekday || '';
+    document.getElementById('msgCount').textContent = d.msgCount || 0;
+    document.getElementById('activeUserCount').textContent = d.activeUserCount || 0;
+    if (d.memberCount) document.getElementById('memberCount').textContent = d.memberCount;
+
+    var usersBox = document.getElementById('users');
+    var users = d.activeUsers || [];
+    if (users.length === 0) {
+      usersBox.innerHTML = '<div style="font-size:13px;color:#B0B7C6">今天还没有活跃成员记录</div>';
+    } else {
+      users.forEach(function (u) {
+        var el = document.createElement('div');
+        el.className = 'user';
+        var name = u.nickname || '群友';
+        var ch = name.charAt(0);
+        el.innerHTML = '<div class="avatar">' + esc(ch) + '</div>' +
+          '<span class="name">' + esc(name) + '</span>' +
+          '<span class="cnt">' + (u.msgCount || 0) + '条</span>';
+        usersBox.appendChild(el);
+      });
+    }
+
+    document.getElementById('summary').textContent = d.summary || '今天还没有总结。';
+    if (d.memSummary) {
+      var mem = document.getElementById('mem');
+      mem.style.display = 'block';
+      mem.innerHTML = '<b>近期记忆</b> · ' + esc(d.memSummary);
+    }
+    document.getElementById('generatedAt').textContent = d.generatedAt ? ('生成于 ' + d.generatedAt) : '';
+    document.body.dataset.rendered = '1';
+  })();
+</script>
+</body>
+</html>

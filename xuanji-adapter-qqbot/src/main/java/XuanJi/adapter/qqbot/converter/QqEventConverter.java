@@ -1,0 +1,168 @@
+package XuanJi.adapter.qqbot.converter;
+
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
+import XuanJi.api.adapter.XuanJiBot;
+import XuanJi.api.event.XuanJiEvent;
+import XuanJi.api.event.XuanJiEventType;
+import XuanJi.api.event.XuanJiGroup;
+import XuanJi.api.event.XuanJiUser;
+import XuanJi.api.json.Json;
+import XuanJi.api.message.XuanJiMessage;
+import XuanJi.api.message.XuanJiMessageElement;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * QQ 事件转换器 — QQ 平台报文 → 统一 XuanJiEvent。
+ */
+public final class QqEventConverter {
+
+    private QqEventConverter() {}
+
+    /**
+     * 将 QQ WS/Webhook 推送的数据转换为统一事件模型。
+     *
+     * @param bot       当前 bot 实例
+     * @param eventType 原始事件类型字符串（如 GROUP_AT_MESSAGE_CREATE）
+     * @param data      事件数据（d 字段，已注入 _eventType/_eventId 元数据）
+     * @param eventId   事件 ID（平台推送或框架生成）
+     */
+    public static XuanJiEvent convert(XuanJiBot bot, String rawEventType, String envType, ObjectNode data, String eventId) {
+        XuanJiEventType type = mapEventType(rawEventType);
+        XuanJiUser sender = extractUser(data, rawEventType);
+        XuanJiGroup group = extractGroup(data, rawEventType);
+        XuanJiMessage message = extractMessage(data, rawEventType, bot != null ? bot.selfId() : null);
+        String replyMsgId = data.path("id").asText(null);
+
+        return new XuanJiEvent(
+                eventId != null ? eventId : UUID.randomUUID().toString(),
+                type,
+                bot,
+                sender,
+                group,
+                message != null && !message.elements().isEmpty() ? message : null,
+                replyMsgId,
+                data,  // 保留平台原生数据
+                rawEventType,
+                envType
+        );
+    }
+
+    static XuanJiEventType mapEventType(String qqEvent) {
+        return switch (qqEvent) {
+            case "C2C_MESSAGE_CREATE" -> XuanJiEventType.MESSAGE_PRIVATE;
+            case "GROUP_MESSAGE_CREATE", "GROUP_AT_MESSAGE_CREATE" -> XuanJiEventType.MESSAGE_GROUP;
+            case "GUILD_MESSAGE_CREATE" -> XuanJiEventType.MESSAGE_GUILD;
+            case "GROUP_MEMBER_JOIN" -> XuanJiEventType.NOTICE_MEMBER_JOIN;
+            case "GROUP_MEMBER_LEAVE" -> XuanJiEventType.NOTICE_MEMBER_LEAVE;
+            case "INTERACTION_CREATE" -> XuanJiEventType.INTERACTION_BUTTON;
+            default -> XuanJiEventType.of("qq/" + qqEvent.replace('_', '/').toLowerCase());
+        };
+    }
+
+    static XuanJiUser extractUser(ObjectNode data, String eventType) {
+        ObjectNode author = Json.getObj(data, "author");
+        String userId = "";
+        String nickname = "";
+        boolean botFlag = false;
+
+        if (author != null) {
+            userId = author.path("id").asText("");
+            nickname = author.path("username").asText("");
+            botFlag = author.path("bot").asBoolean(false);
+        }
+
+        // 群聊中 author 可能包含 member_openid，优先使用
+        if (author != null) {
+            String memberId = author.path("member_openid").asText(null);
+            if (memberId != null && !memberId.isEmpty()) {
+                userId = memberId;
+            }
+        }
+
+        return new XuanJiUser(
+                userId, userId, nickname.isEmpty() ? userId : nickname,
+                null, 0, Instant.now()
+        );
+    }
+
+    static XuanJiGroup extractGroup(ObjectNode data, String eventType) {
+        String groupId = data.path("group_openid").asText(null);
+        if (groupId == null) {
+            groupId = data.path("guild_id").asText(null);
+        }
+        if (groupId == null) {
+            return null;
+        }
+        return new XuanJiGroup(groupId, "", groupId, "", 0, Instant.now());
+    }
+
+    /**
+     * 从 QQ 事件数据解析消息链。
+     *
+     * <p>正文/富媒体一律委托 {@link QqMessageConverter#fromQqData(ObjectNode, String)}，
+     * 与 SDK 事件（{@code GroupMessageHandler.sdkEvent}）走同一套解析逻辑 ——
+     * 管道侧（命令路由 / 权限 / 黑名单）和插件侧看到的消息链从此完全一致，
+     * 不会再出现「插件能收到图片、命令匹配却只看得见空文本」的分叉。
+     *
+     * <p>本方法在此基础上补两类<b>事件层</b>字段（它们不在消息载荷里，转换器不该管）：
+     * <ol>
+     *   <li>{@code message_reference} → {@link XuanJiMessageElement.Reply}，置于链首</li>
+     *   <li>{@code mentions} → {@link XuanJiMessageElement.At}，紧随其后</li>
+     * </ol>
+     * QQ 平台会把 {@code @机器人} 从 content 里剥离到 mentions 数组，位置信息已丢失；
+     * 放在正文之前是对「@机器人 指令」这一实际语序的还原。
+     *
+     * @param data      事件数据（d 字段）
+     * @param eventType 原始事件类型（保留给后续按类型分支，如频道消息形态差异）
+     * @param appId     机器人 appId，用于媒体按需下载；null 则媒体保持 URL 形态
+     * @return 消息链；无任何内容时返回 {@code null}（与 {@link #convert} 的空消息语义对齐）
+     */
+    static XuanJiMessage extractMessage(ObjectNode data, String eventType, String appId) {
+        XuanJiMessage body = QqMessageConverter.fromQqData(data, appId);
+
+        List<XuanJiMessageElement> prefix = new ArrayList<>();
+
+        // 1. 引用回复：{"message_reference":{"message_id":"xxx"}}
+        String refId = data.path("message_reference").path("message_id").asText(null);
+        if (refId != null && !refId.isBlank()) {
+            prefix.add(new XuanJiMessageElement.Reply(refId));
+        }
+
+        // 2. @ 提及：QQ 把 @ 从 content 剥离到 mentions 数组
+        JsonNode mentions = data.path("mentions");
+        if (mentions.isArray()) {
+            for (JsonNode m : mentions) {
+                // 群场景优先 member_openid（与 extractUser 的 userId 口径一致，便于插件比对）
+                String userId = firstNonBlank(
+                        m.path("member_openid").asText(null),
+                        m.path("user_openid").asText(null),
+                        m.path("id").asText(null));
+                if (userId == null) continue;
+                prefix.add(new XuanJiMessageElement.At(userId, m.path("username").asText("")));
+            }
+        }
+
+        if (prefix.isEmpty()) {
+            return body.elements().isEmpty() ? null : body;
+        }
+
+        XuanJiMessage.Builder builder = XuanJiMessage.builder();
+        prefix.forEach(builder::add);
+        body.elements().forEach(builder::add);
+        XuanJiMessage merged = builder.build();
+        return merged.elements().isEmpty() ? null : merged;
+    }
+
+    /** 返回第一个非空白值，全空返回 null。 */
+    private static String firstNonBlank(String... values) {
+        for (String v : values) {
+            if (v != null && !v.isBlank()) return v;
+        }
+        return null;
+    }
+}

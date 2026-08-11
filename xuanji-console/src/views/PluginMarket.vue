@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, h } from 'vue'
+import {
+  ref, computed, onMounted, h
+} from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NCard, NButton, NSpace, NIcon, NText, NTag, NInput, NGrid, NGi, NEmpty,
-  NPopconfirm, NModal, NAlert, useMessage
+  NPopconfirm, NModal, NAlert, useMessage, NSelect, NSpin
 } from 'naive-ui'
 import {
   StorefrontOutline, RefreshOutline, SearchOutline, SettingsOutline, TrashOutline, CubeOutline,
@@ -17,8 +19,22 @@ const router = useRouter()
 const message = useMessage()
 const rows = ref<any[]>([])
 const keyword = ref('')
+const category = ref('all')
 const loading = ref(false)
 const scanning = ref(false)
+
+// 插件分类（五大类）
+const CATEGORIES = [
+  { value: 'all', label: '全部' },
+  { value: 'entertainment', label: '娱乐' },
+  { value: 'tool', label: '工具' },
+  { value: 'group-admin', label: '群管' },
+  { value: 'service', label: '服务' },
+  { value: 'other', label: '其他' }
+]
+const CATEGORY_LABEL: Record<string, string> = {
+  entertainment: '娱乐', tool: '工具', 'group-admin': '群管', service: '服务', other: '其他'
+}
 
 // 命令执行统计（风控数据源）
 const cmdStat = ref<Record<string, any>>({ execCount: 0, failCount: 0, successRate: 100, rateLimitHits: 0 })
@@ -31,11 +47,13 @@ async function loadCmdStat() {
 
 const filtered = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
-  if (!kw) return rows.value
-  return rows.value.filter((p) =>
-    (p.name || '').toLowerCase().includes(kw) ||
-    (p.id || '').toLowerCase().includes(kw) ||
-    (p.description || '').toLowerCase().includes(kw))
+  return rows.value.filter((p) => {
+    if (category.value !== 'all' && p.category !== category.value) return false
+    if (!kw) return true
+    return (p.name || '').toLowerCase().includes(kw) ||
+      (p.id || '').toLowerCase().includes(kw) ||
+      (p.description || '').toLowerCase().includes(kw)
+  })
 })
 
 async function load() {
@@ -133,6 +151,12 @@ onMounted(() => { load(); loadCmdStat() })
       </NSpace>
     </PageHero>
 
+    <!-- 分类筛选 -->
+    <NSpace align="center" style="margin-bottom: 12px">
+      <NSelect v-model:value="category" :options="CATEGORIES" size="small" style="width: 140px" />
+      <NText depth="3" style="font-size: 12px">分类：娱乐 / 工具 / 群管 / 服务 / 其他 · 来源：官方 / 社区</NText>
+    </NSpace>
+
     <NEmpty v-if="!loading && !filtered.length" description="暂无插件，点「扫描新插件」或把 jar 放入 plugins/ 目录" style="padding: 60px 0" />
 
     <!-- 插件执行统计（来自框架命令注册表） -->
@@ -160,6 +184,8 @@ onMounted(() => { load(); loadCmdStat() })
               <div class="p-name">
                 <NText strong>{{ p.name || p.id }}</NText>
                 <NTag size="small" :bordered="false" :type="p.running ? 'success' : 'default'" round>{{ p.running ? '运行中' : '已停用' }}</NTag>
+                <NTag size="small" :bordered="false" :type="p.origin === 'official' ? 'info' : 'warning'" round>{{ p.origin === 'official' ? '官方' : '社区' }}</NTag>
+                <NTag size="small" :bordered="false" type="primary" round>{{ CATEGORY_LABEL[p.category] || '其他' }}</NTag>
               </div>
               <NText depth="3" style="font-size: 12px">{{ p.id }} · v{{ p.version }}</NText>
             </div>
@@ -219,6 +245,7 @@ onMounted(() => { load(); loadCmdStat() })
         </NSpace>
       </template>
     </NModal>
+
   </div>
 </template>
 

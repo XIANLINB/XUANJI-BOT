@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>dev.xuanji</groupId>
+        <artifactId>xuanji-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>xuanji-llm</artifactId>
+    <name>XuanJi LLM</name>
+    <description>璇玑 LLM 模块 — AI 能力引擎（对话 / 工具 / Agent / MCP / 记忆 / RAG / 多模态）</description>
+
+    <dependencies>
+        <!-- SPI 接口层：LlmProvider / @LlmTool / LlmMessage 等，插件可见 -->
+        <dependency>
+            <groupId>dev.xuanji</groupId>
+            <artifactId>xuanji-api</artifactId>
+        </dependency>
+
+        <!-- 框架核心：Pipeline / CommandRegistry / ConversationSession / 持久化（JdbcTemplate） -->
+        <dependency>
+            <groupId>dev.xuanji</groupId>
+            <artifactId>xuanji-core</artifactId>
+        </dependency>
+
+        <!-- 定时任务：自然语言建定时（create_schedule 工具复用 SchedulerJobStore / TaskSchedulerService） -->
+        <dependency>
+            <groupId>dev.xuanji</groupId>
+            <artifactId>xuanji-scheduler</artifactId>
+        </dependency>
+
+        <!-- RestClient（RestClient / JdkClientHttpRequestFactory / HttpHeaders 所在包），版本由父 BOM 管理 -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-web</artifactId>
+        </dependency>
+
+        <!-- SseEmitter 等 SSE 流式响应（控制台 AI 对话页） -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-webmvc</artifactId>
+        </dependency>
+
+        <!-- HTML 模板渲染截图（图文卡片：日报/签到/战绩）。Playwright 无头 Chromium，浏览器二进制放 data/browser -->
+        <dependency>
+            <groupId>com.microsoft.playwright</groupId>
+            <artifactId>playwright</artifactId>
+            <version>1.62.0</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+</project>

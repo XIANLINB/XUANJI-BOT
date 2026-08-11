@@ -16,6 +16,9 @@ export const botsApi = {
   saveBot: (body: Record<string, string>) => post('/bot-config', body),
   reloadBots: () => post('/bot-config/reload'),
   deleteBot: (appId: string) => del('/bot-config/' + encodeURIComponent(appId)),
+  // 删除并归档（防误删，30 天内可恢复）
+  archives: () => get('/bot-config/archives'),
+  restoreBot: (id: number | string) => post(`/bot-config/archives/${id}/restore`),
   // 变动数据（统计卡用）
   getBotGroupVariation: (botKey: string) => get(`/console/bots/${encodeURIComponent(botKey)}/group-variation`),
   getBotFriendVariation: (botKey: string) => get(`/console/bots/${encodeURIComponent(botKey)}/friend-variation`)

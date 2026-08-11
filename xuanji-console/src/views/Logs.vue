@@ -19,7 +19,7 @@ const err = ref('')
 const loading = ref(false)
 const autoScroll = ref(true)
 const fontSize = ref(13)
-const minLevel = ref('INFO')
+const minLevel = ref('DEBUG')
 
 // ══════ 自动更新模式：关闭 / 轮询 / 实时（SSE）三态单选 ══════
 // 轮询与实时是互斥的两种「自动更新」手段，合并为一个三态避免同时运行/状态打架
@@ -55,7 +55,7 @@ const streamEs = ref<EventSource | null>(null)
 const streamError = ref(false)
 const LIVE_CAP = 5000 // 实时累积行数上限，避免失控增长
 
-const LEVEL_ORDER: Record<string, number> = { TRACE: 0, DEBUG: 1, INFO: 2, WARN: 3, ERROR: 4 }
+const LEVEL_ORDER: Record<string, number> = { TRACE: 0, DEBUG: 1, INFO: 2, WARN: 3, ERROR: 4, RAW: -1 }
 const LEVEL_COLOR: Record<string, string> = {
   ERROR: '#ff6b6b',
   WARN: '#ffa94d',
@@ -82,8 +82,48 @@ const entries = computed<Entry[]>(() => {
   for (const line of text.split('\n')) {
     const t = line.trim()
     if (!t) continue
+    // 三级解析：
+    //   1) 直接 JSON（来自某些结构化日志格式）
+    //   2) SSE 包装的 JSON（type=log，line 字段是真日志行）
+    //   3) 纯文本 logback 行（来自 /logs 接口文件尾部读取），用正则从中提取 level/time/thread/logger/message
+    let o: any = null
     try {
-      const o = JSON.parse(t)
+      o = JSON.parse(t)
+    } catch {
+      // 进入第 3 条：用正则解析 logback 行，缺失时仍 fallback RAW
+      // 时间戳可带日期（yyyy-MM-dd HH:mm:ss.SSS）或不带（仅 HH:mm:ss.SSS），兼容两种格式
+      const m = /^(?:\d{4}-\d{2}-\d{2}\s+)?(\d{2}:\d{2}:\d{2}\.\d{3})\s+(TRACE|DEBUG|INFO|WARN|ERROR)\s+\[([^\]]+)\]\s+(\S+)\s*(.*)$/.exec(t)
+      if (m) {
+        o = {
+          time: m[1],
+          level: m[2],
+          thread_name: m[3],
+          logger_name: m[4],
+          message: m[5]
+        }
+      }
+    }
+    if (o && typeof o === 'object' && o !== null) {
+      // SSE wrapper（{ type, line }）：解包后递归解析真实日志行
+      if (o.type === 'log' && typeof o.line === 'string' && !o.level) {
+        const inner = o.line.trim()
+        let innerParsed: any = null
+        try {
+          innerParsed = JSON.parse(inner)
+        } catch {
+          const m2 = /^(?:\d{4}-\d{2}-\d{2}\s+)?(\d{2}:\d{2}:\d{2}\.\d{3})\s+(TRACE|DEBUG|INFO|WARN|ERROR)\s+\[([^\]]+)\]\s+(\S+)\s*(.*)$/.exec(inner)
+          if (m2) {
+            innerParsed = {
+              time: m2[1],
+              level: m2[2],
+              thread_name: m2[3],
+              logger_name: m2[4],
+              message: m2[5]
+            }
+          }
+        }
+        if (innerParsed && typeof innerParsed === 'object') o = innerParsed
+      }
       const mdc = (o.mdc && typeof o.mdc === 'object') ? o.mdc : {}
       out.push({
         level: (o.level || 'INFO').toUpperCase(),
@@ -94,14 +134,14 @@ const entries = computed<Entry[]>(() => {
         stack: o.stack || '',
         trace: mdc.traceId || ''
       })
-    } catch {
+    } else {
       out.push({ level: 'RAW', message: t, logger: '', time: '', thread: '' })
     }
   }
   let result = out
   if (minLevel.value !== 'ALL') {
     const min = LEVEL_ORDER[minLevel.value] ?? 0
-    result = result.filter((e) => (LEVEL_ORDER[e.level] ?? 99) >= min)
+    result = result.filter((e) => (LEVEL_ORDER[e.level] ?? 0) >= min)
   }
   if (traceFilter.value) {
     result = result.filter((e) => e.trace === traceFilter.value)
@@ -221,9 +261,14 @@ function stopPoll() {
 }
 
 watch(autoScroll, (v) => { if (v) scrollToBottom() })
-watch(updateMode, () => {
+watch(updateMode, (v) => {
   localStorage.setItem(LOGS_MODE_KEY, updateMode.value)
-  applyUpdateMode()
+  // 切到「轮询」或「实时」时先拉一次历史，再启动订阅，保证切模式时立刻能看到日志
+  if (v === 'off') {
+    applyUpdateMode()
+  } else {
+    load().finally(() => applyUpdateMode())
+  }
 })
 watch(pollSec, () => {
   localStorage.setItem(LOGS_POLL_SEC_KEY, String(pollSec.value))

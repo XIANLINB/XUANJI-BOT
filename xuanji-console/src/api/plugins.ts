@@ -22,6 +22,6 @@ export const pluginsApi = {
   clearPluginKv: (pluginId: string) => post(`/console/plugins/${encodeURIComponent(pluginId)}/kv/clear`),
   // 运行时扫描 plugins 目录，加载新插件
   scanPlugins: () => post('/console/plugins/scan'),
-  // 卸载插件（关闭容器 + 清理持久态）
+  // 卸载插件（关闭容器 + 清理持久态 + 删 jar）
   unloadPlugin: (pluginId: string) => post(`/console/plugins/${encodeURIComponent(pluginId)}/unload`)
 }
