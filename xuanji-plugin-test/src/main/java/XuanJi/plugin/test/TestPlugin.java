@@ -81,13 +81,13 @@ public class TestPlugin extends XuanJiPluginBase {
          * 群成员禁言：调用设置群成员禁言接口（restrict_chat_setting）。
          * 仅群主/管理员可用（@Command roles）；机器人需为群管理，否则平台返回失败。
          *
-         * <p>用法：{@code 禁言 @成员 <分钟>}，例如「禁言 @小明 5」。未指定分钟默认 10，上限 7 天。
+         * <p>用法：{@code #禁言 @成员 <分钟>}，例如「#禁言 @小明 5」。未指定分钟默认 10，上限 7 天。
          */
-        @Command(value = "禁言", scope = Command.Scope.GROUP, roles = {"owner", "admin"})
+        @Command(value = "#禁言", scope = Command.Scope.GROUP, roles = {"owner", "admin"})
         public String mute(GroupMessageEvent e, PluginServices svc) {
             List<String> targets = e.getMentionedUserIds();
             if (targets == null || targets.isEmpty()) {
-                return "用法：禁言 @成员 <分钟>，例如：禁言 @小明 5。仅群主/管理员可用，机器人需为群管理。";
+                return "用法：#禁言 @成员 <分钟>，例如：#禁言 @小明 5。仅群主/管理员可用，机器人需为群管理。";
             }
             // 从消息纯文本提取分钟数（QQ 的 @ 占位不含纯数字，提取到的数字即分钟数；默认 10，上限 7 天）
             int minutes = 10;
