@@ -484,6 +484,13 @@ public class QqBotWsClient {
         // 记录收到的事件
         log.info("[BotWS] 收到事件: type={}, robotId={}, seq={}", eventType, robotId, seq);
 
+        // 互动事件（INTERACTION_CREATE）：非消息类事件，type=11/12 须调用互动响应接口，
+        // 否则客户端会一直 loading 直到超时；不进 Pipeline（不是消息）。
+        if ("INTERACTION_CREATE".equals(eventType)) {
+            handleInteractionCreate(data);
+            return;
+        }
+
         // 提取事件 ID 并交给 Pipeline 处理
         String eventId = data.path("id").asText("");
         totalEvents++;
@@ -500,6 +507,31 @@ public class QqBotWsClient {
             botPipeline.proceed(be);
         } catch (Exception e) {
             log.error("[BotWS] 事件处理异常: type={}, robotId={}, error={}", eventType, robotId, e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 处理互动事件（INTERACTION_CREATE）。
+     *
+     * <p>仅 type=11（消息按钮）与 type=12（快捷菜单）需要调用
+     * {@code PUT /interactions/{interaction_id}} 回应，否则客户端会一直 loading 直到超时；
+     * 其他类型（消息反馈/清空会话/故事集/切换模型/授权等）无需回应，仅记录。
+     */
+    private void handleInteractionCreate(ObjectNode data) {
+        String interactionId = data.path("id").asText("");
+        int type = data.path("type").asInt(0);
+        String scene = data.path("scene").asText("");
+        if (interactionId.isBlank()) return;
+        if (type != 11 && type != 12) {
+            log.info("[BotWS] 互动事件无需回应: type={}, scene={}, robotId={}", type, scene, robotId);
+            return;
+        }
+        log.info("[BotWS] 互动事件回应: type={}, scene={}, id={}, robotId={}", type, scene, interactionId, robotId);
+        try {
+            qqApiService.replyInteraction(robotId, envType, interactionId, 0);
+            log.info("[BotWS] 互动事件已回应: id={}, robotId={}", interactionId, robotId);
+        } catch (Exception e) {
+            log.warn("[BotWS] 互动事件回应失败: id={}, robotId={}, error={}", interactionId, robotId, e.getMessage());
         }
     }
 

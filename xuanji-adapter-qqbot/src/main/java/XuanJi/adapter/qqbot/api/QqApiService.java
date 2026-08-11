@@ -87,6 +87,9 @@ public class QqApiService {
     /** 公共 HTTP 客户端（由 HttpClientConfig 统一管理，连接池复用） */
     private final HttpClient httpClient;
 
+    /** 接口限频器（QPS/QPM 分桶，429 降档兜底）。 */
+    private final QqApiRateLimit rateLimit;
+
     /**
      * 是否使用新开放平台（全局配置）
      * <p>true = 使用新开放平台（api.bot.qq.com），false = 使用老开放平台（api.sgroup.qq.com）
@@ -99,11 +102,14 @@ public class QqApiService {
      * @param accessTokenService AccessToken 管理服务
      * @param robotRegistry      机器人注册表
      * @param httpClient         公共 HTTP 客户端
+     * @param rateLimit          接口限频器
      */
-    public QqApiService(AccessTokenService accessTokenService, RobotRegistry robotRegistry, HttpClient httpClient) {
+    public QqApiService(AccessTokenService accessTokenService, RobotRegistry robotRegistry,
+                        HttpClient httpClient, QqApiRateLimit rateLimit) {
         this.accessTokenService = accessTokenService;
         this.robotRegistry = robotRegistry;
         this.httpClient = httpClient;
+        this.rateLimit = rateLimit;
     }
 
     /**
@@ -134,6 +140,7 @@ public class QqApiService {
         m.put("openedAt", circuitOpenedAt);
         long remain = circuitOpen ? Math.max(0, CIRCUIT_COOLDOWN_MS - (System.currentTimeMillis() - circuitOpenedAt)) : 0;
         m.put("cooldownRemainingMs", remain);
+        m.put("rateLimit", rateLimit.stats());
         return m;
     }
 
@@ -328,6 +335,40 @@ public class QqApiService {
     }
 
     /**
+     * 生成机器人分享链接（POST /v2/generate_url_link，50 QPS）。
+     *
+     * @param robotId      机器人 ID
+     * @param envType      环境类型
+     * @param urlLink      需要跳转的 URL（可选，null 不传）
+     * @param callbackData 透传给开发者的自定义参数（可选，最长 32 字符）
+     * @return 生成的 url_link；失败返回 null
+     */
+    public String generateShareLink(String robotId, String envType, String urlLink, String callbackData) {
+        ObjectNode body = Json.obj();
+        if (urlLink != null && !urlLink.isBlank()) body.put("url_link", urlLink);
+        if (callbackData != null && !callbackData.isBlank()) body.put("callback_data", callbackData);
+        ObjectNode resp = post(robotId, envType, "/v2/generate_url_link", body);
+        return resp != null ? resp.path("url_link").asText(null) : null;
+    }
+
+    /**
+     * 互动事件响应（PUT /interactions/{interaction_id}，50 QPS）。
+     *
+     * <p>收到 INTERACTION_CREATE 事件后须调用本接口回应，否则客户端会一直 loading 直到超时；
+     * 仅 type=11（消息按钮）与 type=12（快捷菜单）需要回应，同一 interaction_id 只能回应一次。
+     *
+     * @param robotId       机器人 ID
+     * @param envType       环境类型
+     * @param interactionId 互动事件 ID（INTERACTION_CREATE 事件体 id 字段）
+     * @param code          0=成功 1=操作失败 2=操作频繁 3=重复操作 4=没有权限 5=仅管理员操作
+     * @return 响应 JSON（平台无响应体，通常为空对象）
+     */
+    public ObjectNode replyInteraction(String robotId, String envType, String interactionId, int code) {
+        ObjectNode body = Json.obj().put("code", code);
+        return put(robotId, envType, "/interactions/" + interactionId, body);
+    }
+
+    /**
      * DELETE 请求（通过 robotId）
      *
      * @param robotId 机器人 ID
@@ -466,6 +507,10 @@ public class QqApiService {
                                    boolean isNewOpenBot) {
         // 0. 熔断前置检查（冷却期内直接快速失败；半开态仅放行探针）
         checkCircuit();
+        // 0.5 接口限频（本地限频拒绝不触发熔断计数；按 appId+类别分桶，QPS/QPM）
+        if (!rateLimit.acquire(appId, path)) {
+            throw new BusinessException(429, "QQ 接口本地限频（" + path + "），请稍后重试");
+        }
         // 1. 获取 AccessToken（缓存优先，过期自动刷新）
         String accessToken = accessTokenService.getAccessToken(appId, appSecret, envType, isNewOpenBot);
 
@@ -574,6 +619,9 @@ public class QqApiService {
 
         } catch (BusinessException e) {
             onApiFailure(); // 含 429/404/500 等平台错误
+            if (e.getCode() == 429) {
+                rateLimit.on429(appId, path); // 平台限频 → 本地对应桶降档兜底
+            }
             throw e; // 业务异常直接抛出
         } catch (InterruptedException e) {
             onApiFailure();
@@ -599,6 +647,10 @@ public class QqApiService {
                                                boolean isNewOpenBot, int timeoutSeconds) {
         // 熔断前置检查（与 sendRequest 共用同一熔断器）
         checkCircuit();
+        // 接口限频（与 sendRequest 共用同一限频器）
+        if (!rateLimit.acquire(appId, path)) {
+            throw new BusinessException(429, "QQ 接口本地限频（" + path + "），请稍后重试");
+        }
         String accessToken = accessTokenService.getAccessToken(appId, appSecret, envType, isNewOpenBot);
         String apiBase = QqPlatformConfig.getApiBaseUrl(isNewOpenBot, envType);
         String url = apiBase + path;
@@ -628,6 +680,9 @@ public class QqApiService {
                 throw new BusinessException(statusCode, errorMsg);
             }
         } catch (BusinessException e) {
+            if (e.getCode() == 429) {
+                rateLimit.on429(appId, path);
+            }
             throw e;
         } catch (Exception e) {
             log.error("QQ API请求异常: method={}, path={}, error={}", method, path, e.getMessage(), e);

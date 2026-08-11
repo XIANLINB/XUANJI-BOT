@@ -181,6 +181,53 @@ public class QqGuildApiService {
                 "/guilds/" + guildId + "/members/" + userId + "/mute", body);
     }
 
+    // ==================== 入群自动审批策略（6 接口，均 60 QPM） ====================
+
+    /** 查询入群自动审批策略列表：GET /v2/groups/join_approval_strategy?cursor=&limit=（默认20 最大100） */
+    public ObjectNode listJoinApprovalStrategies(String robotId, String envType, String cursor, Integer limit) {
+        StringBuilder path = new StringBuilder("/v2/groups/join_approval_strategy");
+        boolean hasQ = false;
+        if (cursor != null && !cursor.isBlank()) {
+            path.append("?cursor=").append(cursor);
+            hasQ = true;
+        }
+        if (limit != null && limit > 0) {
+            path.append(hasQ ? '&' : '?').append("limit=").append(limit);
+        }
+        return api.get(robotId, envType, path.toString());
+    }
+
+    /**
+     * 创建入群自动审批策略：POST /v2/groups/join_approval_strategy。
+     * body 字段：group_openids[] / group_ids[]（二选一必填，最多100）、is_enable(on/off)、
+     * expire_at(RFC3339，不传默认一年)、remark(≤255汉字)。一个机器人最多 20 个策略。
+     */
+    public ObjectNode createJoinApprovalStrategy(String robotId, String envType, ObjectNode body) {
+        return api.post(robotId, envType, "/v2/groups/join_approval_strategy", body);
+    }
+
+    /** 修改入群自动审批策略：PATCH /v2/groups/join_approval_strategy/{strategyId}（body 传需修改字段） */
+    public ObjectNode updateJoinApprovalStrategy(String robotId, String envType, String strategyId, ObjectNode body) {
+        return api.patch(robotId, envType, "/v2/groups/join_approval_strategy/" + strategyId, body);
+    }
+
+    /** 删除入群自动审批策略：DELETE /v2/groups/join_approval_strategy/{strategyId} */
+    public ObjectNode deleteJoinApprovalStrategy(String robotId, String envType, String strategyId) {
+        return api.delete(robotId, envType, "/v2/groups/join_approval_strategy/" + strategyId);
+    }
+
+    /** 执行入群自动审批策略：POST /v2/groups/join_approval_strategy/{strategyId}/execute */
+    public ObjectNode executeJoinApprovalStrategy(String robotId, String envType, String strategyId, ObjectNode body) {
+        return api.post(robotId, envType,
+                "/v2/groups/join_approval_strategy/" + strategyId + "/execute", body);
+    }
+
+    /** 修改入群自动审批策略白名单号码：POST /v2/groups/join_approval_strategy/{strategyId}/whitelist_users */
+    public ObjectNode updateJoinApprovalStrategyWhitelist(String robotId, String envType, String strategyId, ObjectNode body) {
+        return api.post(robotId, envType,
+                "/v2/groups/join_approval_strategy/" + strategyId + "/whitelist_users", body);
+    }
+
     // ==================== 默认机器人快捷方式 ====================
 
     /** 注册表第一个机器人的 robotId（无注册机器人时为空串）。 */
