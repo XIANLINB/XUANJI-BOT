@@ -763,6 +763,23 @@ public class QqBotRepository {
     }
 
     /**
+     * 某群内某个成员的最近消息（direction=IN 入站，即该成员发的），未撤回优先，倒序取最近 limit 条。
+     * 供「撤回某人最近 N 条消息」命令使用；返回行含 msg_id / create_time（epoch 秒）。
+     */
+    public List<Map<String, Object>> listRecentMemberMessages(String appId, String groupId,
+                                                              String memberOpenid, int limit) {
+        if (isBlank(groupId) || isBlank(memberOpenid)) return List.of();
+        return queryLog(appId, """
+            SELECT id, chat_type, group_id, user_id, direction, msg_type, content, msg_id,
+                   msg_seq, create_time, retracted
+            FROM qqbot_message
+            WHERE chat_type='group' AND group_id=? AND user_id=? AND direction='IN'
+              AND msg_id IS NOT NULL AND msg_id <> ''
+            ORDER BY id DESC LIMIT ?
+        """, groupId, memberOpenid, Math.min(Math.max(limit, 1), 50));
+    }
+
+    /**
      * 单会话消息范围查询（控制台分页用）：按 create_time 范围 + 上界过滤，倒序取最近 limit 条。
      * until / before 为 Long.MAX_VALUE 表示无上界。
      */

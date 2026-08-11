@@ -53,6 +53,9 @@ public class QqXuanJiMessageSender implements XuanJiMessageSender, XuanJi.api.ad
     /** 老协议 <@openid>，自动升级为新协议 <qqbot-at-user id="openid"/> */
     private static final Pattern LEGACY_AT = Pattern.compile("<@([A-Fa-f0-9]+)>");
 
+    /** 撤回窗口：仅能撤回 2 分钟内的消息（QQ 平台限制）。 */
+    private static final long RECALL_WINDOW_SECONDS = 120;
+
     private final MessageSender messageSender;
     private final XuanJi.api.action.PlatformActionHub hub;
     private final XuanJi.adapter.qqbot.storage.QqBotRepository qqBotRepository;
@@ -156,6 +159,74 @@ public class QqXuanJiMessageSender implements XuanJiMessageSender, XuanJi.api.ad
             ObjectNode resp = messageSender.retractGroupMessage(str(p, "groupOpenid"), str(p, "msgId"));
             return Map.of("data", (Object) toMap(resp));
         });
+        // 撤回群内某成员最近 N 条消息（框架层查库判断：权限/2分钟窗口/逐条撤回）
+        m.put(PlatformActions.GROUP_RECALL_RECENT, p -> {
+            String group = str(p, "groupOpenid");
+            String member = str(p, "memberOpenid");
+            if (group == null || group.isBlank() || member == null || member.isBlank()) {
+                return Map.of("ok", false, "error", "撤回被拒：缺少群或成员参数");
+            }
+            int count = intOr(p, "count", 1);
+            if (count < 1) count = 1;
+            if (count > 50) count = 50;
+            String robotId = messageSender.currentRobotId();
+            // ① 机器人必须为群管理才能撤回他人消息（读持久化角色，避免实时调接口）
+            String botRole = qqBotRepository.getGroupRobotRole(robotId, group);
+            if (botRole == null || botRole.isBlank()) {
+                return Map.of("ok", false, "error",
+                        "撤回被拒：机器人群角色未知（bot_state 未同步或机器人不在群），无法撤回他人消息");
+            }
+            if (!"admin".equalsIgnoreCase(botRole) && !"owner".equalsIgnoreCase(botRole)) {
+                return Map.of("ok", false, "error",
+                        "撤回被拒：机器人必须为群管理才能撤回他人消息（当前角色=" + botRole + "）");
+            }
+            // ② 查该成员最近 count 条入站消息（含 msg_id / create_time）
+            java.util.List<Map<String, Object>> rows = qqBotRepository.listRecentMemberMessages(robotId, group, member, count);
+            if (rows.isEmpty()) {
+                return Map.of("ok", false, "error", "撤回被拒：未找到该成员的最近消息");
+            }
+            long nowSec = System.currentTimeMillis() / 1000;
+            int recalled = 0, skipped = 0;
+            java.util.List<String> details = new java.util.ArrayList<>();
+            // ③ 逐条撤回：超过 2 分钟窗口的跳过（QQ 平台限制），其余调用撤回接口
+            for (Map<String, Object> row : rows) {
+                Object msgIdObj = row.get("MSG_ID");
+                String msgId = msgIdObj == null ? null : String.valueOf(msgIdObj);
+                long createSec = num(row.get("CREATE_TIME"));
+                if (msgId == null || msgId.isBlank()) { skipped++; continue; }
+                if (nowSec - createSec > RECALL_WINDOW_SECONDS) {
+                    skipped++;
+                    details.add("超过2分钟不可撤回(msgId=" + shortId(msgId) + ")");
+                    continue;
+                }
+                try {
+                    ObjectNode resp = messageSender.retractGroupMessage(group, msgId);
+                    if (resp != null && !resp.hasNonNull("message") && !resp.hasNonNull("code")) {
+                        recalled++;
+                        qqBotRepository.markMessageRetracted(robotId, group, msgId);
+                    } else {
+                        skipped++;
+                        details.add("撤回失败(msgId=" + shortId(msgId) + ", err=" + resp + ")");
+                    }
+                } catch (Exception ex) {
+                    skipped++;
+                    details.add("撤回异常(msgId=" + shortId(msgId) + ", err=" + ex.getMessage() + ")");
+                }
+            }
+            java.util.Map<String, Object> data = new LinkedHashMap<>();
+            data.put("requested", count);
+            data.put("recalled", recalled);
+            data.put("skipped", skipped);
+            data.put("memberOpenid", member);
+            data.put("botRole", botRole);
+            if (!details.isEmpty()) data.put("details", details);
+            if (recalled > 0) {
+                return Map.of("data", (Object) data);
+            }
+            return Map.of("ok", false, "error",
+                    "撤回失败：共需撤 " + count + " 条，成功 0 条" + (skipped > 0 ? "（跳过 " + skipped + " 条：超2分钟或平台拒绝）" : ""),
+                    "data", (Object) data);
+        });
         // 撤回单聊消息
         m.put(PlatformActions.GROUP_RECALL_PRIVATE, p -> {
             ObjectNode resp = messageSender.retractC2cMessage(str(p, "openid"), str(p, "msgId"));
@@ -222,6 +293,29 @@ public class QqXuanJiMessageSender implements XuanJiMessageSender, XuanJi.api.ad
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /** 取 int，缺省/非法时用默认值。 */
+    private static int intOr(Map<String, Object> p, String key, int def) {
+        Integer v = intOrNull(p, key);
+        return v == null ? def : v;
+    }
+
+    /** 安全取 long（null/非法 → 0）。 */
+    private static long num(Object v) {
+        if (v instanceof Number n) return n.longValue();
+        if (v == null) return 0L;
+        try {
+            return Long.parseLong(String.valueOf(v).trim());
+        } catch (Exception e) {
+            return 0L;
+        }
+    }
+
+    /** 长 id 取前 10 位 + 省略号（日志/提示展示用）。 */
+    private static String shortId(String id) {
+        if (id == null) return "?";
+        return id.length() <= 12 ? id : id.substring(0, 12) + "…";
     }
 
     private static boolean boolOf(Map<String, Object> p, String key) {

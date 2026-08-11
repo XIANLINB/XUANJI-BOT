@@ -89,6 +89,17 @@ public interface PluginServices {
     /** 撤回群消息。 */
     OpResult recallMessage(String botKey, String groupOpenid, String msgId);
 
+    /**
+     * 撤回群内某成员最近 N 条消息（框架负责查库与校验）。
+     *
+     * <p>框架内部完成：① 校验机器人必须为群管理；② 查该成员最近 {@code count} 条入站消息；
+     * ③ 逐条判断是否在 2 分钟撤回窗口内（超时跳过）；④ 撤回成功并标记已撤回。
+     *
+     * @param count 撤回条数（默认 1，上限 50）
+     * @return 汇总结果（成功条数 / 跳过条数与原因，如超 2 分钟、平台拒绝）
+     */
+    OpResult recallRecentMessages(String botKey, String groupOpenid, String memberOpenid, int count);
+
     /** 撤回单聊消息。 */
     OpResult recallPrivateMessage(String botKey, String openid, String msgId);
 

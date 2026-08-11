@@ -34,6 +34,9 @@ public final class PlatformActions {
     /** 撤回群消息。参数：groupOpenid、msgId。 */
     public static final String GROUP_RECALL = "group.recall";
 
+    /** 撤回群内某成员最近 N 条消息。参数：groupOpenid、memberOpenid、count(默认1)。 */
+    public static final String GROUP_RECALL_RECENT = "group.recall_recent";
+
     /** 撤回单聊消息。参数：openid、msgId。返回：平台原始 data。 */
     public static final String GROUP_RECALL_PRIVATE = "group.recall_private";
 

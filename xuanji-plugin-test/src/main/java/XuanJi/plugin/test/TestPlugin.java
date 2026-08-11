@@ -108,5 +108,29 @@ public class TestPlugin extends XuanJiPluginBase {
             System.out.println("[TestPlugin] 禁言结果: " + r.message());
             return null;
         }
+
+        /**
+         * 撤回群内某成员最近 N 条消息。
+         * 仅群主/管理员可用（@Command roles）；机器人需为群管理，否则框架返回失败原因。
+         *
+         * <p>用法：{@code #撤回 @成员 [条数]}，例如「#撤回 @小明 3」= 撤回其最近 3 条消息；
+         * 不带条数默认撤回最近 1 条。条数由 {@link Arg} 解析（可选）。
+         * 框架层完成：权限校验（群管理）、查该成员最近消息、2 分钟窗口判断、逐条撤回并汇总。
+         */
+        @Command(value = "#撤回", scope = Command.Scope.GROUP, roles = {"owner", "admin"})
+        public String recall(GroupMessageEvent e, PluginServices svc,
+                             @Arg(value = "条数", required = false) Integer count) {
+            // 框架已过滤：getMentionedUserIds() 不含机器人与机器人自己
+            List<String> targets = e.getMentionedUserIds();
+            if (targets.isEmpty()) {
+                return "用法：#撤回 @成员 [条数]，例如：#撤回 @小明 3（默认撤回最近 1 条）。仅群主/管理员可用，机器人需为群管理。";
+            }
+            int n = count == null ? 1 : Math.min(Math.max(count, 1), 50);
+            OpResult r = svc.recallRecentMessages(e.getBotId(), e.getGroupId(), targets.get(0), n);
+            // 失败信息不发送到 QQ 群（给框架开发者看日志）；成功才回群
+            if (r.ok()) return r.message();
+            System.out.println("[TestPlugin] 撤回结果: " + r.message());
+            return null;
+        }
     }
 }

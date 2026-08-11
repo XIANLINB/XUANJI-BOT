@@ -143,6 +143,26 @@ public class PluginServicesImpl implements PluginServices {
     }
 
     @Override
+    public OpResult recallRecentMessages(String botKey, String groupOpenid, String memberOpenid, int count) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("groupOpenid", groupOpenid);
+        params.put("memberOpenid", memberOpenid);
+        params.put("count", count);
+        Map<String, Object> out = actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_RECALL_RECENT, params);
+        if (out != null && Boolean.TRUE.equals(out.get("ok")) && out.get("data") instanceof Map<?, ?> dm) {
+            Object recalled = dm.get("recalled");
+            Object skipped = dm.get("skipped");
+            StringBuilder sb = new StringBuilder("已撤回 ");
+            sb.append(recalled == null ? count : recalled).append(" 条");
+            if (skipped != null && ((Number) skipped).longValue() > 0) {
+                sb.append("，跳过 ").append(skipped).append(" 条（超2分钟或平台拒绝）");
+            }
+            return OpResult.ok(sb.toString());
+        }
+        return opResult(out, "已撤回该成员最近消息");
+    }
+
+    @Override
     public OpResult recallPrivateMessage(String botKey, String openid, String msgId) {
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("openid", openid);
