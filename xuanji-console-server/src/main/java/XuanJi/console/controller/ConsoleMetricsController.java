@@ -237,6 +237,45 @@ public class ConsoleMetricsController {
     public Map<String, Object> versionLog() {
         List<Map<String, Object>> versions = new ArrayList<>();
 
+        // ── v1.3.1 入群申请审批能力（2026-08-12）──
+        versions.add(versionEntry("v1.3.1", "2026-08-12", "正式版",
+                List.of(
+                        "入群申请审批：join_request_id 修正为必传（修复平台 11004 无效或已过期的审批令牌）",
+                        "审批接口对齐官方：请求体 op=approve/decline、路径 /approval_join_request/ 修正",
+                        "入群申请列表接口修正：path=/join_request_list、分页参数 cursor，verify_info 双数据源解析（列表拉取 admin_review_qa / 事件推送 verify_message）",
+                        "插件审批命令组：#查看入群申请列表 / #同意 / #拒绝 / #全部同意 / #全部拒绝",
+                        "修复去重误判：入群申请等系统事件改用 join_request_id 作事件 ID，不再退化成内容键误丢",
+                        "框架只下发完整字段（getJoinRequestInfo），审批判定逻辑完全由插件实现")));
+
+        // ── v1.3.0 插件群管能力（2026-08-12）──
+        versions.add(versionEntry("v1.3.0", "2026-08-12", "正式版",
+                List.of(
+                        "管理操作日志：qqbot_op_log 表 + dispatch 统一埋点 + 前端操作日志页（筛选/搜索/失败留痕）",
+                        "PluginServices 命令方法统一返回 OpResult（成功提示/失败原因），插件可面向用户展示",
+                        "禁言/撤回群聊方法名加 Group 前缀（muteGroupMember / recallGroupMessage），批量禁言 muteGroupMembers",
+                        "框架负责事件解析过滤：getMentionedUsers 返回已过滤可操作目标（排除机器人/自己），@Arg 原生参数解析",
+                        "撤回最近 N 条消息：框架查库 + 2 分钟窗口 + 逐条执行，默认条数下沉框架",
+                        "系统事件页新增群名称列，CSV 导出同步")));
+
+        // ── v1.2.0 QQ 接口限频治理 + 缺失接口（2026-08-12）──
+        versions.add(versionEntry("v1.2.0", "2026-08-12", "正式版",
+                List.of(
+                        "QQ 接口限频层 QqApiRateLimit：按 appId+接口类别分桶（QPS 令牌桶 / QPM 分钟窗口），429 自动降档兜底",
+                        "分享链接生成（POST /v2/generate_url_link，50 QPS）",
+                        "互动事件响应（PUT /interactions/{id}，50 QPS）+ WS 入站 INTERACTION 自动回应",
+                        "入群自动审批策略 6 接口（60 QPM）：列表/创建/修改/删除/执行/白名单",
+                        "QQ clientSecret 加密落库（CredentialCipher AES-256-GCM，enc: 前缀零停机迁移）")));
+
+        // ── v1.1.0 稳定性加固（2026-08-12）──
+        versions.add(versionEntry("v1.1.0", "2026-08-12", "正式版",
+                List.of(
+                        "QQ API 熔断器真正生效：连续失败熔断 + 半开探针，冷却期快速失败",
+                        "Pipeline 单条消息整体超时（默认 60s 可配置），慢 Stage 不再挂死线程",
+                        "LLM 主对话瞬态错误重试（429/5xx/超时，指数退避 2 次）",
+                        "出站执行器有界队列 + 调用线程同步执行兜底（防 OOM）",
+                        "WS 优雅关闭（awaitTermination）+ 重连竞态守卫；Stage 异常不中断整链；泄漏 Map 惰性清理",
+                        "前端 SSE 断线状态徽标 + 轮询失败提示；插件卸载即清副本残留")));
+
         // ── v1.0.0 正式版（2026-08-09）──
         versions.add(versionEntry("v1.0.0", "2026-08-09", "正式版",
                 List.of(
@@ -271,7 +310,7 @@ public class ConsoleMetricsController {
                         "控制台最早形态：登录引导 / 基础页面框架")));
 
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("current", "v1.0.0");
+        m.put("current", "v1.3.1");
         m.put("versions", versions);
         return m;
     }
