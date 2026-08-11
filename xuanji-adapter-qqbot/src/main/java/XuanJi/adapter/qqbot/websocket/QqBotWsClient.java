@@ -492,7 +492,9 @@ public class QqBotWsClient {
         }
 
         // 提取事件 ID 并交给 Pipeline 处理
-        String eventId = data.path("id").asText("");
+        // 优先用平台稳定 eventId（消息类=顶层 id；入群申请等系统事件=join_request_id/request_id），
+        // 避免退化成「内容键」导致同群多条同类型空内容事件被误判重复。
+        String eventId = firstNonBlank(data, "id", "join_request_id", "request_id");
         totalEvents++;
 
         // 转换为统一 XuanJiEvent，交由 Pipeline 处理（Whitelist/RateLimit/权限等阶段生效）
@@ -762,5 +764,14 @@ public class QqBotWsClient {
                 scheduleReconnect(); // 仍在运行中，触发重连
             }
         }
+    }
+
+    /** 依次取首个非空字符串字段（事件 ID 候选：消息 id / 入群申请 join_request_id 等）。 */
+    private static String firstNonBlank(tools.jackson.databind.node.ObjectNode data, String... keys) {
+        for (String k : keys) {
+            String v = data != null && data.hasNonNull(k) ? data.path(k).asText("") : "";
+            if (!v.isBlank()) return v;
+        }
+        return "";
     }
 }
