@@ -42,14 +42,16 @@ public interface PluginServices {
     /**
      * 入群申请审批。
      *
-     * @param botKey       机器人标识（空串回退第一个机器人）
-     * @param groupOpenid  目标群 openid
-     * @param memberOpenid 申请者 openid
-     * @param approve      true=同意入群 false=拒绝
-     * @param reason       拒绝理由（拒绝时可选）
+     * @param botKey        机器人标识（空串回退第一个机器人）
+     * @param groupOpenid   目标群 openid
+     * @param memberOpenid  申请者 openid
+     * @param joinRequestId 申请 ID（必填；来自入群申请事件 {@code getJoinRequestInfo().joinRequestId}，
+     *                      审批令牌定位用；无则传 null 交给平台报错）
+     * @param approve       true=同意入群 false=拒绝
+     * @param reason        拒绝理由（拒绝时可选）
      * @return 执行结果（含成功提示或失败原因，可面向用户）
      */
-    OpResult approveGroupJoin(String botKey, String groupOpenid, String memberOpenid,
+    OpResult approveGroupJoin(String botKey, String groupOpenid, String memberOpenid, String joinRequestId,
                               boolean approve, String reason);
 
     /**

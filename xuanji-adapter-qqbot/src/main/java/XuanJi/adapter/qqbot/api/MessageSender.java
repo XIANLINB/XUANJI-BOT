@@ -882,14 +882,18 @@ public class MessageSender {
     /**
      * 入群申请审批（官方 POST /v2/groups/{group_openid}/approval_join_request/{member_openid}）。
      *
+     * @param joinRequestId 申请 ID（必填，审批令牌定位用；来自入群申请事件/列表的 join_request_id）
      * @param approved      true=通过(approve)，false=拒绝(decline)
      * @param rejectReason  拒绝理由（op=decline 时可选）
      * @param addBlacklist  是否同时加入群黑名单（op=decline 时可选）
      */
-    public ObjectNode approveGroupJoinRequest(String groupOpenid, String memberOpenid,
+    public ObjectNode approveGroupJoinRequest(String groupOpenid, String memberOpenid, String joinRequestId,
                                               boolean approved, String rejectReason, Boolean addBlacklist) {
         ObjectNode body = Json.obj();
         body.put("op", approved ? "approve" : "decline");
+        if (joinRequestId != null && !joinRequestId.isBlank()) {
+            body.put("join_request_id", joinRequestId);
+        }
         if (rejectReason != null && !rejectReason.isBlank()) {
             body.put("reject_reason", rejectReason);
         }

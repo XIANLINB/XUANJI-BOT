@@ -95,7 +95,8 @@ public class TestPlugin extends XuanJiPluginBase {
                 pass = "2".equalsIgnoreCase(answer.trim());
                 if (!pass) reason = "入群问题答案不正确";
             }
-            OpResult r = svc.approveGroupJoin(e.getBotId(), groupId, memberId, pass, reason);
+            OpResult r = svc.approveGroupJoin(e.getBotId(), groupId, memberId,
+                    String.valueOf(req.get("joinRequestId")), pass, reason);
             System.out.println("[TestPlugin] 审批结果: " + (pass ? "通过" : "拒绝") + " → " + r.message());
         }
 

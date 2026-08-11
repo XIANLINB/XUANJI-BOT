@@ -85,11 +85,12 @@ public class PluginServicesImpl implements PluginServices {
     // ──────────── 群管（统一动作协议） ────────────
 
     @Override
-    public OpResult approveGroupJoin(String botKey, String groupOpenid, String memberOpenid,
+    public OpResult approveGroupJoin(String botKey, String groupOpenid, String memberOpenid, String joinRequestId,
                                      boolean approve, String reason) {
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("groupOpenid", groupOpenid);
         params.put("memberOpenid", memberOpenid);
+        params.put("joinRequestId", joinRequestId);
         params.put("approve", approve);
         if (reason != null) params.put("reason", reason);
         return opResult(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_APPROVE, params),
