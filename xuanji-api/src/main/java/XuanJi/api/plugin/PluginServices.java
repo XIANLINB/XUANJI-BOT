@@ -47,10 +47,10 @@ public interface PluginServices {
      * @param memberOpenid 申请者 openid
      * @param approve      true=同意入群 false=拒绝
      * @param reason       拒绝理由（拒绝时可选）
-     * @return 平台是否支持并执行成功
+     * @return 执行结果（含成功提示或失败原因，可面向用户）
      */
-    boolean approveGroupJoin(String botKey, String groupOpenid, String memberOpenid,
-                             boolean approve, String reason);
+    OpResult approveGroupJoin(String botKey, String groupOpenid, String memberOpenid,
+                              boolean approve, String reason);
 
     /**
      * 入群申请列表（平台原始报文转 Map）。
@@ -67,14 +67,16 @@ public interface PluginServices {
      * <p>时长参数为<b>分钟</b>（分钟→秒的换算由平台适配器内部完成，插件无需 ×60）。
      *
      * @param minutes 禁言分钟数（&lt;=0 解除禁言）
+     * @return 执行结果（成功含禁言时长/解除提示；失败含具体原因，如
+     *         机器人不是群管理、不能禁言群主/管理员/其他机器人、参数不合法等）
      */
-    boolean muteMember(String botKey, String groupOpenid, String memberOpenid, int minutes);
+    OpResult muteMember(String botKey, String groupOpenid, String memberOpenid, int minutes);
 
     /** 撤回群消息。 */
-    boolean recallMessage(String botKey, String groupOpenid, String msgId);
+    OpResult recallMessage(String botKey, String groupOpenid, String msgId);
 
     /** 撤回单聊消息。 */
-    boolean recallPrivateMessage(String botKey, String openid, String msgId);
+    OpResult recallPrivateMessage(String botKey, String openid, String msgId);
 
     // ──────────── 平台信息查询 ────────────
 

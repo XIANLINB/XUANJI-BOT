@@ -4,6 +4,7 @@ import XuanJi.api.annotation.Command;
 import XuanJi.api.annotation.XuanJiPlugin;
 import XuanJi.api.json.Json;
 import XuanJi.api.message.XuanJiMessage;
+import XuanJi.api.plugin.OpResult;
 import XuanJi.api.plugin.PluginServices;
 import XuanJi.api.plugin.XuanJiPluginBase;
 import XuanJi.sdk.event.GroupMessageEvent;
@@ -86,41 +87,7 @@ public class TestPlugin extends XuanJiPluginBase {
         @Command(value = "#禁言", scope = Command.Scope.GROUP, roles = {"owner", "admin"})
         public String mute(GroupMessageEvent e, PluginServices svc) {
             List<GroupMessageEvent.Mention> targets = e.getMentionedUsers();
-            if (targets == null || targets.isEmpty()) {
-                return "用法：#禁言 @成员 <分钟>，例如：#禁言 @小明 5。仅群主/管理员可用，机器人需为群管理。";
-            }
-            // 从消息纯文本提取分钟数（QQ 的 @ 占位不含纯数字，提取到的数字即分钟数；默认 10，上限 7 天）
-            // muteMember 时长参数为「分钟」，秒级换算由 qqbot 适配器内部完成
-            int minutes = 10;
-            Matcher m = Pattern.compile("(\\d+)").matcher(e.getPlainText() == null ? "" : e.getPlainText());
-            if (m.find()) {
-                int v = Integer.parseInt(m.group(1));
-                if (v > 0) minutes = Math.min(v, 10080);
-            }
-            int ok = 0;
-            for (GroupMessageEvent.Mention target : targets) {
-                // 消息字段判断：不能禁言其他机器人（含机器人自己），失败信息只记录给开发者，不发送到 QQ 群
-                if (target.bot() || target.isYou()) {
-                    System.out.println("[TestPlugin] 禁言被拒：机器人不能禁言其他机器人, member=" + target.userId());
-                    continue;
-                }
-                try {
-                    if (svc.muteMember(e.getBotId(), e.getGroupId(), target.userId(), minutes)) {
-                        ok++;
-                    } else {
-                        // 失败详情（如非群管理/禁言群主管理员）在 qqbot 适配器日志中，只记录给开发者
-                        System.out.println("[TestPlugin] 禁言被拒（详见适配器日志）: group="
-                                + e.getGroupId() + " member=" + target.userId() + " minutes=" + minutes);
-                    }
-                } catch (Exception ex) {
-                    System.out.println("[TestPlugin] 禁言异常: member=" + target.userId() + " err=" + ex.getMessage());
-                }
-            }
-            // 失败信息不发送到 QQ 群（给框架开发者看日志）；只回成功部分；全失败则不回复
-            if (ok > 0) {
-                return "已禁言 " + ok + " 人 " + minutes + " 分钟";
-            }
-            return null;
+            
         }
     }
 }

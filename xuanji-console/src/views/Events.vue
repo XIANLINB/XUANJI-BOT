@@ -20,6 +20,21 @@ const rows = ref<any[]>([])
 const err = ref('')
 const loading = ref(false)
 const message = useMessage()
+// 群 ID → 群名称 映射（getGroups 一次拉取，系统事件列展示用）
+const groupNames = ref<Record<string, string>>({})
+
+async function loadGroupNames() {
+  try {
+    const gs: any[] = (await api.getGroups()) || []
+    const m: Record<string, string> = {}
+    for (const g of gs) {
+      const id = String(g.GROUP_ID || '')
+      const name = String(g.GROUP_NAME || '')
+      if (id && name && !m[id]) m[id] = name
+    }
+    groupNames.value = m
+  } catch { /* 群列表不可用时仅展示群 ID */ }
+}
 
 // ══════ 日期筛选 + 导出 ══════
 const dateFilter = ref(0)
@@ -47,6 +62,7 @@ function exportEvents(format: 'csv' | 'json') {
         { key: 'CREATE_TIME', label: '时间', value: (r: any) => fmtTime(r.CREATE_TIME) },
         { key: 'EVENT_TYPE', label: '事件类型' },
         { key: 'GROUP_ID', label: '群 ID' },
+        { key: 'GROUP_NAME', label: '群名称', value: (r: any) => groupNames.value[r.GROUP_ID] || '' },
         { key: 'USER_ID', label: '用户 ID' },
         { key: 'BOT_APPID', label: '机器人' },
         { key: 'RAW_JSON', label: '原始数据' }
@@ -191,6 +207,14 @@ const columns = computed<DataTableColumns>(() => [
     }
   },
   { title: '群', key: 'GROUP_ID', width: 180, ellipsis: { tooltip: true }, render: (row: any) => textCell(row.GROUP_ID, 60) },
+  {
+    title: '群名称', key: 'GROUP_NAME', width: 160, ellipsis: { tooltip: true },
+    render: (row: any) => {
+      const n = groupNames.value[row.GROUP_ID]
+      if (!n) return h('span', { style: 'color: #86909c' }, '—')
+      return textCell(n, 60)
+    }
+  },
   { title: '用户', key: 'USER_ID', width: 180, ellipsis: { tooltip: true }, render: (row: any) => textCell(row.USER_ID, 60) },
   { title: 'Bot', key: 'BOT_APPID', width: 130, ellipsis: { tooltip: true }, render: (row: any) => h('span', { style: 'font-variant-numeric: tabular-nums' }, textCell(row.BOT_APPID, 30)) },
   { title: '原始数据', key: 'RAW_JSON', width: 320, ellipsis: { tooltip: true }, render: (row: any) => textCell(row.RAW_JSON, 120) }
@@ -204,6 +228,7 @@ const pagination = computed(() =>
 
 onMounted(async () => {
   await loadBots()
+  await loadGroupNames()
   await load()
   if (live.value) startStream()
 })

@@ -7,6 +7,7 @@ import XuanJi.api.context.BotContext;
 import XuanJi.api.llm.LlmChatOptions;
 import XuanJi.api.llm.LlmMessage;
 import XuanJi.api.message.XuanJiMessage;
+import XuanJi.api.plugin.OpResult;
 import XuanJi.api.plugin.PluginServices;
 import XuanJi.api.sender.XuanJiMessageSender;
 import XuanJi.api.sender.XuanJiSendReceipt;
@@ -84,39 +85,43 @@ public class PluginServicesImpl implements PluginServices {
     // ──────────── 群管（统一动作协议） ────────────
 
     @Override
-    public boolean approveGroupJoin(String botKey, String groupOpenid, String memberOpenid,
-                                    boolean approve, String reason) {
+    public OpResult approveGroupJoin(String botKey, String groupOpenid, String memberOpenid,
+                                     boolean approve, String reason) {
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("groupOpenid", groupOpenid);
         params.put("memberOpenid", memberOpenid);
         params.put("approve", approve);
         if (reason != null) params.put("reason", reason);
-        return isOk(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_APPROVE, params));
+        return opResult(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_APPROVE, params),
+                approve ? "已同意入群申请" : "已拒绝入群申请");
     }
 
     @Override
-    public boolean muteMember(String botKey, String groupOpenid, String memberOpenid, int minutes) {
+    public OpResult muteMember(String botKey, String groupOpenid, String memberOpenid, int minutes) {
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("groupOpenid", groupOpenid);
         params.put("memberOpenid", memberOpenid);
         params.put("minutes", minutes); // 分钟，适配器内部换算成秒
-        return isOk(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_MUTE, params));
+        String successMsg = minutes > 0 ? "已禁言 " + minutes + " 分钟" : "已解除禁言";
+        return opResult(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_MUTE, params), successMsg);
     }
 
     @Override
-    public boolean recallMessage(String botKey, String groupOpenid, String msgId) {
+    public OpResult recallMessage(String botKey, String groupOpenid, String msgId) {
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("groupOpenid", groupOpenid);
         params.put("msgId", msgId);
-        return isOk(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_RECALL, params));
+        return opResult(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_RECALL, params),
+                "已撤回群消息");
     }
 
     @Override
-    public boolean recallPrivateMessage(String botKey, String openid, String msgId) {
+    public OpResult recallPrivateMessage(String botKey, String openid, String msgId) {
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("openid", openid);
         params.put("msgId", msgId);
-        return isOk(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_RECALL_PRIVATE, params));
+        return opResult(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_RECALL_PRIVATE, params),
+                "已撤回单聊消息");
     }
 
     // ──────────── 平台信息查询（统一动作协议） ────────────
@@ -192,8 +197,14 @@ public class PluginServicesImpl implements PluginServices {
         return botKey == null ? "" : botKey;
     }
 
-    private boolean isOk(Map<String, Object> out) {
-        return out != null && Boolean.TRUE.equals(out.get("ok"));
+    /** 群管命令结果：成功返回携带成功提示的 OpResult；失败透传框架/适配器提供的错误原因。 */
+    private OpResult opResult(Map<String, Object> out, String successMsg) {
+        if (out != null && Boolean.TRUE.equals(out.get("ok"))) {
+            return OpResult.ok(successMsg);
+        }
+        String err = out == null ? "平台无响应" : String.valueOf(out.get("error"));
+        if (err == null || err.isBlank() || "null".equals(err)) err = "操作失败，请稍后重试";
+        return OpResult.fail(err);
     }
 
     /** 动作结果 data；失败或平台不支持返回 null。 */
