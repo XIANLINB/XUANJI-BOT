@@ -5,6 +5,8 @@ import XuanJi.api.annotation.Command;
 import XuanJi.api.annotation.XuanJiPlugin;
 import XuanJi.api.json.Json;
 import XuanJi.api.message.XuanJiMessage;
+import XuanJi.api.plugin.JoinRequest;
+import XuanJi.api.plugin.JoinRequestList;
 import XuanJi.api.plugin.OpResult;
 import XuanJi.api.plugin.PluginServices;
 import XuanJi.api.plugin.XuanJiPluginBase;
@@ -76,19 +78,16 @@ public class TestPlugin extends XuanJiPluginBase {
          */
         @Command(value = "#查看入群申请列表", scope = Command.Scope.GROUP, roles = {"owner", "admin"})
         public String listJoinRequests(GroupMessageEvent e, PluginServices svc) {
-            Map<String, Object> resp = svc.listGroupJoinRequests(e.getBotId(), e.getGroupId());
-            List<Map<String, Object>> list = extractJoinRequests(resp);
+            JoinRequestList list = svc.listGroupJoinRequests(e.getBotId(), e.getGroupId());
             if (list.isEmpty()) return "当前无待处理的入群申请";
             StringBuilder sb = new StringBuilder("入群申请列表（" + list.size() + " 条）：\n");
-            for (Map<String, Object> item : list) {
-                sb.append("· ").append(String.valueOf(item.get("username")))
-                        .append(" (").append(String.valueOf(item.get("member_openid"))).append(")");
-                Object vp = item.get("_verify_parsed");
-                if (vp instanceof Map<?, ?> parsed) {
-                    sb.append(" 验证=").append(parsed.get("verifyMessage"));
-                    if (Boolean.TRUE.equals(parsed.get("qaMode"))) {
-                        sb.append(" 答案=").append(parsed.get("answer"));
-                    }
+            for (JoinRequest req : list.requests()) {
+                sb.append("· ").append(req.username())
+                        .append(" (").append(req.memberOpenid()).append(")");
+                if (req.isQaMode()) {
+                    sb.append(" 问题=").append(req.getQuestion()).append(" 答案=").append(req.getAnswer());
+                } else {
+                    sb.append(" 验证=").append(req.getVerifyMessage());
                 }
                 sb.append('\n');
             }
@@ -119,11 +118,11 @@ public class TestPlugin extends XuanJiPluginBase {
 
         /** 单个成员审批：从列表查出该成员的申请（含 join_request_id）再审批。 */
         private String approveByMember(GroupMessageEvent e, PluginServices svc, String memberOpenid, boolean approve) {
-            Map<String, Object> resp = svc.listGroupJoinRequests(e.getBotId(), e.getGroupId());
-            for (Map<String, Object> item : extractJoinRequests(resp)) {
-                if (memberOpenid.equals(String.valueOf(item.get("member_openid")))) {
-                    String reqId = String.valueOf(item.get("join_request_id"));
-                    OpResult r = svc.approveGroupJoin(e.getBotId(), e.getGroupId(), memberOpenid, reqId, approve, null);
+            JoinRequestList list = svc.listGroupJoinRequests(e.getBotId(), e.getGroupId());
+            for (JoinRequest req : list.requests()) {
+                if (memberOpenid.equals(req.memberOpenid())) {
+                    OpResult r = svc.approveGroupJoin(e.getBotId(), e.getGroupId(),
+                            memberOpenid, req.joinRequestId(), approve, null);
                     return r.ok() ? r.message() : ("审批失败：" + r.message());
                 }
             }
@@ -132,41 +131,20 @@ public class TestPlugin extends XuanJiPluginBase {
 
         /** 遍历列表逐条审批（全部同意/全部拒绝）。 */
         private String approveAllBy(PluginServices svc, GroupMessageEvent e, boolean approve) {
-            Map<String, Object> resp = svc.listGroupJoinRequests(e.getBotId(), e.getGroupId());
-            List<Map<String, Object>> list = extractJoinRequests(resp);
+            JoinRequestList list = svc.listGroupJoinRequests(e.getBotId(), e.getGroupId());
             if (list.isEmpty()) return "当前无待处理的入群申请";
             int ok = 0;
             StringBuilder sb = new StringBuilder("已" + (approve ? "同意" : "拒绝") + " ");
-            for (Map<String, Object> item : list) {
-                String member = String.valueOf(item.get("member_openid"));
-                String reqId = String.valueOf(item.get("join_request_id"));
-                OpResult r = svc.approveGroupJoin(e.getBotId(), e.getGroupId(), member, reqId, approve, null);
+            for (JoinRequest req : list.requests()) {
+                OpResult r = svc.approveGroupJoin(e.getBotId(), e.getGroupId(),
+                        req.memberOpenid(), req.joinRequestId(), approve, null);
                 if (r.ok()) {
                     ok++;
                 } else {
-                    sb.append('\n').append(String.valueOf(item.get("username"))).append(" 失败: ").append(r.message());
+                    sb.append('\n').append(req.username()).append(" 失败: ").append(r.message());
                 }
             }
             return sb.toString().replaceFirst("已", "已" + ok + " 人");
-        }
-
-        /** 从 listGroupJoinRequests 返回中提取申请列表（兼容 {data:{list}} 与 {list} 两种结构）。 */
-        private static List<Map<String, Object>> extractJoinRequests(Map<String, Object> resp) {
-            if (resp == null) return List.of();
-            @SuppressWarnings("unchecked")
-            Object listObj = resp.get("data") instanceof Map<?, ?> dm ? dm.get("list") : resp.get("list");
-            if (listObj instanceof List<?> list) {
-                List<Map<String, Object>> out = new java.util.ArrayList<>();
-                for (Object o : list) {
-                    if (o instanceof Map<?, ?> m) {
-                        @SuppressWarnings("unchecked")
-                        Map<String, Object> mm = (Map<String, Object>) m;
-                        out.add(mm);
-                    }
-                }
-                return out;
-            }
-            return List.of();
         }
 
         /** 原始报文 → ```json 代码块；null 时给出平台不支持/查询失败提示。 */

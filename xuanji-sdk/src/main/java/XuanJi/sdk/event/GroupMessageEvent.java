@@ -105,7 +105,9 @@ public class GroupMessageEvent implements MessageEvent {
     /** 事件所属机器人 ID（appId），用于 bot 级配置。 */
     public String getBotId() { return botId == null ? "" : botId; }
     /** 群事件附加信息（入群申请等系统事件的完整字段，框架解析后下发；普通消息为 null）。 */
-    public Map<String, Object> getJoinRequestInfo() { return joinRequestInfo; }
+    public XuanJi.api.plugin.JoinRequest getJoinRequestInfo() {
+        return XuanJi.api.plugin.JoinRequest.from(joinRequestInfo);
+    }
     public Object raw() { return this; }
 
     public static class Builder {

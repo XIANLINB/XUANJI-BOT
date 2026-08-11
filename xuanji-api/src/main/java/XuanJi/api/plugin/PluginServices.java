@@ -61,7 +61,13 @@ public interface PluginServices {
      * @param groupOpenid 目标群 openid
      * @return 平台原始 data 字段；平台不支持或失败时返回 null
      */
-    Map<String, Object> listGroupJoinRequests(String botKey, String groupOpenid);
+    /**
+     * 入群申请列表（类型化返回）。
+     *
+     * @return 入群申请列表（含 next_cursor）；平台不支持或失败时返回空列表
+     * @see JoinRequestList JoinRequestList
+     */
+    JoinRequestList listGroupJoinRequests(String botKey, String groupOpenid);
 
     /**
      * 群成员禁言（单目标）。

@@ -7,6 +7,7 @@ import XuanJi.api.context.BotContext;
 import XuanJi.api.llm.LlmChatOptions;
 import XuanJi.api.llm.LlmMessage;
 import XuanJi.api.message.XuanJiMessage;
+import XuanJi.api.plugin.JoinRequestList;
 import XuanJi.api.plugin.OpResult;
 import XuanJi.api.plugin.PluginServices;
 import XuanJi.api.sender.XuanJiMessageSender;
@@ -192,9 +193,10 @@ public class PluginServicesImpl implements PluginServices {
     }
 
     @Override
-    public Map<String, Object> listGroupJoinRequests(String botKey, String groupOpenid) {
-        return actionData(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_JOIN_REQUEST_LIST,
+    public JoinRequestList listGroupJoinRequests(String botKey, String groupOpenid) {
+        Map<String, Object> data = actionData(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_JOIN_REQUEST_LIST,
                 Map.of("groupOpenid", groupOpenid)));
+        return JoinRequestList.from(data);
     }
 
     @Override
