@@ -284,7 +284,7 @@ export const llmApi = {
   /** 主动搭话记录 */
   proactiveLogs: (botKey?: string, limit = 50) =>
     get<ProactiveLogRow[]>(`/console/llm/proactive-logs${botKey ? `?botKey=${encodeURIComponent(botKey)}` : ''}&limit=${limit}`),
-  /** 主动搭话测试触发 */
+  /** 主动搭话测试触发 —— 后端接口已就绪（LlmController /proactive/test），前端暂未接线，需 bot+群选择器。 */
   proactiveTest: (botKey: string, groupId: string) =>
     post<{ ok: boolean; type?: string; error?: string }>('/console/llm/proactive/test', { botKey, groupId }),
 
@@ -338,7 +338,7 @@ export const llmApi = {
   summaryHistory: (limit = 50) =>
     get<SummaryLogRow[]>(`/console/llm/summary/history?limit=${limit}`),
 
-  // ── 图文卡片渲染（HtmlRenderService） ──
+  // ── 图文卡片渲染（HtmlRenderService）——后端接口已就绪（LlmController /render/*），前端暂未接线（预览弹窗待做） ──
   renderTemplates: () => get<string[]>('/console/llm/render/templates'),
   renderPreview: (m: { templateId: string; data?: Record<string, any>; botKey?: string; groupId?: string; groupName?: string; summary?: string }) =>
     post<{ ok: boolean; templateId?: string; size?: number; base64?: string; error?: string }>('/console/llm/render/preview', m),

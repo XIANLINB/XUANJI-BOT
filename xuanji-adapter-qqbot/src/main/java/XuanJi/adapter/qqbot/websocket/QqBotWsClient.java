@@ -294,6 +294,12 @@ public class QqBotWsClient {
 
             // 等待连接建立（onOpen 回调会在 future 完成前触发）
             future.get(10, TimeUnit.SECONDS);
+            // 竞态防护：连接建立期间可能已被 stop()，此时立即拆除刚建成的连接，避免僵尸连接继续投递事件
+            if (!running.get()) {
+                log.warn("[BotWS] 连接建立期间已被停止, 立即关闭, robotId={}", robotId);
+                closeWebSocket();
+                return;
+            }
             log.info("[BotWS] WebSocket 连接完成, robotId={}", robotId);
 
         } catch (Exception e) {
@@ -330,25 +336,6 @@ public class QqBotWsClient {
         log.info("[BotWS] Identify 消息: {}", identifyJson);
         send(identifyJson);
         log.info("[BotWS] Identify 已发送, robotId={}, intents={}", robotId, intents);
-    }
-
-    /**
-     * 发送 Resume 恢复消息（op=6）
-     *
-     * <p>当连接意外断开后，如果 session_id 和 seq 有效，可以尝试 Resume 恢复会话，
-     * 而不是重新 Identify。Resume 可以避免丢失断线期间的事件。
-     */
-    private void sendResume() {
-        String accessToken = accessTokenService.getAccessToken(appId, appSecret, envType, isNewOpenBot);
-        ObjectNode resume = Json.obj();
-        resume.put("op", 6);
-        ObjectNode d = Json.obj();
-        d.put("token", "QQBot " + accessToken);
-        d.put("session_id", sessionId);  // 之前的会话 ID
-        d.put("seq", lastSeq);           // 最后的事件序列号
-        resume.set("d", d);
-        send(resume.toString());
-        log.info("[BotWS] Resume 已发送, robotId={}, seq={}", robotId, lastSeq);
     }
 
     // ===== 心跳 =====
@@ -677,12 +664,25 @@ public class QqBotWsClient {
         public void onOpen(WebSocket webSocket) {
             // 保存 WebSocket 引用（必须在 onOpen 中设置，否则 sendIdentify 时可能为 null）
             QqBotWsClient.this.webSocket = webSocket;
+            // 竞态防护：已 stop 的客户端若仍被回调 onOpen，立即关闭，不进入握手
+            if (!running.get()) {
+                log.warn("[BotWS] onOpen 但已停止, 立即关闭, robotId={}", robotId);
+                QqBotWsClient.this.webSocket = null;
+                try {
+                    webSocket.sendClose(WebSocket.NORMAL_CLOSURE, "client stopped");
+                } catch (Exception ignored) { /* 关闭异常可忽略 */ }
+                return;
+            }
             log.info("[BotWS] onOpen, robotId={}", robotId);
             webSocket.request(1); // 请求接收下一条消息
         }
 
         @Override
         public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
+            // 竞态防护：已 stop 的客户端不再把事件送入 pipeline
+            if (!running.get()) {
+                return null;
+            }
             buffer.append(data);
             if (last) {
                 // 消息接收完毕，处理完整消息

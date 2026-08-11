@@ -104,6 +104,19 @@ class RateLimitStage implements PipelineStage {
     private final XuanJi.core.config.ConfigService configService;
     // 命中统计（风控中心概览：框架级限流拦截次数，含维度 user/group 双计）
     private final java.util.concurrent.atomic.AtomicLong hits = new java.util.concurrent.atomic.AtomicLong();
+    /** 惰性清理：map 超过阈值才清过期条目，避免长期运行内存增长。 */
+    private static final int PRUNE_SIZE_THRESHOLD = 10_000;
+    private static final long PRUNE_INTERVAL_MS = 60_000;
+    private long lastPruneAt = 0;
+
+    /** 清掉超过 TTL 的过期条目（TTL = max(10×窗口, 60s)）；仅当 map 大且距上次清理超 1 分钟时执行。 */
+    private void maybePrune(long now, long windowMs) {
+        if (lastAccess.size() < PRUNE_SIZE_THRESHOLD) return;
+        if (now - lastPruneAt < PRUNE_INTERVAL_MS) return;
+        lastPruneAt = now;
+        long ttlMs = Math.max(windowMs * 10, 60_000L);
+        lastAccess.entrySet().removeIf(e -> now - e.getValue() > ttlMs);
+    }
 
     RateLimitStage(XuanJi.core.config.ConfigService configService) {
         this.configService = configService;
@@ -121,6 +134,8 @@ class RateLimitStage implements PipelineStage {
 
     @Override
     public Result handle(XuanJiEvent e, PipelineChain c) {
+        long now = System.currentTimeMillis();
+        maybePrune(now, 2000); // 惰性清理过期 lastAccess（禁用限流时也清，防关停后残留）
         String botKey = e.bot() != null ? e.bot().selfId() : null;
         // 配置驱动：bot 级 rate_limit_enabled（设置页机器人开关）优先，全局 framework.rate_limit.enabled 兜底；
         // 任一为 true 才启用（默认不限制）。
@@ -147,7 +162,6 @@ class RateLimitStage implements PipelineStage {
             String gid = e.group() != null ? e.group().id() : "?";
             key = "bot:" + (botKey != null ? botKey : "?") + ":group:" + gid;
         }
-        long now = System.currentTimeMillis();
         Long last = lastAccess.get(key);
         if (last != null && (now - last) < windowMs) {
             hits.incrementAndGet();
@@ -249,6 +263,18 @@ class DedupStage implements PipelineStage {
  * 透传阶段 — P3 后续迭代实现。
  */
 @Component class WakingCheckStage    implements PipelineStage { public String name() { return "waking-check"; } public int order() { return 10; } public Result handle(XuanJiEvent e, PipelineChain c) { return c.proceed(); } }
-@Component class ContentSafetyStage  implements PipelineStage { public String name() { return "content-safety"; } public int order() { return 40; } public Result handle(XuanJiEvent e, PipelineChain c) { return c.proceed(); } }
+/**
+ * 内容安全检查阶段（order=40）— P3 预留扩展位。
+ *
+ * <p>当前为空转占位（直接放行），保留 stage 位置以便后续实现敏感词/违规内容校验时按 order=40
+ * 原位插入，不影响 LLM 审核（order=41）等相邻阶段。前端 Health 页已将该阶段标注为「P3 预留位」。
+ * 若未来实现真实校验，应在 handle 中对 {@link XuanJi.api.event.XuanJiEvent} 的文本内容做检查，
+ * 命中时返回 {@code Result.ABORT} 拦截后续处理。
+ */
+@Component class ContentSafetyStage implements PipelineStage {
+    @Override public String name() { return "content-safety"; }
+    @Override public int order() { return 40; }
+    @Override public Result handle(XuanJiEvent e, PipelineChain c) { return c.proceed(); }
+}
 @Component class ResultDecorateStage implements PipelineStage { public String name() { return "result-decorate"; } public int order() { return 70; } public Result handle(XuanJiEvent e, PipelineChain c) { return c.proceed(); } }
 @Component class RespondStage        implements PipelineStage { public String name() { return "respond"; } public int order() { return 80; } public Result handle(XuanJiEvent e, PipelineChain c) { return c.proceed(); } }

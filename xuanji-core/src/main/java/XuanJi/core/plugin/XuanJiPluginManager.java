@@ -136,6 +136,14 @@ public class XuanJiPluginManager extends DefaultPluginManager {
             originalJarPaths.remove(pluginId);
         }
 
+        /** 卸载后立即清扫该插件的 copy 副本（须在 ClassLoader 关闭、文件句柄释放后调用，映射删除前）。 */
+        void sweepCopiesFor(String pluginId) {
+            Path orig = originalJarPaths.get(pluginId);
+            if (orig != null) {
+                sweepOldCopies(orig.getFileName().toString());
+            }
+        }
+
         @Override
         public synchronized ClassLoader loadPlugin(Path pluginPath, PluginDescriptor descriptor) {
             // 记录用户原始 jar：若传入的是旧副本，反推回 plugins/<原名>.jar
@@ -548,10 +556,14 @@ public class XuanJiPluginManager extends DefaultPluginManager {
         unregisterCommands(pluginId);
         pluginCommands.remove(pluginId);
         states.remove(pluginId);
-        if (copyingLoader != null) copyingLoader.forget(pluginId);
-        stateStore.delete(pluginId);
         boolean stopped = stopPlugin(pluginId) == PluginState.STOPPED;
         if (w != null) closePluginClassLoader(w);
+        if (copyingLoader != null) {
+            // 先清扫副本（需用 originalJarPaths 映射）再 forget，避免卸载后磁盘残留到下次启动
+            copyingLoader.sweepCopiesFor(pluginId);
+            copyingLoader.forget(pluginId);
+        }
+        stateStore.delete(pluginId);
         return stopped;
     }
 

@@ -115,32 +115,71 @@ public class QqApiService {
         this.isNewOpenBot = isNewOpenBot;
     }
 
-    // ===== 简易熔断（供控制台运行健康页展示） =====
+    // ===== 简易熔断（供控制台运行健康页展示，并在连续失败达阈值后真正阻断请求） =====
 
     private static final int CIRCUIT_THRESHOLD = 5;
     private static final long CIRCUIT_COOLDOWN_MS = 30_000;
     private final AtomicInteger consecutiveFailures = new AtomicInteger();
     private volatile boolean circuitOpen = false;
+    /** 半开探针进行中：冷却结束后仅放行一个真实请求探测链路是否恢复，避免并发全放把刚恢复的服务又打挂。 */
+    private volatile boolean halfOpen = false;
     private volatile long circuitOpenedAt = 0;
 
     /** 熔断快照（控制台 /console/health 的 platforms.qqbot 键）。 */
     public Map<String, Object> getCircuitBreakerSnapshot() {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("open", circuitOpen);
+        m.put("halfOpen", halfOpen);
         m.put("consecutiveFailures", consecutiveFailures.get());
         m.put("openedAt", circuitOpenedAt);
+        long remain = circuitOpen ? Math.max(0, CIRCUIT_COOLDOWN_MS - (System.currentTimeMillis() - circuitOpenedAt)) : 0;
+        m.put("cooldownRemainingMs", remain);
         return m;
+    }
+
+    /**
+     * 进入请求前检查熔断：冷却期内直接快速失败（抛 {@link QqApiCircuitOpenException}）；
+     * 冷却结束后进入半开态，仅放行一个请求作为探针，其余请求继续快速失败。
+     */
+    private void checkCircuit() {
+        if (!circuitOpen) return;
+        long now = System.currentTimeMillis();
+        long elapsed = now - circuitOpenedAt;
+        if (elapsed < CIRCUIT_COOLDOWN_MS) {
+            throw new QqApiCircuitOpenException(CIRCUIT_COOLDOWN_MS - elapsed);
+        }
+        // 冷却结束 → 半开探针：用 synchronized 保证同一时刻只有一个请求作为探针放行
+        synchronized (this) {
+            if (!circuitOpen) return;          // 并发下可能已被别的探针重置
+            if (halfOpen) {
+                throw new QqApiCircuitOpenException(CIRCUIT_COOLDOWN_MS);
+            }
+            halfOpen = true;                    // 本次作为探针放行
+        }
     }
 
     private void onApiSuccess() {
         consecutiveFailures.set(0);
-        if (circuitOpen) circuitOpen = false;
+        if (circuitOpen) {
+            circuitOpen = false;
+            halfOpen = false;
+            log.info("[QQ熔断] 链路恢复，熔断器关闭");
+        }
     }
 
     private void onApiFailure() {
+        if (halfOpen) {
+            // 半开探针失败 → 重新打开并重置冷却计时
+            halfOpen = false;
+            circuitOpen = true;
+            circuitOpenedAt = System.currentTimeMillis();
+            log.warn("[QQ熔断] 半开探针失败，重新打开熔断器");
+            return;
+        }
         if (consecutiveFailures.incrementAndGet() >= CIRCUIT_THRESHOLD) {
             circuitOpen = true;
             circuitOpenedAt = System.currentTimeMillis();
+            log.warn("[QQ熔断] 连续失败达阈值({})，打开熔断器（冷却 {}ms）", CIRCUIT_THRESHOLD, CIRCUIT_COOLDOWN_MS);
         }
     }
 
@@ -319,8 +358,8 @@ public class QqApiService {
     /**
      * 获取机器人凭证
      *
-     * <p>从 {@link RobotRegistry} 查找机器人配置，提取 AppID 和 AppSecret。
-     * 注意：appSecretEncrypted 字段在当前框架模式下存储的是明文密钥。
+     * <p>从 {@link RobotRegistry} 查找机器人配置，提取 AppID 和 AppSecret（内存中为明文，
+     * 落库时已是加密态，出库时已由 {@code QqBotRepository.getBotRow} 解密）。
      *
      * @param robotId 机器人 ID
      * @param envType 环境类型
@@ -425,6 +464,8 @@ public class QqApiService {
     private ObjectNode sendRequest(String method, String appId, String appSecret,
                                    String envType, String path, ObjectNode body,
                                    boolean isNewOpenBot) {
+        // 0. 熔断前置检查（冷却期内直接快速失败；半开态仅放行探针）
+        checkCircuit();
         // 1. 获取 AccessToken（缓存优先，过期自动刷新）
         String accessToken = accessTokenService.getAccessToken(appId, appSecret, envType, isNewOpenBot);
 
@@ -556,6 +597,8 @@ public class QqApiService {
     private ObjectNode sendRequestWithTimeout(String method, String appId, String appSecret,
                                                String envType, String path, ObjectNode body,
                                                boolean isNewOpenBot, int timeoutSeconds) {
+        // 熔断前置检查（与 sendRequest 共用同一熔断器）
+        checkCircuit();
         String accessToken = accessTokenService.getAccessToken(appId, appSecret, envType, isNewOpenBot);
         String apiBase = QqPlatformConfig.getApiBaseUrl(isNewOpenBot, envType);
         String url = apiBase + path;
@@ -659,6 +702,8 @@ public class QqApiService {
             log.info("QQ API重试响应: status={}, traceId={}", statusCode, traceId);
 
             if (statusCode >= 200 && statusCode < 300) {
+                // 401 刷新重试成功：同步重置熔断计数（否则成功也不会计数清零）
+                onApiSuccess();
                 if (responseBody == null || responseBody.isEmpty()) {
                     return Json.obj();
                 }

@@ -43,9 +43,10 @@ public class Robot {
     private String appId;
 
     /**
-     * QQ 开放平台的 AppSecret（加密存储）
-     * <p>在当前框架模式下，该字段存储的是明文密钥。
-     * 使用前需要通过 {@link XuanJi.starter.security.util.AesUtil} 解密。
+     * QQ 开放平台的 AppSecret（落库已加密，内存中为明文）。
+     * <p>入库前由 {@code QqBotRepository.upsertBot} 经 {@code CredentialCipher} 加密（AES-256-GCM，
+     * {@code enc:} 前缀），出库时由 {@code getBotRow} 解密；本对象仅持有解密后的明文以便 API 调用。
+     * 旧的明文库行因无前缀会被原样返回，故升级无需迁移。
      */
     private String appSecretEncrypted;
 

@@ -113,11 +113,25 @@ const live = ref(localStorage.getItem(EVENTS_LIVE_KEY) === 'true')
 const liveEvents = ref<any[]>([])
 const streamEs = ref<EventSource | null>(null)
 const LIVE_CAP = 200
+// SSE 连接状态：off(关闭) / connecting(连接中) / open(已连接) / error(断线自动重连中)
+const streamStatus = ref<'off' | 'connecting' | 'open' | 'error'>('off')
+const reconnectCount = ref(0)
 
 function startStream() {
   stopStream()
+  streamStatus.value = 'connecting'
+  reconnectCount.value = 0
   try {
     const es = openStream()
+    es.onopen = () => {
+      streamStatus.value = 'open'
+      reconnectCount.value = 0
+    }
+    es.onerror = () => {
+      // EventSource 断线会自动重连，这里只标记状态与累计次数，不弹重复 toast
+      streamStatus.value = 'error'
+      reconnectCount.value++
+    }
     es.addEventListener('event', (e: MessageEvent) => {
       try {
         const d = JSON.parse((e as MessageEvent).data)
@@ -126,10 +140,15 @@ function startStream() {
       } catch { /* 忽略畸形帧 */ }
     })
     streamEs.value = es
-  } catch { /* SSE 不可用时静默降级，不影响表格 */ }
+  } catch {
+    // SSE 不可用时标记为断开状态，供界面展示，不影响表格
+    streamStatus.value = 'error'
+    reconnectCount.value++
+  }
 }
 function stopStream() {
   if (streamEs.value) { streamEs.value.close(); streamEs.value = null }
+  streamStatus.value = 'off'
 }
 function toggleLive(v: boolean) {
   live.value = v
@@ -215,6 +234,10 @@ onUnmounted(stopStream)
           <NSwitch v-model:value="live" size="small" @update:value="toggleLive" />
           <NIcon size="14" color="#18a058"><PulseOutline /></NIcon>
           <span class="ctl-label" title="开启后通过 SSE 实时接收消息处理流水">实时</span>
+          <NTag v-if="live" size="tiny" round :bordered="false"
+            :type="streamStatus === 'open' ? 'success' : streamStatus === 'error' ? 'error' : 'warning'">
+            {{ streamStatus === 'open' ? '已连接' : streamStatus === 'error' ? '重连中(' + reconnectCount + ')' : '连接中' }}
+          </NTag>
         </NSpace>
         <NButton size="small" secondary :disabled="!filteredRows.length" @click="exportEvents('csv')">
           <template #icon><NIcon><DownloadOutline /></NIcon></template>

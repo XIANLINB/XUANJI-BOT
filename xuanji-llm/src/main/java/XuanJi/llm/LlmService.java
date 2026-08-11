@@ -36,6 +36,10 @@ public class LlmService {
     /** 最近一次 chatWithTools 的真实 usage（{prompt, completion}）；线程隔离，供用量统计读取。 */
     private final ThreadLocal<long[]> lastUsage = new ThreadLocal<>();
 
+    /** 瞬态错误重试次数（429/5xx/网络超时最多额外重试 2 次，指数退避 500ms→1s）。 */
+    private static final int TRANSIENT_RETRY_COUNT = 2;
+    private static final long TRANSIENT_RETRY_BASE_MS = 500;
+
     /** 取走并清空本线程最近一次对话的真实 token 用量；无记录返回 {0,0}。 */
     public long[] takeLastUsage() {
         long[] u = lastUsage.get();
@@ -161,16 +165,63 @@ public class LlmService {
                 }
                 LlmChatOptions effective = options != null ? options
                         : new LlmChatOptions(b.model(), cfg.getTemperature(), cfg.getMaxTokens(), null);
+                String label = b.providerType() + "(" + b.model() + ")";
                 try {
-                    return provider.chat(messages, effective, b.credentials());
+                    return withTransientRetry(() -> provider.chat(messages, effective, b.credentials()), label);
                 } catch (Exception e) {
-                    errors.add(b.providerType() + "(" + b.model() + "): " + e.getMessage());
+                    errors.add(label + ": " + e.getMessage());
                     log.warn("[LLM] 对话供应商 {} 失败，尝试下一个: {}", b.providerType(), e.getMessage());
                 }
             }
             throw new IllegalStateException(errors.isEmpty()
                     ? "尚未配置可用的对话供应商" : String.join("；", errors));
         });
+    }
+
+    /** 对瞬态错误（429 限流 / 5xx 服务端 / 网络超时）做指数退避重试；非瞬态错误不重试直接抛出。 */
+    private static <T> T withTransientRetry(java.util.function.Supplier<T> call, String label) {
+        for (int attempt = 0; ; attempt++) {
+            try {
+                return call.get();
+            } catch (Exception e) {
+                if (attempt >= TRANSIENT_RETRY_COUNT || !isTransientError(e)) {
+                    throw e;
+                }
+                long backoff = TRANSIENT_RETRY_BASE_MS << attempt; // 500ms → 1s
+                log.warn("[LLM] {} 瞬态错误(第{}次)，{}ms 后重试: {}", label, attempt + 1, backoff, e.getMessage());
+                try {
+                    Thread.sleep(backoff);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(label + " 重试等待被中断", ie);
+                }
+            }
+        }
+    }
+
+    /** 判断异常是否为可安全重试的瞬态错误（沿 cause 链查找）。 */
+    private static boolean isTransientError(Throwable t) {
+        while (t != null) {
+            // Spring RestClient 对非 2xx 抛 RestClientResponseException（HttpStatusCodeException 是其子类）
+            if (t instanceof org.springframework.web.client.RestClientResponseException rce) {
+                int code = rce.getStatusCode().value();
+                return code == 429 || code >= 500;
+            }
+            // 网络/超时类（RestClient 会把 IO 错误包成 ResourceAccessException；直接 IOException 也要兜）
+            if (t instanceof java.io.IOException || t instanceof java.net.http.HttpTimeoutException
+                    || t instanceof java.net.SocketTimeoutException || t instanceof java.net.ConnectException) {
+                return true;
+            }
+            // 供应商把 HTTP 码内嵌在异常消息里，如 "LLM 流式调用失败(HTTP 429)" / "(HTTP 500)"
+            String msg = t.getMessage();
+            if (msg != null && (msg.contains("HTTP 429") || msg.contains("HTTP 50")
+                    || msg.contains("HTTP 502") || msg.contains("HTTP 503") || msg.contains("HTTP 504")
+                    || msg.contains("429 Too Many Requests"))) {
+                return true;
+            }
+            t = t.getCause();
+        }
+        return false;
     }
 
     /** 连通性测试：发一条最小消息验证 key/网络/模型。 */

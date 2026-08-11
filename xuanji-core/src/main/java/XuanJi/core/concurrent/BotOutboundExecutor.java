@@ -7,9 +7,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionHandler;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.LongSupplier;
 import java.util.function.ToLongFunction;
@@ -47,6 +50,24 @@ public class BotOutboundExecutor implements DisposableBean {
     /** 每 key 出站并发池（虚拟线程，线程数 = tune.out_threads_per_bot，默认 1）。 */
     private final Map<String, ExecutorService> executors = new ConcurrentHashMap<>();
     private final AtomicInteger seq = new AtomicInteger();
+
+    /** 每 bot 出站队列容量（有界），防任务无限堆积拖垮内存。 */
+    private static final int OUTBOUND_QUEUE_CAPACITY = 1000;
+
+    /**
+     * 拒绝兜底：队列满载时降级为「调用线程同步执行」——既是背压（提交方越慢，入库越慢），又不丢任务；
+     * 池已关闭时丢弃并告警。绝不抛异常中断提交方。
+     */
+    private static final RejectedExecutionHandler REJECT_HANDLER = (task, pool) -> {
+        if (pool.isShutdown()) {
+            log.warn("[Outbound] 出站池已关闭，任务丢弃: {}", task);
+            return;
+        }
+        log.warn("[Outbound] 出站队列已满({})，降级为调用线程同步执行(背压): {}", OUTBOUND_QUEUE_CAPACITY, task);
+        if (!Thread.currentThread().isInterrupted()) {
+            task.run();
+        }
+    };
 
     /** 测试/裸用路径：默认不节流。 */
     public BotOutboundExecutor() {
@@ -107,13 +128,11 @@ public class BotOutboundExecutor implements DisposableBean {
             }
         } catch (Exception ignored) { /* 非法值用默认 1 */ }
         final int t = threads;
-        log.info("[Outbound] 创建出站池: key={}, threads={}", key, t);
-        return Executors.newFixedThreadPool(t, r -> {
-            Thread th = Thread.ofVirtual().name("xuanji-out-" + key + "-" + seq.incrementAndGet())
-                    .factory().newThread(r);
-            th.setDaemon(true);
-            return th;
-        });
+        log.info("[Outbound] 创建出站池: key={}, threads={}, queue={}", key, t, OUTBOUND_QUEUE_CAPACITY);
+        return new ThreadPoolExecutor(t, t, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(OUTBOUND_QUEUE_CAPACITY),
+                Thread.ofVirtual().name("xuanji-out-" + key + "-" + seq.incrementAndGet()).factory(),
+                REJECT_HANDLER);
     }
 
     private void pace(String key) {

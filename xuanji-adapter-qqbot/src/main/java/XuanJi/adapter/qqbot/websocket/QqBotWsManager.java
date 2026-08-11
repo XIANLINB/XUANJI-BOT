@@ -194,8 +194,30 @@ public class QqBotWsManager {
         log.info("[BotWS Manager] 关闭所有连接...");
         clients.values().forEach(QqBotWsClient::stop);
         clients.clear();
-        if (heartbeatScheduler != null) heartbeatScheduler.shutdownNow();
-        if (connectExecutor != null) connectExecutor.shutdownNow();
+        // 优雅关闭：先 shutdown 停止接收新任务，再 awaitTermination 等在途任务结束，超时才强制中断
+        if (heartbeatScheduler != null) {
+            heartbeatScheduler.shutdown();
+            try {
+                if (!heartbeatScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                    heartbeatScheduler.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                heartbeatScheduler.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
+        if (connectExecutor != null) {
+            connectExecutor.shutdown();
+            try {
+                if (!connectExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
+                    connectExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                connectExecutor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
+        log.info("[BotWS Manager] 已关闭全部连接与线程池");
     }
 
     /**

@@ -53,6 +53,8 @@ const sending = ref(false)
 const groupMembers = ref<any[]>([])
 const membersLoading = ref(false)
 let pollTimer: number | null = null
+/** 连续轮询失败计数：用于「首次失败提示一次」的节流，避免后端挂掉时每 4s 弹一条 toast。 */
+const pollFails = ref(0)
 
 // 富媒体
 const showMediaModal = ref(false)
@@ -370,6 +372,7 @@ async function refreshLatest() {
     const res = await api.getContactMessages({
       type: chatTargetType.value, targetId: chatTargetId.value, limit: 50
     })
+    pollFails.value = 0
     const rows = (res?.rows || []) as MsgRow[]
     if (!rows.length) return
     const lastLocal = chatMessages.value[chatMessages.value.length - 1]
@@ -381,7 +384,13 @@ async function refreshLatest() {
       updatePreviewInList(newOnes)
       await nextTick(); scrollToBottom()
     }
-  } catch {}
+  } catch {
+    // 后端不可用时的轮询失败兜底：只提示一次（连续失败期间不重复弹），恢复后自动重置
+    pollFails.value++
+    if (pollFails.value === 1) {
+      message.warning('与后端连接异常，消息轮询中断，将自动重试')
+    }
+  }
 }
 function updatePreviewInList(newOnes: MsgRow[]) {
   const sid = selectedSessionId.value

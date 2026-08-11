@@ -26,6 +26,31 @@ public class LlmChatGuard {
     private final ConcurrentHashMap<String, Long> lastReplyAt = new ConcurrentHashMap<>();
     /** 估算 token 与字符数比例（1 token ≈ 2 字符，中文场景偏保守） */
     private static final int CHARS_PER_TOKEN = 2;
+    /** 惰性清理：map 超过阈值才清过期条目，避免长期运行内存增长。 */
+    private static final int PRUNE_SIZE_THRESHOLD = 10_000;
+    private static final long PRUNE_INTERVAL_MS = 60_000;
+    /** 冷却记录 TTL：1 小时前的冷却记录无保留价值。 */
+    private static final long COOLDOWN_TTL_MS = 3600_000;
+    private long lastPruneAt = 0;
+
+    /** 清掉过期条目：冷却记录超 1 小时移除；每日增量只保留今天的（历史日已持久化到 DB，内存副本是死重）。 */
+    private void maybePrune(long nowMs) {
+        if (lastReplyAt.size() < PRUNE_SIZE_THRESHOLD && dailyDeltas.size() < 100) return;
+        if (nowMs - lastPruneAt < PRUNE_INTERVAL_MS) return;
+        lastPruneAt = nowMs;
+        long cutoffSec = nowMs / 1000 - COOLDOWN_TTL_MS / 1000;
+        lastReplyAt.entrySet().removeIf(e -> e.getValue() < cutoffSec);
+        long today = dayNumber();
+        dailyDeltas.keySet().removeIf(k -> {
+            int idx = k.indexOf(':');
+            if (idx <= 0) return false;
+            try {
+                return Long.parseLong(k.substring(0, idx)) != today;
+            } catch (NumberFormatException e) {
+                return false;
+            }
+        });
+    }
 
     public LlmChatGuard(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
@@ -52,6 +77,7 @@ public class LlmChatGuard {
      * <p>在真正决定回复的线程内同步调用即可；冷却为低频操作，方法级 synchronized 无性能顾虑。
      */
     public synchronized boolean tryGrantReply(String botKey, String groupId, int cooldownSeconds) {
+        maybePrune(System.currentTimeMillis());
         long nowSec = System.currentTimeMillis() / 1000;
         if (cooldownSeconds <= 0) {
             lastReplyAt.put(key(botKey, groupId), nowSec);
@@ -99,6 +125,7 @@ public class LlmChatGuard {
     }
 
     private void record(String botKey, String groupId, long total, long prompt, long completion) {
+        maybePrune(System.currentTimeMillis());
         long day = dayNumber();
         try {
             // H2 的 MERGE...VALUES 不支持引用已有列做累加，退化为「查→插/更」两步

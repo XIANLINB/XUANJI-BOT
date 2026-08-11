@@ -14,9 +14,12 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -40,8 +43,12 @@ public class BotPipeline implements DisposableBean {
     private final List<PipelineStage> stages;
     private final ConfigService configService;
     private final AtomicLong processedCount = new AtomicLong();
+    private final AtomicLong timeoutCount = new AtomicLong();
+    private final AtomicLong stageErrorCount = new AtomicLong();
     private final Map<String, AtomicInteger> slowStageCounts = new ConcurrentHashMap<>();
     private static final long SLOW_THRESHOLD_MS = 100;
+    /** 单条消息整体处理超时（秒）；读 tune.pipeline_timeout_sec，默认 60s；<=0 关闭兜底。 */
+    private static final long PIPELINE_TIMEOUT_SEC_DEFAULT = 60;
 
     // ── 每 bot 虚拟线程并发池 ──
     /** key = "platform:selfId"，value = 该 bot 的并发池。 */
@@ -82,7 +89,8 @@ public class BotPipeline implements DisposableBean {
         processedCount.incrementAndGet();
         QpsMeter.hit();
         ExecutorService pool = poolFor(event);
-        pool.execute(() -> {
+        long timeoutSec = pipelineTimeoutSec();
+        CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
             // 进入即开启全链路 traceId（MDC），贯穿洋葱模型 / 分发 / 处理器 / AI 回复，
             // 使得同一条消息的所有日志可用同一 traceId 串联（不再仅限 handler 内部）。
             TraceContext.enter(event.eventId(), event.bot() != null ? event.bot().selfId() : "");
@@ -97,7 +105,32 @@ public class BotPipeline implements DisposableBean {
             } finally {
                 TraceContext.exit();
             }
-        });
+        }, pool);
+        // 单条消息整体超时兜底：超时即中断（cancel 会打断虚拟线程上的阻塞调用）并记超时，
+        // 防止慢 Stage（典型 LLM / 下游 HTTP）卡死导致处理池线程堆积。
+        if (timeoutSec > 0) {
+            future.orTimeout(timeoutSec, TimeUnit.SECONDS).exceptionally(t -> {
+                if (t instanceof TimeoutException) {
+                    timeoutCount.incrementAndGet();
+                    log.warn("[Pipeline] 事件处理超时（{}s）: eventId={}, type={}, selfId={}",
+                            timeoutSec, event.eventId(), event.rawEventType(),
+                            event.bot() != null ? event.bot().selfId() : "?");
+                }
+                return null;
+            });
+        }
+    }
+
+    /** 单条消息整体超时（秒）；读 tune.pipeline_timeout_sec，非法/未配置用默认 60s。 */
+    private long pipelineTimeoutSec() {
+        try {
+            String v = configService.getGlobalConfig().get("tune.pipeline_timeout_sec");
+            if (v != null && !v.isBlank()) {
+                long n = Long.parseLong(v.trim());
+                if (n > 0) return n;
+            }
+        } catch (Exception ignored) { /* 非法值用默认 */ }
+        return PIPELINE_TIMEOUT_SEC_DEFAULT;
     }
 
     /** 取/建该 bot 的并发池（大小 = tune.bot_concurrency，默认 1=串行）。 */
@@ -156,7 +189,15 @@ public class BotPipeline implements DisposableBean {
                 log.debug("[Pipeline] {} 中断流水线", stage.name());
             }
         } catch (Exception e) {
-            log.error("[Pipeline] {} 执行异常: {}", stage.name(), e.getMessage(), e);
+            // 阶段异常不再静默中断整链：记录错误并继续后续阶段（模拟该阶段主动 next()），
+            // 避免一个辅助 Stage 的故障吞掉整条消息、用户得不到任何回复。
+            stageErrorCount.incrementAndGet();
+            log.error("[Pipeline] 阶段 {} 执行异常，继续后续阶段: eventId={}, type={}, err={}",
+                    stage.name(), event.eventId(), event.rawEventType(), e.getMessage(), e);
+            if (nextBegin.get() < 0) {
+                // 仅当该阶段未主动调用 next() 时才继续推进，避免重复进入后续阶段
+                doProceed(event, index + 1);
+            }
         }
     }
 
@@ -166,6 +207,8 @@ public class BotPipeline implements DisposableBean {
         m.put("processed", processedCount.get());
         m.put("stages", stages.size());
         m.put("slowThresholdMs", SLOW_THRESHOLD_MS);
+        m.put("pipelineTimeouts", timeoutCount.get());
+        m.put("pipelineStageErrors", stageErrorCount.get());
         // 聚合 DedupStage 的 DB 命中 / 降级本地计数（前端 /health 卡片字段）
         for (PipelineStage s : stages) {
             if (s instanceof DedupStage dd) {

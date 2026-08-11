@@ -1,5 +1,6 @@
 package XuanJi.adapter.qqbot.storage;
 
+import XuanJi.core.security.CredentialCipher;
 import XuanJi.core.storage.BotDataSourceRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -63,16 +64,18 @@ public class QqBotRepository {
     public void upsertBot(String appId, String clientSecret, String connMode, boolean isSandbox,
                           String status, String webhookUrl) {
         JdbcTemplate jdbc = platformJdbc();
+        // clientSecret 加密落库（AES-256-GCM，见 CredentialCipher）；空值/已加密值幂等原样写入
+        String secretToStore = CredentialCipher.encrypt(clientSecret);
         if (webhookUrl != null) {
             jdbc.update("""
                 MERGE INTO qqbot_bot (bot_appid, bot_clientSecret, conn_mode, is_sandbox, status, webhook_url)
                 KEY (bot_appid) VALUES (?, ?, ?, ?, ?, ?)
-            """, appId, clientSecret, connMode, isSandbox ? 1 : 0, status, webhookUrl);
+            """, appId, secretToStore, connMode, isSandbox ? 1 : 0, status, webhookUrl);
         } else {
             jdbc.update("""
                 MERGE INTO qqbot_bot (bot_appid, bot_clientSecret, conn_mode, is_sandbox, status)
                 KEY (bot_appid) VALUES (?, ?, ?, ?, ?)
-            """, appId, clientSecret, connMode, isSandbox ? 1 : 0, status);
+            """, appId, secretToStore, connMode, isSandbox ? 1 : 0, status);
         }
     }
 
@@ -184,7 +187,20 @@ public class QqBotRepository {
                 SELECT bot_appid, bot_clientSecret, conn_mode, is_sandbox, status, webhook_url
                 FROM qqbot_bot WHERE bot_appid = ?
             """, appId);
-            return rows.isEmpty() ? Map.of() : rows.get(0);
+            if (rows.isEmpty()) {
+                return Map.of();
+            }
+            Map<String, Object> row = rows.get(0);
+            // 出库即解密 clientSecret（加密落库见 upsertBot）；H2 未加引号标识符默认大写，
+            // 兼容两种 key 写法，保证各调用方拿到明文；旧明文（无 enc: 前缀）原样返回。
+            Object raw = row.get("BOT_CLIENTSECRET");
+            if (raw == null) raw = row.get("bot_clientSecret");
+            if (raw instanceof String s) {
+                String dec = CredentialCipher.decrypt(s);
+                row.put("BOT_CLIENTSECRET", dec);
+                row.put("bot_clientSecret", dec);
+            }
+            return row;
         } catch (DataAccessException e) {
             log.debug("[QQ] 读取 qqbot_bot({}) 失败: {}", appId, e.getMessage());
             return Map.of();
