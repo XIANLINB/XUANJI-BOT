@@ -100,6 +100,9 @@ public interface PluginServices {
      */
     OpResult recallRecentMessages(String botKey, String groupOpenid, String memberOpenid, int count);
 
+    /** 撤回群内某成员最近 1 条消息（框架默认条数=1）。 */
+    OpResult recallRecentMessages(String botKey, String groupOpenid, String memberOpenid);
+
     /** 撤回单聊消息。 */
     OpResult recallPrivateMessage(String botKey, String openid, String msgId);
 

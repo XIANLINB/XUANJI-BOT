@@ -125,8 +125,10 @@ public class TestPlugin extends XuanJiPluginBase {
             if (targets.isEmpty()) {
                 return "用法：#撤回 @成员 [条数]，例如：#撤回 @小明 3（默认撤回最近 1 条）。仅群主/管理员可用，机器人需为群管理。";
             }
-            int n = count == null ? 1 : Math.min(Math.max(count, 1), 50);
-            OpResult r = svc.recallRecentMessages(e.getBotId(), e.getGroupId(), targets.get(0), n);
+            // 不带条数走框架默认（撤回最近 1 条）；带条数由框架执行批量撤回
+            OpResult r = count == null
+                    ? svc.recallRecentMessages(e.getBotId(), e.getGroupId(), targets.get(0))
+                    : svc.recallRecentMessages(e.getBotId(), e.getGroupId(), targets.get(0), Math.min(Math.max(count, 1), 50));
             // 失败信息不发送到 QQ 群（给框架开发者看日志）；成功才回群
             if (r.ok()) return r.message();
             System.out.println("[TestPlugin] 撤回结果: " + r.message());

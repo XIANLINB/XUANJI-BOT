@@ -143,6 +143,11 @@ public class PluginServicesImpl implements PluginServices {
     }
 
     @Override
+    public OpResult recallRecentMessages(String botKey, String groupOpenid, String memberOpenid) {
+        return recallRecentMessages(botKey, groupOpenid, memberOpenid, 1);
+    }
+
+    @Override
     public OpResult recallRecentMessages(String botKey, String groupOpenid, String memberOpenid, int count) {
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("groupOpenid", groupOpenid);
