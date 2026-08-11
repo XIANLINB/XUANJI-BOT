@@ -6,6 +6,7 @@ import XuanJi.adapter.qqbot.model.Robot;
 import XuanJi.adapter.qqbot.registry.RobotRegistry;
 import lombok.extern.slf4j.Slf4j;
 import tools.jackson.databind.node.ObjectNode;
+import XuanJi.api.exception.BusinessException;
 import XuanJi.api.json.Json;
 import org.springframework.stereotype.Component;
 
@@ -889,11 +890,13 @@ public class MessageSender {
      */
     public ObjectNode approveGroupJoinRequest(String groupOpenid, String memberOpenid, String joinRequestId,
                                               boolean approved, String rejectReason, Boolean addBlacklist) {
+        // join_request_id 必传（平台文档标注可选，但实测缺省报 11004「无效或已过期的审批令牌」）
+        if (joinRequestId == null || joinRequestId.isBlank()) {
+            throw new XuanJi.api.exception.BusinessException(400, "入群审批失败：缺少必传参数 join_request_id");
+        }
         ObjectNode body = Json.obj();
         body.put("op", approved ? "approve" : "decline");
-        if (joinRequestId != null && !joinRequestId.isBlank()) {
-            body.put("join_request_id", joinRequestId);
-        }
+        body.put("join_request_id", joinRequestId);
         if (rejectReason != null && !rejectReason.isBlank()) {
             body.put("reject_reason", rejectReason);
         }
