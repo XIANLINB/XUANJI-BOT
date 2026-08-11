@@ -140,7 +140,6 @@ public class BotPipeline implements DisposableBean {
         // 阶段自身耗时 = handle 开始 → 调 next（或 handle 返回）之间。
         long start = System.nanoTime();
         AtomicLong nextBegin = new AtomicLong(-1);
-        log.info("[FLOW] 🧅 洋葱·进入 stage={} order={}", stage.name(), stage.order());
         try {
             PipelineStage.Result result = stage.handle(event, () -> {
                 nextBegin.set(System.nanoTime());
@@ -153,7 +152,6 @@ public class BotPipeline implements DisposableBean {
                 log.warn("[Pipeline] 慢阶段: {} ({}ms)", stage.name(), elapsedMs);
                 slowStageCounts.computeIfAbsent(stage.name(), k -> new AtomicInteger()).incrementAndGet();
             }
-            log.info("[FLOW] 🧅 洋葱·离开 stage={} order={} result={}", stage.name(), stage.order(), result);
             if (result == PipelineStage.Result.ABORT) {
                 log.debug("[Pipeline] {} 中断流水线", stage.name());
             }

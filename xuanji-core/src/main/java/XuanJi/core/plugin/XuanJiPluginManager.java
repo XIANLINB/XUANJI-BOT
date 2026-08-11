@@ -49,6 +49,8 @@ public class XuanJiPluginManager extends DefaultPluginManager {
     private final Map<String, XuanJiPluginState> states = new HashMap<>();
     /** pluginId → 插件 Spring 子容器 */
     private final Map<String, AnnotationConfigApplicationContext> pluginContexts = new HashMap<>();
+    /** copy 式加载器实例（热加载时回查用户原始 jar 路径，且承载唯一副本名生成） */
+    private CopyingJarPluginLoader copyingLoader;
 
     public XuanJiPluginManager(ApplicationContext parentContext,
                                PluginStateStore stateStore,
@@ -60,9 +62,11 @@ public class XuanJiPluginManager extends DefaultPluginManager {
 
     @Override
     protected PluginLoader createPluginLoader() {
+        CopyingJarPluginLoader cpl = new CopyingJarPluginLoader(this);
+        this.copyingLoader = cpl;
         return new CompoundPluginLoader()
                 .add(new DevelopmentPluginLoader(this), this::isDevelopment)
-                .add(new CopyingJarPluginLoader(this), this::isNotDevelopment)
+                .add(cpl, this::isNotDevelopment)
                 .add(new DefaultPluginLoader(this), this::isNotDevelopment);
     }
 
@@ -94,41 +98,84 @@ public class XuanJiPluginManager extends DefaultPluginManager {
     }
 
     /**
-     * P3-G 关键：复制式 Jar 加载器 — 先把插件 jar 复制到 {@code plugins/.work/} 再加载副本。
+     * 复制式 Jar 加载器 — 先把插件 jar 复制到 {@code plugins/.work/} 再加载副本。
      *
-     * <p>Windows 下 pf4j 的 JarPluginLoader 打开 jar 后不释放文件锁，框架运行时（IDEA）用户
-     * 无法覆盖 plugins/ 下的 jar。复制加载后，<b>原 jar 永不被 JVM 打开</b>，用户可随时覆盖；
-     * 热加载时重新复制新 jar（REPLACE）即加载新内容，不重启框架。
-     * pf4j 扫描根目录 *.jar 不递归子目录，.work 副本不会被重复加载。
+     * <p>Windows 下 pf4j 的 JarPluginLoader 打开 jar 后会持有文件锁直到 ClassLoader 关闭，
+     * 若直接加载 plugins/ 下的原 jar，框架运行期间用户无法覆盖它。复制加载后<b>原 jar 只被读取、
+     * 永不被 JVM 长期持有</b>，用户可随时覆盖；热加载时重新复制新 jar 即加载新内容，不重启框架。
+     *
+     * <p>关键修正（修复原 jar 被锁死）：每次加载都生成<b>唯一</b>副本名（{@code copy-<原名>-<n>.jar}），
+     * 绝不覆盖仍被旧 ClassLoader 锁定的旧副本；且复制失败<b>绝不回退直载原 jar</b>（否则原 jar 会被锁死）。
+     * 这样无论热重载多少次，原 jar 始终处于「仅被读取」状态，可被用户随时覆盖。
      */
     static final class CopyingJarPluginLoader extends JarPluginLoader {
 
         private final Path workDir;
+        /** 插件根目录（plugins/），构造时保存，供静态内部类回查原始 jar */
+        private final Path pluginsRoot;
+        /** pluginId → 用户原始 jar 路径（热加载时回读最新 jar） */
+        private final Map<String, Path> originalJarPaths = new HashMap<>();
 
         CopyingJarPluginLoader(PluginManager pm) {
             super(pm);
-            workDir = pm.getPluginsRoot().resolve(".work");
+            pluginsRoot = pm.getPluginsRoot();
+            workDir = pluginsRoot.resolve(".work");
             try {
                 java.nio.file.Files.createDirectories(workDir);
             } catch (Exception ignored) { /* 目录创建失败由复制时处理 */ }
         }
 
+        /** 返回插件对应的「用户原始 jar」路径（热加载回读用）。 */
+        Path originalJarOf(String pluginId) {
+            Path p = originalJarPaths.get(pluginId);
+            return (p != null && java.nio.file.Files.isRegularFile(p)) ? p : null;
+        }
+
         @Override
-        public ClassLoader loadPlugin(Path pluginPath, PluginDescriptor descriptor) {
-            // 规范化：无论传入原 jar 还是已复制的副本，都落到固定 copy-{原名}.jar（避免 copy-copy- 叠加）
-            String name = pluginPath.getFileName().toString();
-            if (name.startsWith("copy-")) name = name.substring("copy-".length());
-            Path copy = workDir.resolve("copy-" + name);
+        public synchronized ClassLoader loadPlugin(Path pluginPath, PluginDescriptor descriptor) {
+            // 记录用户原始 jar：若传入的是旧副本，反推回 plugins/<原名>.jar
+            Path original = pluginPath;
+            String fn = original.getFileName().toString();
+            if (fn.startsWith("copy-")) {
+                Path cand = pluginsRoot.resolve(stripCopyPrefix(fn));
+                if (java.nio.file.Files.isRegularFile(cand)) original = cand;
+            }
+            originalJarPaths.put(descriptor.getPluginId(), original);
+
+            String base = original.getFileName().toString();
+            // best-effort 清理同名旧副本（仍被旧 ClassLoader 占用的会删除失败，忽略即可，下方用唯一名避开）
+            sweepOldCopies(base);
+            // 生成唯一副本名，绝不替换仍被占用的旧副本
+            Path copy = uniqueCopy(base);
             try {
-                // 先删除旧副本（best-effort）。上一次热重载若未释放文件锁，delete 会失败但无妨，
-                // 关键修复在调用方 reloadJar 会先 close 旧 ClassLoader 释放锁，此处即可成功覆盖。
-                try { java.nio.file.Files.deleteIfExists(copy); } catch (Exception ignored) { /* 锁未释放时跳过，下方 copy 会兜底报错 */ }
-                java.nio.file.Files.copy(pluginPath, copy, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                java.nio.file.Files.copy(original, copy, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             } catch (Exception e) {
-                log.warn("[Plugin] 复制插件到工作目录失败，回退直载原 jar: {}", e.getMessage());
-                return super.loadPlugin(pluginPath, descriptor);
+                // 宁可失败也不回退直载原 jar——回退会让原 jar 被 JVM 锁死，用户再也无法覆盖
+                throw new RuntimeException("[Plugin] 复制插件到工作目录失败: " + e.getMessage(), e);
             }
             return super.loadPlugin(copy, descriptor);
+        }
+
+        private static String stripCopyPrefix(String fn) {
+            return fn.startsWith("copy-") ? fn.substring("copy-".length()) : fn;
+        }
+
+        /** 删除 copy-<base>-* 的旧副本（best-effort）。 */
+        private void sweepOldCopies(String base) {
+            try (var s = java.nio.file.Files.list(workDir)) {
+                s.filter(p -> p.getFileName().toString().startsWith("copy-" + base + "-"))
+                 .forEach(p -> { try { java.nio.file.Files.deleteIfExists(p); } catch (Exception ignored) { /* 占用中，跳过 */ } });
+            } catch (Exception ignored) { /* 目录不可列，忽略 */ }
+        }
+
+        /** 生成形如 copy-<base>-<n>.jar 的唯一路径，自动跳过已存在（可能仍被锁）的名字。 */
+        private Path uniqueCopy(String base) {
+            int n = 0;
+            Path p;
+            do {
+                p = workDir.resolve("copy-" + base + "-" + (n++));
+            } while (java.nio.file.Files.exists(p));
+            return p;
         }
     }
 
@@ -378,16 +425,12 @@ public class XuanJiPluginManager extends DefaultPluginManager {
         return true;
     }
 
-    /** 解析热加载应使用的「原始」jar 路径：复制式加载后插件路径可能是 .work/copy-* 副本，
-     *  反推回 plugins/&lt;原名&gt;.jar，确保热加载加载的是用户更新后的内容，而非旧副本。 */
+    /** 解析热加载应使用的「原始」jar 路径：优先用 copy 加载器记录的「用户原始 jar」，
+     *  确保热加载加载的是用户更新后的内容，而非仍被锁定的旧副本。 */
     private Path resolveReloadJar(PluginWrapper old) {
-        Path p = old.getPluginPath();
-        String fn = p.getFileName().toString();
-        if (fn.startsWith("copy-")) {
-            Path candidate = getPluginsRoot().resolve(fn.substring("copy-".length()));
-            if (java.nio.file.Files.isRegularFile(candidate)) return candidate;
-        }
-        return p;
+        Path p = copyingLoader != null ? copyingLoader.originalJarOf(old.getPluginId()) : null;
+        if (p != null) return p;
+        return old.getPluginPath();
     }
 
     /** 关闭插件 ClassLoader（释放底层 jar 文件句柄）。Windows 下 PF4J 卸载不关闭 URLClassLoader，
