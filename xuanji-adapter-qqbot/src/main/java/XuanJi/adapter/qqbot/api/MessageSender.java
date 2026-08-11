@@ -73,6 +73,10 @@ public class MessageSender {
     private String getCurrentRobotId() {
         RobotContext ctx = CURRENT_CONTEXT.get();
         if (ctx != null) return ctx.robotId;
+        // 命令/事件处理线程：优先用「当前正在处理的机器人」（CommandRegistry 事件线程绑定的 botKey=appId），
+        // 避免多机器人时命令回复/插件发送回退到第一个注册机器人（11255 同源问题）。
+        String cmdBot = XuanJi.core.command.CommandRegistry.getCurrentBotKey();
+        if (cmdBot != null && !cmdBot.isBlank()) return cmdBot;
         return robotRegistry.getAllRobots().keySet().stream()
                 .findFirst()
                 .orElseThrow(() -> new RuntimeException("没有注册的机器人"));

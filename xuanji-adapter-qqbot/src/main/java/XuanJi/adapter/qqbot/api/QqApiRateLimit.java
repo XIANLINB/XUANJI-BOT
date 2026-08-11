@@ -191,10 +191,15 @@ public class QqApiRateLimit {
             long limit = fallbackUntil > nowMs ? cat.fallback : cat.limit;
             if (cat.type == Type.QPS) {
                 long nanos = System.nanoTime();
-                if (lastRefillNanos == 0) lastRefillNanos = nanos;
-                double refill = (nanos - lastRefillNanos) / 1_000_000_000.0 * limit;
-                tokens = Math.min(limit, tokens + refill);
-                lastRefillNanos = nanos;
+                if (lastRefillNanos == 0) {
+                    // 首次调用：满桶放行（否则第一帧 refill=0、tokens=0 会误判限频）
+                    lastRefillNanos = nanos;
+                    tokens = limit;
+                } else {
+                    double refill = (nanos - lastRefillNanos) / 1_000_000_000.0 * limit;
+                    tokens = Math.min(limit, tokens + refill);
+                    lastRefillNanos = nanos;
+                }
                 if (tokens >= 1.0) {
                     tokens -= 1.0;
                     return true;
