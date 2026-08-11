@@ -146,13 +146,15 @@ public class QqXuanJiMessageSender implements XuanJiMessageSender, XuanJi.api.ad
         });
         // 入群申请列表
         m.put(PlatformActions.GROUP_JOIN_REQUEST_LIST, p -> {
-            Integer start = intOrNull(p, "start");
+            String cursor = str(p, "cursor");
             Integer limit = intOrNull(p, "limit");
-            ObjectNode resp = start != null
+            ObjectNode resp = cursor != null && !cursor.isBlank()
                     ? messageSender.listGroupJoinRequests(messageSender.currentRobotId(), messageSender.currentEnvType(),
-                            str(p, "groupOpenid"), start, limit)
+                            str(p, "groupOpenid"), cursor, limit)
                     : messageSender.listGroupJoinRequests(str(p, "groupOpenid"));
-            return Map.of("data", (Object) toMap(resp));
+            Map<String, Object> d = toMap(resp);
+            if (d != null) enrichJoinRequests(d);
+            return d == null ? Map.of() : Map.of("data", (Object) d);
         });
         // 撤回群消息
         m.put(PlatformActions.GROUP_RECALL, p -> {
@@ -329,6 +331,73 @@ public class QqXuanJiMessageSender implements XuanJiMessageSender, XuanJi.api.ad
             return null;
         }
         return Json.mapper().convertValue(node, Map.class);
+    }
+
+    /** 入群申请列表响应增强：解析每项的 verify_info，区分「无入群问题 / 有入群问题」并提取问题与答案。 */
+    private static void enrichJoinRequests(Map<String, Object> d) {
+        try {
+            Object listObj = d.get("list");
+            if (!(listObj instanceof java.util.List<?> list)) return;
+            for (Object itemObj : list) {
+                if (!(itemObj instanceof Map<?, ?>)) continue;
+                @SuppressWarnings("unchecked")
+                Map<String, Object> item = (Map<String, Object>) itemObj;
+                Object vi = item.get("verify_info");
+                if (!(vi instanceof Map<?, ?> vim)) continue;
+                // 注入解析字段（保留原始 verify_info 不变）
+                Map<String, Object> parsed = parseVerifyInfo(vim);
+                item.put("_verify_parsed", parsed);
+            }
+        } catch (Exception ex) {
+            log.debug("[入群申请] verify_info 解析失败: {}", ex.getMessage());
+        }
+    }
+
+    /**
+     * 解析入群验证信息 verify_info：
+     * <ul>
+     *   <li>method=admin_review_qa → 用 review_qa_list 的结构化问题/答案</li>
+     *   <li>method=verify_message 且内容形如「问题：…\n答案：…」→ 有入群问题，正则提取 question/answer</li>
+     *   <li>其余 → 无入群问题，verify_message 即用户填写内容（question=null）</li>
+     * </ul>
+     */
+    static Map<String, Object> parseVerifyInfo(Map<?, ?> vim) {
+        String method = vim.get("method") == null ? "" : String.valueOf(vim.get("method"));
+        String message = vim.get("verify_message") == null ? "" : String.valueOf(vim.get("verify_message"));
+        java.util.Map<String, Object> out = new LinkedHashMap<>();
+        out.put("method", method);
+        out.put("verifyMessage", message);
+        // ① admin_review_qa：官方结构化问答
+        if (vim.get("review_qa_list") instanceof java.util.List<?> qaList && !qaList.isEmpty()) {
+            Object first = qaList.get(0);
+            if (first instanceof Map<?, ?> qa) {
+                out.put("question", strOrNull(qa.get("question")));
+                out.put("answer", strOrNull(qa.get("answer")));
+                out.put("qaMode", true);
+                return out;
+            }
+        }
+        // ② verify_message 形如「问题：xxx\n答案：yyy」→ 有入群问题，正则提取
+        java.util.regex.Matcher m = VERIFY_QA.matcher(message);
+        if (m.matches()) {
+            out.put("question", m.group(1).trim());
+            out.put("answer", m.group(2).trim());
+            out.put("qaMode", true);
+        } else {
+            out.put("question", null);
+            out.put("answer", message);  // 无问题场景：verify_message 即用户答案
+            out.put("qaMode", false);
+        }
+        return out;
+    }
+
+    /** 入群问题格式「问题：…\n答案：…」（冒号中英文、换行兼容）。 */
+    private static final Pattern VERIFY_QA =
+            java.util.regex.Pattern.compile("^\\s*问题[:：]\\s*(.+?)\\s*[\\r\\n]+\\s*答案[:：]\\s*(.+?)\\s*$",
+                    java.util.regex.Pattern.DOTALL);
+
+    private static String strOrNull(Object v) {
+        return v == null ? null : String.valueOf(v);
     }
 
     @Override

@@ -855,15 +855,15 @@ public class MessageSender {
     /**
      * 入群申请列表（全参，支持分页）。
      *
-     * @param pageStart 起始位置（游标，可选）
-     * @param pageLimit 每页条数（可选）
+     * @param cursor  分页游标（首次可不传或传空串，可选）
+     * @param pageLimit 每页条数（可选，默认 20，最大 100）
      */
     public ObjectNode listGroupJoinRequests(String robotId, String envType, String groupOpenid,
-                                            Integer pageStart, Integer pageLimit) {
-        StringBuilder path = new StringBuilder("/v2/groups/").append(groupOpenid).append("/join_requests");
+                                            String cursor, Integer pageLimit) {
+        StringBuilder path = new StringBuilder("/v2/groups/").append(groupOpenid).append("/join_request_list");
         boolean first = true;
-        if (pageStart != null) {
-            path.append('?').append("start=").append(pageStart);
+        if (cursor != null && !cursor.isBlank()) {
+            path.append('?').append("cursor=").append(java.net.URLEncoder.encode(cursor, java.nio.charset.StandardCharsets.UTF_8));
             first = false;
         }
         if (pageLimit != null) {
