@@ -9,8 +9,8 @@ import java.util.*;
  */
 public class GroupMessageEvent implements MessageEvent {
 
-    /** 被 @ 的群成员（含是否机器人）。 */
-    public record Mention(String userId, boolean bot) {}
+    /** 被 @ 的群成员（userId=openid；bot=是否机器人；isYou=是否机器人自己）。 */
+    public record Mention(String userId, boolean bot, boolean isYou) {}
 
     private final String messageId;
     private final String content;

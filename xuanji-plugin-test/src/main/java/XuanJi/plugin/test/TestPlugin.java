@@ -99,8 +99,8 @@ public class TestPlugin extends XuanJiPluginBase {
             }
             int ok = 0;
             for (GroupMessageEvent.Mention target : targets) {
-                // 消息字段判断：不能禁言其他机器人（失败信息只记录给开发者，不发送到 QQ 群）
-                if (target.bot()) {
+                // 消息字段判断：不能禁言其他机器人（含机器人自己），失败信息只记录给开发者，不发送到 QQ 群
+                if (target.bot() || target.isYou()) {
                     System.out.println("[TestPlugin] 禁言被拒：机器人不能禁言其他机器人, member=" + target.userId());
                     continue;
                 }

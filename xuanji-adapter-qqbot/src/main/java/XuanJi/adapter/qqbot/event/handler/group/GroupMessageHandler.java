@@ -314,7 +314,8 @@ public class GroupMessageHandler implements EventHandler {
         for (var mn : mentions) {
             String uid = mn.getMemberOpenid() != null ? mn.getMemberOpenid() : mn.getId();
             if (uid != null && !uid.isBlank()) {
-                out.add(new XuanJi.sdk.event.GroupMessageEvent.Mention(uid, Boolean.TRUE.equals(mn.getBot())));
+                out.add(new XuanJi.sdk.event.GroupMessageEvent.Mention(uid,
+                        Boolean.TRUE.equals(mn.getBot()), Boolean.TRUE.equals(mn.getIsYou())));
             }
         }
         return out;
