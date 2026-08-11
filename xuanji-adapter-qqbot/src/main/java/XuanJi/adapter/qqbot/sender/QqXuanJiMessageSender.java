@@ -115,11 +115,12 @@ public class QqXuanJiMessageSender implements XuanJiMessageSender, XuanJi.api.ad
         // 机器人在群内的状态（原始报文转 Map）
         m.put(PlatformActions.GROUP_BOT_STATE,
                 p -> safeGet(() -> toMap(messageSender.getBotGroupState(str(p, "groupOpenid")))));
-        // 群成员禁言（seconds<=0 解除；memberOpenid 为被禁言成员）
+        // 群成员禁言（minutes<=0 解除；memberOpenid 为被禁言成员；分钟→秒在此换算）
         m.put(PlatformActions.GROUP_MUTE, p -> {
             String group = str(p, "groupOpenid");
             String member = str(p, "memberOpenid");
-            int seconds = intOf(p, "seconds");
+            int minutes = intOf(p, "minutes");
+            int seconds = minutes > 0 ? minutes * 60 : 0;
             String op = seconds > 0 ? "add" : "del";
             String expire = seconds > 0
                     ? fmtRfc3339(System.currentTimeMillis() / 1000 + seconds)

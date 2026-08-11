@@ -95,11 +95,11 @@ public class PluginServicesImpl implements PluginServices {
     }
 
     @Override
-    public boolean muteMember(String botKey, String groupOpenid, String memberOpenid, int seconds) {
+    public boolean muteMember(String botKey, String groupOpenid, String memberOpenid, int minutes) {
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("groupOpenid", groupOpenid);
         params.put("memberOpenid", memberOpenid);
-        params.put("seconds", seconds);
+        params.put("minutes", minutes); // 分钟，适配器内部换算成秒
         return isOk(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_MUTE, params));
     }
 

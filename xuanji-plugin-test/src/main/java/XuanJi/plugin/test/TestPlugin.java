@@ -90,18 +90,18 @@ public class TestPlugin extends XuanJiPluginBase {
                 return "用法：#禁言 @成员 <分钟>，例如：#禁言 @小明 5。仅群主/管理员可用，机器人需为群管理。";
             }
             // 从消息纯文本提取分钟数（QQ 的 @ 占位不含纯数字，提取到的数字即分钟数；默认 10，上限 7 天）
+            // muteMember 时长参数为「分钟」，秒级换算由 qqbot 适配器内部完成
             int minutes = 10;
             Matcher m = Pattern.compile("(\\d+)").matcher(e.getPlainText() == null ? "" : e.getPlainText());
             if (m.find()) {
                 int v = Integer.parseInt(m.group(1));
                 if (v > 0) minutes = Math.min(v, 10080);
             }
-            int seconds = minutes * 60;
             int ok = 0;
             List<String> failed = new ArrayList<>();
             for (String uid : targets) {
                 try {
-                    if (svc.muteMember(e.getBotId(), e.getGroupId(), uid, seconds)) {
+                    if (svc.muteMember(e.getBotId(), e.getGroupId(), uid, minutes)) {
                         ok++;
                     } else {
                         failed.add(uid);

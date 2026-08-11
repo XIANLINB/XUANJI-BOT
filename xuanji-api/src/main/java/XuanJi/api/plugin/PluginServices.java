@@ -64,9 +64,11 @@ public interface PluginServices {
     /**
      * 群成员禁言。
      *
-     * @param seconds 禁言秒数（&lt;=0 解除禁言）
+     * <p>时长参数为<b>分钟</b>（分钟→秒的换算由平台适配器内部完成，插件无需 ×60）。
+     *
+     * @param minutes 禁言分钟数（&lt;=0 解除禁言）
      */
-    boolean muteMember(String botKey, String groupOpenid, String memberOpenid, int seconds);
+    boolean muteMember(String botKey, String groupOpenid, String memberOpenid, int minutes);
 
     /** 撤回群消息。 */
     boolean recallMessage(String botKey, String groupOpenid, String msgId);
