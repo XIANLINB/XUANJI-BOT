@@ -354,12 +354,20 @@ public class QqXuanJiMessageSender implements XuanJiMessageSender, XuanJi.api.ad
     }
 
     /**
-     * 解析入群验证信息 verify_info：
+     * 解析入群验证信息 verify_info（兼容两个数据源的差异）：
+     *
+     * <p><b>数据源差异</b>（同一用户的申请，两处结构不同）：
      * <ul>
-     *   <li>method=admin_review_qa → 用 review_qa_list 的结构化问题/答案</li>
-     *   <li>method=verify_message 且内容形如「问题：…\n答案：…」→ 有入群问题，正则提取 question/answer</li>
-     *   <li>其余 → 无入群问题，verify_message 即用户填写内容（question=null）</li>
+     *   <li><b>列表拉取</b>（GET /join_request_list）：设置问题后 {@code method=admin_review_qa}，
+     *       问题/答案走结构化的 {@code review_qa_list}；仅验证消息时 {@code method=verify_message}，
+     *       {@code verify_message} 即用户填写内容、{@code review_qa_list=[]}</li>
+     *   <li><b>事件推送</b>（WS GROUP_JOIN_REQUEST）：无论是否设置问题 method 都是
+     *       {@code verify_message}；设置问题后 {@code verify_message} 形如「问题：…\n答案：…」
+     *       （拼接格式，需正则提取）</li>
      * </ul>
+     *
+     * <p>解析优先级：① review_qa_list 非空（列表拉取的问题）→ ② 正则匹配「问题：…\n答案：…」
+     * （事件推送的问题）→ ③ 无入群问题（verify_message 即用户答案，qaMode=false）。
      */
     static Map<String, Object> parseVerifyInfo(Map<?, ?> vim) {
         String method = vim.get("method") == null ? "" : String.valueOf(vim.get("method"));
