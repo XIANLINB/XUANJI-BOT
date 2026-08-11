@@ -604,10 +604,11 @@ public class QqApiService {
                 throw new BusinessException(404, "QQ平台API不存在: " + path);
 
             } else if (statusCode == 500 || statusCode == 504) {
-                // 处理失败（文档7.1: 500/504 处理失败）
+                // 处理失败（文档7.1: 500/504 处理失败）— 平台 body 通常带 message/code/trace_id，
+                // 用 parseErrorMessage 提取并附带排查建议，避免把具体错误掩盖成笼统文案
                 log.error("QQ API服务端错误({}): path={}, traceId={}, body={}",
                         statusCode, path, traceId, responseBody);
-                throw new BusinessException(statusCode, "QQ平台服务处理失败，请稍后重试");
+                throw new BusinessException(statusCode, parseErrorMessage(responseBody, statusCode));
 
             } else {
                 // 其他错误 — 尝试解析平台错误码

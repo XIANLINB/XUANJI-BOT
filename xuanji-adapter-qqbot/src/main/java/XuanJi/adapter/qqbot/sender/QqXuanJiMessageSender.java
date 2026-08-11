@@ -140,9 +140,15 @@ public class QqXuanJiMessageSender implements XuanJiMessageSender, XuanJi.api.ad
         });
         // 入群申请审批
         m.put(PlatformActions.GROUP_APPROVE, p -> {
+            String group = str(p, "groupOpenid");
+            String member = str(p, "memberOpenid");
+            String reqId = str(p, "joinRequestId");
+            if (group.isBlank() || member.isBlank() || reqId.isBlank()) {
+                return Map.of("ok", false, "error",
+                        "审批被拒：缺少群/成员/申请ID参数（join_request_id 必传）");
+            }
             ObjectNode resp = messageSender.approveGroupJoinRequest(
-                    str(p, "groupOpenid"), str(p, "memberOpenid"), str(p, "joinRequestId"),
-                    boolOf(p, "approve"), str(p, "reason"),
+                    group, member, reqId, boolOf(p, "approve"), str(p, "reason"),
                     p.containsKey("blacklist") ? boolOf(p, "blacklist") : null);
             return Map.of("data", (Object) toMap(resp));
         });
@@ -160,7 +166,12 @@ public class QqXuanJiMessageSender implements XuanJiMessageSender, XuanJi.api.ad
         });
         // 撤回群消息
         m.put(PlatformActions.GROUP_RECALL, p -> {
-            ObjectNode resp = messageSender.retractGroupMessage(str(p, "groupOpenid"), str(p, "msgId"));
+            String group = str(p, "groupOpenid");
+            String msgId = str(p, "msgId");
+            if (group.isBlank() || msgId.isBlank()) {
+                return Map.of("ok", false, "error", "撤回被拒：缺少群或消息ID参数");
+            }
+            ObjectNode resp = messageSender.retractGroupMessage(group, msgId);
             return Map.of("data", (Object) toMap(resp));
         });
         // 撤回群内某成员最近 N 条消息（框架层查库判断：权限/2分钟窗口/逐条撤回）
@@ -233,7 +244,12 @@ public class QqXuanJiMessageSender implements XuanJiMessageSender, XuanJi.api.ad
         });
         // 撤回单聊消息
         m.put(PlatformActions.GROUP_RECALL_PRIVATE, p -> {
-            ObjectNode resp = messageSender.retractC2cMessage(str(p, "openid"), str(p, "msgId"));
+            String openid = str(p, "openid");
+            String msgId = str(p, "msgId");
+            if (openid.isBlank() || msgId.isBlank()) {
+                return Map.of("ok", false, "error", "撤回被拒：缺少用户或消息ID参数");
+            }
+            ObjectNode resp = messageSender.retractC2cMessage(openid, msgId);
             Map<String, Object> d = toMap(resp);
             return d == null ? Map.of() : Map.of("data", (Object) d);
         });
