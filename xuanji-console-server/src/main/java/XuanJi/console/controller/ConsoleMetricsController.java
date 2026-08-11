@@ -247,7 +247,8 @@ public class ConsoleMetricsController {
                         "修复去重误判：入群申请等系统事件改用 join_request_id 作事件 ID，不再退化成内容键误丢",
                         "框架只下发完整字段（getJoinRequestInfo），审批判定逻辑完全由插件实现",
                         "插件能力类型化：PluginServices 全部方法返回类型化对象（JoinRequest/JoinRequestList/GroupInfo/BotGroupState/GroupMember/UserInfo/GroupBotRole/OpResult），告别裸 JSON",
-                        "错误信息精确定位：平台 500/504 错误透传平台 message+错误码+排查建议（如禁言 10013），撤回/审批缺参前置校验返回具体原因")));
+                        "错误信息精确定位：平台 500/504 错误透传平台 message+错误码+排查建议（如禁言 10013），撤回/审批缺参前置校验返回具体原因",
+                        "开发指南页面改四 Tab：开发指南 / 事件（事件类型+对象字段）/ 动作（参考 Shiro 风格，方法+参数+返回值）/ 注解（全注解+字段+示例）")));
 
         // ── v1.3.0 插件群管能力（2026-08-12）──
         versions.add(versionEntry("v1.3.0", "2026-08-12", "正式版",
