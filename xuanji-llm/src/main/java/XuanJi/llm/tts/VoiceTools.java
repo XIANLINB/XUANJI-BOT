@@ -1,5 +1,6 @@
 package XuanJi.llm.tts;
 
+import XuanJi.api.llm.LlmCapability;
 import XuanJi.api.llm.LlmReplySink;
 import XuanJi.api.llm.LlmTool;
 import XuanJi.api.llm.LlmToolParam;
@@ -101,7 +102,7 @@ public class VoiceTools {
     private List<TtsBinding> resolveTtsBindings(XuanJi.llm.config.LlmConfig cfg) {
         List<TtsBinding> out = new java.util.ArrayList<>();
         for (XuanJi.llm.provider.CapabilityBindingResolver.CapBinding cb :
-                bindingResolver.resolve(cfg, cfg.getTtsBindings(),
+                bindingResolver.resolve(cfg, LlmCapability.TTS, cfg.getTtsBindings(),
                         cfg.getTtsProviderId(), cfg.getTtsModelBinding(), "mimo-v2.5-tts")) {
             String type = cb.providerType();
             if (!"fish".equals(type) && !"mimo".equals(type)) {

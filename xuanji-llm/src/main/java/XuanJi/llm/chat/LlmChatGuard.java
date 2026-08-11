@@ -41,9 +41,28 @@ public class LlmChatGuard {
         return (System.currentTimeMillis() / 1000) - last < cooldownSeconds;
     }
 
-    /** 记录一次回复时间（触发冷却）。 */
-    public void markReplied(String botKey, String groupId) {
-        lastReplyAt.put(key(botKey, groupId), System.currentTimeMillis() / 1000);
+    /**
+     * 原子地「检查冷却 + 占用回复槽」：冷却已过（或冷却关闭）则立即记录本次回复时间并返回
+     * {@code true}（允许回复）；仍在冷却中则返回 {@code false}（跳过）。
+     *
+     * <p>原 {@link #isCooledDown} 为只读检查，与回复标记分处两个线程
+     * （Pipeline 线程检查、REPLY 线程标记），冷却窗口内并发消息会同时通过检查、重复触发 LLM。
+     * 本方法将「检查」与「占用」合并为单步原子操作，彻底消除该竞态。
+     *
+     * <p>在真正决定回复的线程内同步调用即可；冷却为低频操作，方法级 synchronized 无性能顾虑。
+     */
+    public synchronized boolean tryGrantReply(String botKey, String groupId, int cooldownSeconds) {
+        long nowSec = System.currentTimeMillis() / 1000;
+        if (cooldownSeconds <= 0) {
+            lastReplyAt.put(key(botKey, groupId), nowSec);
+            return true;
+        }
+        Long last = lastReplyAt.get(key(botKey, groupId));
+        if (last == null || nowSec - last >= cooldownSeconds) {
+            lastReplyAt.put(key(botKey, groupId), nowSec);
+            return true;
+        }
+        return false;
     }
 
     private static String key(String botKey, String groupId) {

@@ -9,6 +9,7 @@ import XuanJi.api.llm.LlmToolCall;
 import XuanJi.api.llm.LlmToolDefinition;
 import XuanJi.llm.config.LlmConfig;
 import XuanJi.llm.config.LlmConfigStore;
+import XuanJi.llm.provider.LlmConcurrencyLimiter;
 import XuanJi.llm.provider.LlmProviderRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -30,6 +31,7 @@ public class LlmService {
     private final LlmConfigStore configStore;
     private final LlmProviderRegistry registry;
     private final XuanJi.llm.provider.ProviderService providerService;
+    private final LlmConcurrencyLimiter limiter;
 
     /** 最近一次 chatWithTools 的真实 usage（{prompt, completion}）；线程隔离，供用量统计读取。 */
     private final ThreadLocal<long[]> lastUsage = new ThreadLocal<>();
@@ -42,10 +44,12 @@ public class LlmService {
     }
 
     public LlmService(LlmConfigStore configStore, LlmProviderRegistry registry,
-                      XuanJi.llm.provider.ProviderService providerService) {
+                      XuanJi.llm.provider.ProviderService providerService,
+                      LlmConcurrencyLimiter limiter) {
         this.configStore = configStore;
         this.registry = registry;
         this.providerService = providerService;
+        this.limiter = limiter;
     }
 
     // ──────────── 配置 ────────────
@@ -146,24 +150,27 @@ public class LlmService {
      */
     public String chat(List<LlmMessage> messages, LlmChatOptions options) {
         LlmConfig cfg = configStore.get();
-        List<String> errors = new ArrayList<>();
-        for (ChatBinding b : resolveChatBindings(cfg)) {
-            LlmProvider provider = registry.byId(b.providerType());
-            if (provider == null) {
-                errors.add(b.providerType() + " 供应商实现不存在");
-                continue;
+        limiter.configure(cfg.getMaxConcurrency());
+        return limiter.run(() -> {
+            List<String> errors = new ArrayList<>();
+            for (ChatBinding b : resolveChatBindings(cfg)) {
+                LlmProvider provider = registry.byId(b.providerType());
+                if (provider == null) {
+                    errors.add(b.providerType() + " 供应商实现不存在");
+                    continue;
+                }
+                LlmChatOptions effective = options != null ? options
+                        : new LlmChatOptions(b.model(), cfg.getTemperature(), cfg.getMaxTokens(), null);
+                try {
+                    return provider.chat(messages, effective, b.credentials());
+                } catch (Exception e) {
+                    errors.add(b.providerType() + "(" + b.model() + "): " + e.getMessage());
+                    log.warn("[LLM] 对话供应商 {} 失败，尝试下一个: {}", b.providerType(), e.getMessage());
+                }
             }
-            LlmChatOptions effective = options != null ? options
-                    : new LlmChatOptions(b.model(), cfg.getTemperature(), cfg.getMaxTokens(), null);
-            try {
-                return provider.chat(messages, effective, b.credentials());
-            } catch (Exception e) {
-                errors.add(b.providerType() + "(" + b.model() + "): " + e.getMessage());
-                log.warn("[LLM] 对话供应商 {} 失败，尝试下一个: {}", b.providerType(), e.getMessage());
-            }
-        }
-        throw new IllegalStateException(errors.isEmpty()
-                ? "尚未配置可用的对话供应商" : String.join("；", errors));
+            throw new IllegalStateException(errors.isEmpty()
+                    ? "尚未配置可用的对话供应商" : String.join("；", errors));
+        });
     }
 
     /** 连通性测试：发一条最小消息验证 key/网络/模型。 */
@@ -181,25 +188,28 @@ public class LlmService {
     public void chatStream(List<LlmMessage> messages, LlmChatOptions options,
                            java.util.function.Consumer<String> onDelta) {
         LlmConfig cfg = configStore.get();
-        List<String> errors = new ArrayList<>();
-        for (ChatBinding b : resolveChatBindings(cfg)) {
-            LlmProvider provider = registry.byId(b.providerType());
-            if (provider == null) {
-                errors.add(b.providerType() + " 供应商实现不存在");
-                continue;
+        limiter.configure(cfg.getMaxConcurrency());
+        limiter.run(() -> {
+            List<String> errors = new ArrayList<>();
+            for (ChatBinding b : resolveChatBindings(cfg)) {
+                LlmProvider provider = registry.byId(b.providerType());
+                if (provider == null) {
+                    errors.add(b.providerType() + " 供应商实现不存在");
+                    continue;
+                }
+                LlmChatOptions effective = options != null ? options
+                        : new LlmChatOptions(b.model(), cfg.getTemperature(), cfg.getMaxTokens(), null);
+                try {
+                    provider.chatStream(messages, effective, b.credentials(), onDelta);
+                    return;
+                } catch (Exception e) {
+                    errors.add(b.providerType() + ": " + e.getMessage());
+                    log.warn("[LLM] 流式供应商 {} 失败，尝试下一个: {}", b.providerType(), e.getMessage());
+                }
             }
-            LlmChatOptions effective = options != null ? options
-                    : new LlmChatOptions(b.model(), cfg.getTemperature(), cfg.getMaxTokens(), null);
-            try {
-                provider.chatStream(messages, effective, b.credentials(), onDelta);
-                return;
-            } catch (Exception e) {
-                errors.add(b.providerType() + ": " + e.getMessage());
-                log.warn("[LLM] 流式供应商 {} 失败，尝试下一个: {}", b.providerType(), e.getMessage());
-            }
-        }
-        throw new IllegalStateException(errors.isEmpty()
-                ? "尚未配置可用的对话供应商" : String.join("；", errors));
+            throw new IllegalStateException(errors.isEmpty()
+                    ? "尚未配置可用的对话供应商" : String.join("；", errors));
+        });
     }
 
     // ──────────── 工具调用（Function Calling）────────────
@@ -219,67 +229,70 @@ public class LlmService {
     public String chatWithTools(List<LlmMessage> messages, List<LlmToolDefinition> tools,
                                 ToolExecutor executor) {
         LlmConfig cfg = configStore.get();
-        lastUsage.set(new long[]{0, 0}); // 本线程累计 usage（工具循环多轮累加）
-        List<String> errors = new ArrayList<>();
-        for (ChatBinding b : resolveChatBindings(cfg)) {
-            LlmProvider provider = registry.byId(b.providerType());
-            if (provider == null) {
-                errors.add(b.providerType() + " 供应商实现不存在");
-                continue;
-            }
-            LlmChatOptions options = new LlmChatOptions(b.model(), cfg.getTemperature(), cfg.getMaxTokens(), tools);
-            LlmCredentials creds = b.credentials();
+        limiter.configure(cfg.getMaxConcurrency());
+        return limiter.run(() -> {
+            lastUsage.set(new long[]{0, 0}); // 本线程累计 usage（工具循环多轮累加）
+            List<String> errors = new ArrayList<>();
+            for (ChatBinding b : resolveChatBindings(cfg)) {
+                LlmProvider provider = registry.byId(b.providerType());
+                if (provider == null) {
+                    errors.add(b.providerType() + " 供应商实现不存在");
+                    continue;
+                }
+                LlmChatOptions options = new LlmChatOptions(b.model(), cfg.getTemperature(), cfg.getMaxTokens(), tools);
+                LlmCredentials creds = b.credentials();
 
-            List<LlmMessage> msgs = new ArrayList<>(messages);
-            boolean failed = false;
-            for (int round = 0; round < MAX_TOOL_ROUNDS; round++) {
-                LlmChatResponse resp;
-                try {
-                    resp = provider.chatWithTools(msgs, tools, options, creds);
-                } catch (Exception e) {
-                    errors.add(b.providerType() + "(" + b.model() + "): " + e.getMessage());
-                    log.warn("[LLM] 工具供应商 {} 失败，尝试下一个: {}", b.providerType(), e.getMessage());
-                    failed = true;
-                    break;
-                }
-                // 累加真实 usage（prompt/completion）
-                long[] acc = lastUsage.get();
-                acc[0] += resp.promptTokens();
-                acc[1] += resp.completionTokens();
-                if (!resp.hasToolCalls()) {
-                    return resp.content() != null ? resp.content() : "";
-                }
-                // 组装 assistant 消息（编码 tool_calls）+ 逐条执行并回填 tool 结果
-                StringBuilder callsJson = new StringBuilder("[");
-                List<String> results = new ArrayList<>();
-                List<LlmToolCall> calls = resp.toolCalls();
-                for (int i = 0; i < calls.size(); i++) {
-                    LlmToolCall call = calls.get(i);
-                    if (i > 0) callsJson.append(",");
-                    callsJson.append("{\"id\":\"").append(jsonEscape(call.id()))
-                            .append("\",\"name\":\"").append(jsonEscape(call.name()))
-                            .append("\",\"arguments\":").append(call.arguments() == null ? "{}" : call.arguments())
-                            .append("}");
-                    String result;
+                List<LlmMessage> msgs = new ArrayList<>(messages);
+                boolean failed = false;
+                for (int round = 0; round < MAX_TOOL_ROUNDS; round++) {
+                    LlmChatResponse resp;
                     try {
-                        result = executor.execute(call.name(), call.arguments());
+                        resp = provider.chatWithTools(msgs, tools, options, creds);
                     } catch (Exception e) {
-                        result = "执行失败: " + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+                        errors.add(b.providerType() + "(" + b.model() + "): " + e.getMessage());
+                        log.warn("[LLM] 工具供应商 {} 失败，尝试下一个: {}", b.providerType(), e.getMessage());
+                        failed = true;
+                        break;
                     }
-                    results.add("{\"id\":\"" + jsonEscape(call.id()) + "\",\"result\":\"" + jsonEscape(result) + "\"}");
+                    // 累加真实 usage（prompt/completion）
+                    long[] acc = lastUsage.get();
+                    acc[0] += resp.promptTokens();
+                    acc[1] += resp.completionTokens();
+                    if (!resp.hasToolCalls()) {
+                        return resp.content() != null ? resp.content() : "";
+                    }
+                    // 组装 assistant 消息（编码 tool_calls）+ 逐条执行并回填 tool 结果
+                    StringBuilder callsJson = new StringBuilder("[");
+                    List<String> results = new ArrayList<>();
+                    List<LlmToolCall> calls = resp.toolCalls();
+                    for (int i = 0; i < calls.size(); i++) {
+                        LlmToolCall call = calls.get(i);
+                        if (i > 0) callsJson.append(",");
+                        callsJson.append("{\"id\":\"").append(jsonEscape(call.id()))
+                                .append("\",\"name\":\"").append(jsonEscape(call.name()))
+                                .append("\",\"arguments\":").append(call.arguments() == null ? "{}" : call.arguments())
+                                .append("}");
+                        String result;
+                        try {
+                            result = executor.execute(call.name(), call.arguments());
+                        } catch (Exception e) {
+                            result = "执行失败: " + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+                        }
+                        results.add("{\"id\":\"" + jsonEscape(call.id()) + "\",\"result\":\"" + jsonEscape(result) + "\"}");
+                    }
+                    callsJson.append("]");
+                    msgs.add(LlmMessage.assistant(LlmMessage.TOOL_CALLS_PREFIX + callsJson));
+                    for (String r : results) {
+                        msgs.add(LlmMessage.tool(LlmMessage.TOOL_RESULT_PREFIX + r));
+                    }
                 }
-                callsJson.append("]");
-                msgs.add(LlmMessage.assistant(LlmMessage.TOOL_CALLS_PREFIX + callsJson));
-                for (String r : results) {
-                    msgs.add(LlmMessage.tool(LlmMessage.TOOL_RESULT_PREFIX + r));
+                if (!failed) {
+                    return "（工具调用轮次过多，未完成）";
                 }
             }
-            if (!failed) {
-                return "（工具调用轮次过多，未完成）";
-            }
-        }
-        throw new IllegalStateException(errors.isEmpty()
-                ? "尚未配置可用的对话供应商" : String.join("；", errors));
+            throw new IllegalStateException(errors.isEmpty()
+                    ? "尚未配置可用的对话供应商" : String.join("；", errors));
+        });
     }
 
     /** 工具执行回调：调用方返回工具执行结果文本。 */

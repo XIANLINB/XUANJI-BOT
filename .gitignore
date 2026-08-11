@@ -21,6 +21,7 @@ xuanji-starter/src/main/resources/xuanji-robots.yml
 xuanji-console/node_modules/
 xuanji-console/dist/
 xuanji-console/dist.old-*/
+xuanji-console/frontend-dist*/
 
 # ===== 前端部署备份（starter 静态目录）=====
 xuanji-starter/src/main/resources/static/xuanji/console.old-*/

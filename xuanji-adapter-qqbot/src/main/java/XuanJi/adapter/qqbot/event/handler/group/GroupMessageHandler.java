@@ -12,6 +12,7 @@ import XuanJi.core.event.EventMapping;
 import XuanJi.adapter.qqbot.util.KeyboardBuilder;
 import XuanJi.adapter.qqbot.util.MarkdownBuilder;
 import XuanJi.core.command.CommandRegistry;
+import XuanJi.core.util.LogMasker;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.extern.slf4j.Slf4j;
@@ -93,13 +94,14 @@ public class GroupMessageHandler implements EventHandler {
         ObjectNode data = (ObjectNode) botEvent.platformData();
         String robotId = botEvent.bot() != null ? botEvent.bot().selfId() : "";
         String envType = botEvent.envType() != null ? botEvent.envType() : "PRODUCTION";
-        XuanJi.core.metrics.TraceContext.enter(data.has("_eventId") ? data.get("_eventId").asText() : "", String.valueOf(robotId));
         Timer.Sample handleSample = Timer.start();
         try {
             GroupMessageEvent event = objectMapper.readValue(data.toString(), GroupMessageEvent.class);
 
-            // 诊断：打印事件原始报文（含 _eventType / mentions / content 等，便于排查 @机器人 判定）
-            log.info("[收到群聊消息] 原始报文: {}", data);
+            // 诊断：原始报文仅在 DEBUG 输出且脱敏敏感字段，避免生产 INFO 泄露隐私/刷屏
+            if (log.isDebugEnabled()) {
+                log.debug("[收到群聊消息] 原始报文(脱敏): {}", LogMasker.maskJson(data.toString()));
+            }
 
             // 机器人自消息：author.bot=true（其他机器人/本机器人发的）。总是落库记录，处理与否按三级配置
             boolean isBotAuthor = event.getAuthor() != null && Boolean.TRUE.equals(event.getAuthor().getBot());
@@ -116,7 +118,8 @@ public class GroupMessageHandler implements EventHandler {
             }
 
             log.info("[收到群聊消息][群{}] sender={}, memberOpenId={}, content={}",
-                    groupOpenid, event.getAuthor().getUsername(), memberOpenid, content);
+                    groupOpenid, event.getAuthor().getUsername(),
+                    LogMasker.maskValue("member_openid", memberOpenid), content);
 
             // @机器人 诊断：原始事件类型 / mentions 数量与 is_you / isAtBot 判定结果
             log.info("[收到群聊消息] 事件类型={}, mentions={}, isAtBot={}, 原始content={}",
@@ -136,6 +139,13 @@ public class GroupMessageHandler implements EventHandler {
                 String senderName = event.getAuthor() != null ? event.getAuthor().getUsername() : null;
                 autoSyncGroup(appId, groupOpenid, memberOpenid, role(event), senderName);
             }
+
+            // 全链路消息日志：机器人名 / 群名 / 事件类型 / 是否@ / 正文（正文不脱敏，仅敏感 key 脱敏）
+            String botName = safeName(() -> (String) qqBotRepository.getBotInfo(appId).get("name"));
+            String groupName = safeName(() -> (String) qqBotRepository.getGroupInfo(appId, groupOpenid).get("group_name"));
+            log.info("[FLOW] 📨 收到群聊消息 botName={}, groupName={}, eventType={}, atBot={}, content={}, sender={}",
+                    botName, groupName, event.getEventType(), event.isAtBot(), content,
+                    LogMasker.maskValue("member_openid", memberOpenid));
 
             // 消息落库（per-bot 实例库 qqbot_message，控制台消息监控数据源）
             // QQ 不会把本机器人自己发的消息回调给自身（发送侧已落 OUT），
@@ -157,6 +167,7 @@ public class GroupMessageHandler implements EventHandler {
                 boolean ignore = configService.isIgnoreBotMessages(botKey, groupOpenid);
                 if (ignore) {
                     log.info("[群聊消息] 忽略其他机器人消息（只记录不处理）: sender={}, group={}", memberOpenid, groupOpenid);
+                    log.info("[FLOW] ✅ 处理结果 botName={}, groupName={}, result=IGNORED_BOT", botName, groupName);
                     // 事件落库（记录）
                     try {
                         qqBotRepository.insertEvent(appId, "GROUP_MESSAGE_CREATE", groupOpenid, memberOpenid,
@@ -193,10 +204,12 @@ public class GroupMessageHandler implements EventHandler {
                 if (cmdResult != null) {
                     // OUT 落库由 MessageSender 统一完成（方向=OUT、类型按发送方式、raw=出站载荷）
                     messageSender.sendGroupText(groupOpenid, cmdResult, msgId);
+                    log.info("[FLOW] ✅ 处理结果 botName={}, groupName={}, result=COMMAND_REPLIED", botName, groupName);
                     return;
                 }
                 // 命令未命中 → @OnMessage 全量监听器（非命令场景）
                 commandRegistry.dispatchOnMessage(true);
+                log.info("[FLOW] ✅ 处理结果 botName={}, groupName={}, result=ONMESSAGE_DISPATCHED", botName, groupName);
             } finally {
                 CommandRegistry.clearContext();
             }
@@ -207,7 +220,6 @@ public class GroupMessageHandler implements EventHandler {
             log.error("[群聊消息] 解析异常: robotId={}, error={}", robotId, e.getMessage(), e);
         } finally {
             handleSample.stop(handleTimer);
-            XuanJi.core.metrics.TraceContext.exit();
         }
     }
 
@@ -256,6 +268,16 @@ public class GroupMessageHandler implements EventHandler {
             return "markdown";
         }
         return "text";
+    }
+
+    /** 安全取名称：DB 查询异常或字段缺失时返回 "?"，不阻断主流程。 */
+    private static String safeName(java.util.function.Supplier<Object> s) {
+        try {
+            Object v = s.get();
+            return v != null ? v.toString() : "?";
+        } catch (Exception e) {
+            return "?";
+        }
     }
 
     /** 构建 SDK 事件（消息链直塞：QQ 报文经 QqMessageConverter 解析后直塞 chain/hasAttachments，媒体订阅可命中）。

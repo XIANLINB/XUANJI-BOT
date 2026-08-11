@@ -100,7 +100,7 @@ public class ImageUnderstandService {
     private List<VBinding> resolveVisionBindings(LlmConfig cfg) {
         List<VBinding> out = new ArrayList<>();
         for (XuanJi.llm.provider.CapabilityBindingResolver.CapBinding cb :
-                bindingResolver.resolve(cfg, cfg.getVisionBindings(),
+                bindingResolver.resolve(cfg, LlmCapability.IMAGE_UNDERSTAND, cfg.getVisionBindings(),
                         cfg.getVisionProviderId(), cfg.getVisionModelBinding(), "glm-4.6v-flash")) {
             LlmProvider bound = registry.byId(cb.providerType());
             if (bound == null) {

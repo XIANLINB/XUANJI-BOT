@@ -5,6 +5,59 @@
 // 注意：/actuator/** 是 Spring Boot Actuator 的固定路径，不在本前缀之下（见 getActuatorMetric）。
 const BASE = '/xuanji/api/v1'
 
+/**
+ * 后端统一错误响应体的常见字段（见 console-server 全局异常处理器）。
+ * 不同接口可能返回其中任意组合，解析时按优先级兜底。
+ */
+export interface ApiErrorBody {
+  code?: string
+  error?: string
+  message?: string
+  msg?: string
+  detail?: unknown
+}
+
+/**
+ * 结构化错误：非 2xx 响应统一抛此类型，调用方可用 `err instanceof ApiError`
+ * 精确捕获并读取 status / code / detail（如字段级校验错误），同时仍兼容 `err.message`。
+ */
+export class ApiError extends Error {
+  status: number
+  code?: string
+  detail?: unknown
+  constructor(status: number, message: string, code?: string, detail?: unknown) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.code = code
+    this.detail = detail
+  }
+}
+
+/**
+ * 将非 2xx 的 Response 解析为 ApiError：优先按 JSON 读取 { code, message/error/msg, detail }，
+ * 解析失败或纯文本时回退到文本；都拿不到则用 `HTTP <status>` 兜底。
+ */
+async function toApiError(res: Response): Promise<ApiError> {
+  let body: ApiErrorBody | null = null
+  const ct = res.headers.get('Content-Type') || ''
+  try {
+    if (ct.includes('application/json')) {
+      body = (await res.json()) as ApiErrorBody
+    } else {
+      const text = await res.text()
+      if (text) body = { message: text }
+    }
+  } catch {
+    // 响应体无法读取时，保留 null，下面走兜底
+  }
+  const message =
+    (body && (body.message || body.error || body.msg)) ||
+    (body ? JSON.stringify(body) : '') ||
+    `HTTP ${res.status}`
+  return new ApiError(res.status, message, body?.code, body?.detail)
+}
+
 export function qs(params?: Record<string, unknown>): string {
   if (!params) return ''
   const s = new URLSearchParams()
@@ -17,7 +70,7 @@ export function qs(params?: Record<string, unknown>): string {
 
 export async function get<T = any>(path: string, params?: Record<string, unknown>): Promise<T> {
   const res = await fetch(BASE + path + qs(params), { credentials: 'include' })
-  if (!res.ok) throw new Error('HTTP ' + res.status)
+  if (!res.ok) throw await toApiError(res)
   return res.json() as Promise<T>
 }
 
@@ -28,7 +81,7 @@ export async function post<T = any>(path: string, body?: unknown): Promise<T> {
     credentials: 'include',
     body: body !== undefined ? JSON.stringify(body) : undefined
   })
-  if (!res.ok) throw new Error('HTTP ' + res.status)
+  if (!res.ok) throw await toApiError(res)
   return res.json() as Promise<T>
 }
 
@@ -39,7 +92,7 @@ export async function put<T = any>(path: string, body?: unknown): Promise<T> {
     credentials: 'include',
     body: body !== undefined ? JSON.stringify(body) : undefined
   })
-  if (!res.ok) throw new Error('HTTP ' + res.status)
+  if (!res.ok) throw await toApiError(res)
   return res.json() as Promise<T>
 }
 
@@ -50,20 +103,20 @@ export async function upload<T = any>(path: string, form: FormData): Promise<T> 
     credentials: 'include',
     body: form
   })
-  if (!res.ok) throw new Error('HTTP ' + res.status)
+  if (!res.ok) throw await toApiError(res)
   return res.json() as Promise<T>
 }
 
 export async function del<T = any>(path: string): Promise<T> {
   const res = await fetch(BASE + path, { method: 'DELETE', credentials: 'include' })
-  if (!res.ok) throw new Error('HTTP ' + res.status)
+  if (!res.ok) throw await toApiError(res)
   return res.json() as Promise<T>
 }
 
 /** 纯文本响应（如日志接口）。 */
 export async function getText(path: string, params?: Record<string, unknown>): Promise<string> {
   const res = await fetch(BASE + path + qs(params), { credentials: 'include' })
-  if (!res.ok) throw new Error('HTTP ' + res.status)
+  if (!res.ok) throw await toApiError(res)
   return res.text()
 }
 
@@ -73,7 +126,7 @@ export async function getText(path: string, params?: Record<string, unknown>): P
  */
 export async function download(path: string, params?: Record<string, unknown>, fallbackName = 'download'): Promise<void> {
   const res = await fetch(BASE + path + qs(params), { credentials: 'include' })
-  if (!res.ok) throw new Error('HTTP ' + res.status)
+  if (!res.ok) throw await toApiError(res)
   const blob = await res.blob()
   const cd = res.headers.get('Content-Disposition') || ''
   const m = cd.match(/filename="?([^";]+)"?/)

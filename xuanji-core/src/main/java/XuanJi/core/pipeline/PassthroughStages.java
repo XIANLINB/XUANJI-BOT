@@ -226,13 +226,19 @@ class DedupStage implements PipelineStage {
     }
 
     private String dedupKey(XuanJiEvent e) {
+        // 优先用平台稳定 eventId（跨实例主键幂等，范围全局：同一事件 ID 在 TTL 内只处理一次）
         if (e.eventId() != null && !e.eventId().isEmpty()) return e.eventId();
-        // 退化键：平台 + 原始类型 + 原生数据字符串指纹（确定性）
+
+        // 退化键（平台未给稳定 eventId）：用「发送者 + 原始类型 + 消息内容」构造确定性内容键，
+        // 刻意排除时间戳/序号等易变字段，使重连/重推的同一消息仍能被去重（跨会话/跨页重复收口）。
+        // 旧实现用整段 platformData.hashCode()，易变字段会导致同一消息每次哈希不同 → 漏去重。
         try {
-            String botId = e.bot() != null ? e.bot().selfId() : "?";
+            String scopeId = e.group() != null ? "g:" + e.group().id()
+                            : (e.sender() != null ? "u:" + e.sender().id() : "?");
             String raw = e.rawEventType() != null ? e.rawEventType() : "?";
-            String payload = e.platformData() != null ? e.platformData().toString() : "";
-            return botId + ":" + raw + ":" + payload.hashCode();
+            String content = (e.message() != null && e.message().plainText() != null) ? e.message().plainText() : "";
+            String contentKey = scopeId + ":" + raw + ":" + content;
+            return "c:" + Integer.toHexString(contentKey.hashCode());
         } catch (Exception ex) {
             return null;
         }

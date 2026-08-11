@@ -111,10 +111,6 @@ public class LlmChatStage implements PipelineStage {
                 log.info("[LLM] 跳过群聊AI: 未@机器人(mentionRequired=true) group={} atBot={}", groupId, atBot);
                 return Result.CONTINUE;
             }
-            if (guard.isCooledDown(botKey, groupId, cfg.getCooldownSeconds())) {
-                log.info("[LLM] 跳过群聊AI: 冷却中 group={}", groupId);
-                return Result.CONTINUE;
-            }
             if (!guard.withinTokenBudget(botKey, cfg.getDailyTokenLimit())) {
                 log.info("[LLM] 跳过群聊AI: 今日token超限(bot级) group={}", groupId);
                 return Result.CONTINUE;
@@ -136,10 +132,6 @@ public class LlmChatStage implements PipelineStage {
             }
             if (!LlmAvailabilityImpl.c2cAllowed(cfg, userId)) {
                 log.info("[LLM] 跳过单聊AI: 用户不在白名单 user={}", userId);
-                return Result.CONTINUE;
-            }
-            if (guard.isCooledDown(botKey, userId, cfg.getC2cCooldownSeconds())) {
-                log.info("[LLM] 跳过单聊AI: 冷却中 user={}", userId);
                 return Result.CONTINUE;
             }
             if (!guard.withinTokenBudget(botKey, cfg.getC2cDailyTokenLimit())) {
@@ -171,6 +163,14 @@ public class LlmChatStage implements PipelineStage {
             return Result.CONTINUE;
         }
 
+        // 冷却占用（原子）：在真正决定回复的线程内一次性「检查+标记」，杜绝冷却窗口内并发消息
+        // 重复触发 LLM（原「Pipeline 线程检查冷却 → REPLY 线程 markReplied」存在竞态）。
+        int cooldown = isGroup ? cfg.getCooldownSeconds() : cfg.getC2cCooldownSeconds();
+        if (!guard.tryGrantReply(botKey, dimKey, cooldown)) {
+            log.info("[LLM] 跳过AI: 冷却中 bot={}, dim={}", botKey, dimKey);
+            return Result.CONTINUE;
+        }
+
         // 工具确认回复优先：用户回复确认词且有待确认工具 → 直接执行并回复（不调 LLM）
         if (userId != null && XuanJi.llm.tool.ToolConfirmService.isConfirmText(text)
                 && confirmService.hasPending(botKey, dimKey, userId)) {
@@ -180,7 +180,6 @@ public class LlmChatStage implements PipelineStage {
                 try {
                     String result = confirmService.tryConfirm(botKey, dimKey, userId);
                     if (result != null) {
-                        guard.markReplied(botKey, dimKey);
                         guard.recordTokens(botKey, dimKey, result);
                         for (LlmReplySink sink : replySinks) {
                             for (String seg : splitText(result)) {
@@ -196,7 +195,7 @@ public class LlmChatStage implements PipelineStage {
         }
 
         // 异步调 LLM 并发送（保存 event 快照，跨线程安全：XuanJiEvent 为不可变 record）
-        log.info("[LLM] 触发AI: {} bot={}, dim={}, text={}",
+        log.info("[FLOW] 🤖 触发AI回复 {} bot={}, dim={}, text={}",
                 isGroup ? "群聊" : "单聊", botKey, dimKey, text);
         REPLY_EXECUTOR.execute(() -> {
             try {
@@ -214,7 +213,6 @@ public class LlmChatStage implements PipelineStage {
                     log.debug("[LLM] 回复为空，跳过: bot={}", botKey);
                     return;
                 }
-                guard.markReplied(botKey, dimKey);
                 // 用量统计：优先真实 usage（LLM 响应 usage.prompt/completion），未知则回退字符估算
                 long[] u = agentService.lastUsage();
                 if (u != null && (u[0] > 0 || u[1] > 0)) {

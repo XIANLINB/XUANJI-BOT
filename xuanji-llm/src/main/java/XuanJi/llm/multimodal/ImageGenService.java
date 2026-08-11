@@ -1,5 +1,6 @@
 package XuanJi.llm.multimodal;
 
+import XuanJi.api.llm.LlmCapability;
 import XuanJi.api.llm.LlmChatOptions;
 import XuanJi.api.llm.LlmCredentials;
 import XuanJi.api.llm.LlmProvider;
@@ -72,7 +73,7 @@ public class ImageGenService {
     private List<GBinding> resolveImageBindings(LlmConfig cfg) {
         List<GBinding> out = new ArrayList<>();
         for (XuanJi.llm.provider.CapabilityBindingResolver.CapBinding cb :
-                bindingResolver.resolve(cfg, cfg.getImageBindings(),
+                bindingResolver.resolve(cfg, LlmCapability.IMAGE_GEN, cfg.getImageBindings(),
                         cfg.getImageProviderId(), cfg.getImageModelBinding(), "cogview-3-flash")) {
             LlmProvider bound = registry.byId(cb.providerType());
             if (bound != null) {

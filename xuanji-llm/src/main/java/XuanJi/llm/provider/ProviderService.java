@@ -1,5 +1,6 @@
 package XuanJi.llm.provider;
 
+import XuanJi.api.llm.LlmCapability;
 import XuanJi.api.llm.LlmCredentials;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
@@ -14,6 +15,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 供应商 / 模型管理 —— 多供应商（DeepSeek / 智谱 / 小米 / Fish…）+ 多模型能力管理。
@@ -46,8 +48,8 @@ public class ProviderService {
                 m.put("id", rs.getLong("id"));
                 m.put("name", rs.getString("name"));
                 m.put("providerType", rs.getString("provider_type"));
-                m.put("baseUrl", rs.getString("base_url"));
-                m.put("apiKey", maskKey(rs.getString("api_key")));
+                m.put("baseUrl", LlmCredentialCipher.decrypt(rs.getString("base_url")));
+                m.put("apiKey", maskKey(LlmCredentialCipher.decrypt(rs.getString("api_key"))));
                 m.put("status", rs.getInt("status"));
                 m.put("modelCount", rs.getInt("model_count"));
                 return m;
@@ -62,8 +64,8 @@ public class ProviderService {
                 m.put("id", rs.getLong("id"));
                 m.put("name", rs.getString("name"));
                 m.put("providerType", rs.getString("provider_type"));
-                m.put("baseUrl", rs.getString("base_url"));
-                m.put("apiKey", rs.getString("api_key"));
+                m.put("baseUrl", LlmCredentialCipher.decrypt(rs.getString("base_url")));
+                m.put("apiKey", LlmCredentialCipher.decrypt(rs.getString("api_key")));
                 m.put("status", rs.getInt("status"));
                 return m;
             }, id).stream().findFirst().orElse(null);
@@ -71,17 +73,19 @@ public class ProviderService {
 
     public long saveProvider(Long id, String name, String providerType, String baseUrl, String apiKey, Integer status) {
         int st = status == null ? 1 : status;
+        String encBaseUrl = LlmCredentialCipher.encrypt(baseUrl);
+        String encApiKey = LlmCredentialCipher.encrypt(apiKey);
         if (id != null && id > 0) {
             jdbc.update("""
                 UPDATE xuanji_llm_provider SET name=?, provider_type=?, base_url=?, api_key=?, status=? WHERE id=?
-                """, name, providerType, baseUrl, apiKey, st, id);
+                """, name, providerType, encBaseUrl, encApiKey, st, id);
             log.info("[PROVIDER] 供应商已更新: id={}, name={}", id, name);
             return id;
         }
         jdbc.update("""
             INSERT INTO xuanji_llm_provider (name, provider_type, base_url, api_key, status)
             VALUES (?, ?, ?, ?, ?)
-            """, name, providerType, baseUrl, apiKey, st);
+            """, name, providerType, encBaseUrl, encApiKey, st);
         Long newId = jdbc.queryForObject("SELECT MAX(id) FROM xuanji_llm_provider", Long.class);
         log.info("[PROVIDER] 供应商已保存: id={}, name={}, type={}", newId, name, providerType);
         return newId == null ? 0 : newId;
@@ -107,12 +111,12 @@ public class ProviderService {
         return new LlmCredentials(String.valueOf(p.get("baseUrl")), key);
     }
 
-    /** 该供应商所有启用的 API Key（多 key 轮询容灾用）。 */
+    /** 该供应商所有启用的 API Key（多 key 轮询容灾用）。返回已解密的明文 key。 */
     public List<String> enabledKeys(long providerId) {
         return jdbc.query("""
             SELECT api_key FROM xuanji_llm_api_key
             WHERE provider_id = ? AND enabled = 1 ORDER BY id
-            """, (rs, i) -> rs.getString("api_key"), providerId);
+            """, (rs, i) -> LlmCredentialCipher.decrypt(rs.getString("api_key")), providerId);
     }
 
     private String firstEnabledKey(long providerId) {
@@ -130,7 +134,7 @@ public class ProviderService {
                 Map<String, Object> m = new LinkedHashMap<>();
                 m.put("id", rs.getLong("id"));
                 m.put("providerId", rs.getLong("provider_id"));
-                m.put("apiKey", maskKey(rs.getString("api_key")));
+                m.put("apiKey", maskKey(LlmCredentialCipher.decrypt(rs.getString("api_key"))));
                 m.put("remark", rs.getString("remark"));
                 m.put("enabled", rs.getInt("enabled"));
                 return m;
@@ -140,7 +144,7 @@ public class ProviderService {
     public long saveKey(long providerId, String apiKey, String remark) {
         jdbc.update("""
             INSERT INTO xuanji_llm_api_key (provider_id, api_key, remark, enabled) VALUES (?, ?, ?, 1)
-            """, providerId, apiKey, remark);
+            """, providerId, LlmCredentialCipher.encrypt(apiKey), remark);
         Long id = jdbc.queryForObject("SELECT MAX(id) FROM xuanji_llm_api_key", Long.class);
         log.info("[PROVIDER] 供应商 Key 已添加: provider={}, remark={}", providerId, remark);
         return id == null ? 0 : id;
@@ -183,11 +187,13 @@ public class ProviderService {
 
     // ════════════ 能力绑定解析 ════════════
 
-    /** 按能力绑定（providerId + 期望能力）查模型名；未绑定/无该能力模型返回 null。 */
-    public String resolveModel(long providerId, String capability) {
+    /** 按能力绑定（providerId + 期望能力）查模型名；未绑定/无该能力模型返回 null。
+     *  以 {@link LlmCapability} 枚举为唯一匹配基准（替代原先的字符串子串 contains，
+     *  旧实现会把 "STT" 误命中 "TTS" 等）。 */
+    public String resolveModel(long providerId, LlmCapability capability) {
         List<Map<String, Object>> models = listModels(providerId);
         for (Map<String, Object> m : models) {
-            String caps = String.valueOf(m.get("capabilities"));
+            Set<LlmCapability> caps = LlmCapability.parse(String.valueOf(m.get("capabilities")));
             if (caps.contains(capability)) {
                 return String.valueOf(m.get("modelName"));
             }
@@ -248,9 +254,7 @@ public class ProviderService {
     }
 
     private static JdkClientHttpRequestFactory jdkFactory() {
-        HttpClient http = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .build();
+        HttpClient http = LlmHttpClient.shared();
         JdkClientHttpRequestFactory f = new JdkClientHttpRequestFactory(http);
         f.setReadTimeout(Duration.ofSeconds(15));
         return f;

@@ -4,6 +4,7 @@ import XuanJi.api.event.XuanJiEvent;
 import XuanJi.core.bot.BotContextManager;
 import XuanJi.core.bot.DefaultBotContextManager;
 import XuanJi.core.storage.MessageEventRecorder;
+import XuanJi.core.util.LogMasker;
 import tools.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
@@ -66,8 +67,10 @@ public class EventDispatcher {
         botContext.setCurrentBot(robotId, envType);
 
         try {
-            // 所有事件统一打印原始报文（便于核对变量来源/排查）
-            log.info("[事件] 原始报文: type={}, robotId={}, payload={}", eventType, robotId, data.toString());
+            // 诊断日志：原始报文仅在 DEBUG 输出且脱敏敏感字段，避免生产 INFO 泄露隐私/刷屏
+            if (log.isDebugEnabled()) {
+                log.debug("[事件] 原始报文(脱敏): type={}, robotId={}, payload={}", eventType, robotId, LogMasker.maskJson(data.toString()));
+            }
             EventHandler handler = handlerMap.get(eventType);
             if (handler != null) {
                 log.info("[事件分发] 找到处理器: type={}, handler={}", eventType, handler.getClass().getSimpleName());

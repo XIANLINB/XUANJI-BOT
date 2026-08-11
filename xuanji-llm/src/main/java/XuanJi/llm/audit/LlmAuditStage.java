@@ -41,9 +41,11 @@ public class LlmAuditStage implements PipelineStage {
         String userId = event.sender() != null ? event.sender().id() : null;
         boolean pass = auditService.check(botKey, groupId, userId, text);
         if (!pass) {
+            log.info("[FLOW] 🔍 AI审核 group={} result=BLOCK", groupId);
             log.info("[AUDIT] 拦截违规消息: group={}, user={}", groupId, userId);
             return Result.ABORT;
         }
+        log.info("[FLOW] 🔍 AI审核 group={} result=PASS", groupId);
         return chain.proceed();
     }
 }

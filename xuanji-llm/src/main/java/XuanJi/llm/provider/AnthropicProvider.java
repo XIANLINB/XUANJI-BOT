@@ -353,9 +353,7 @@ public class AnthropicProvider implements LlmProvider {
     }
 
     private JdkClientHttpRequestFactory jdkFactory() {
-        java.net.http.HttpClient http = java.net.http.HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(5))
-                .build();
+        java.net.http.HttpClient http = LlmHttpClient.shared();
         JdkClientHttpRequestFactory f = new JdkClientHttpRequestFactory(http);
         f.setReadTimeout(Duration.ofSeconds(30));
         return f;

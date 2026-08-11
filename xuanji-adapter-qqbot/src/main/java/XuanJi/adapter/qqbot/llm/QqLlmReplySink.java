@@ -41,7 +41,8 @@ public class QqLlmReplySink implements LlmReplySink {
             ScopedValue.where(BotContext.currentEvent, event).run(() -> {
                 XuanJiSendReceipt r = xuanJiSender.reply(XuanJiMessage.text(text));
                 if (r.success()) {
-                    log.info("[LLM] 回复已发送: {}ms", r.elapsedMs());
+                    log.info("[FLOW] 💬 回复已发出 channel={} cost={}ms eventId={}",
+                            event.group() != null ? "group" : "c2c", r.elapsedMs(), event.eventId());
                 } else {
                     log.warn("[LLM] 回复发送失败: {}", r.errorMessage());
                 }

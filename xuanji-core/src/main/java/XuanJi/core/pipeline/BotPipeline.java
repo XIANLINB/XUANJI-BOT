@@ -3,6 +3,7 @@ package XuanJi.core.pipeline;
 import XuanJi.api.event.XuanJiEvent;
 import XuanJi.api.pipeline.PipelineStage;
 import XuanJi.core.config.ConfigService;
+import XuanJi.core.metrics.TraceContext;
 import XuanJi.core.concurrent.ThreadPoolRegistry;
 import XuanJi.core.metric.QpsMeter;
 import lombok.extern.slf4j.Slf4j;
@@ -82,11 +83,19 @@ public class BotPipeline implements DisposableBean {
         QpsMeter.hit();
         ExecutorService pool = poolFor(event);
         pool.execute(() -> {
+            // 进入即开启全链路 traceId（MDC），贯穿洋葱模型 / 分发 / 处理器 / AI 回复，
+            // 使得同一条消息的所有日志可用同一 traceId 串联（不再仅限 handler 内部）。
+            TraceContext.enter(event.eventId(), event.bot() != null ? event.bot().selfId() : "");
             try {
+                log.info("[FLOW] ▶ 事件入口 eventId={}, rawType={}, selfId={}, env={}",
+                        event.eventId(), event.rawEventType(),
+                        event.bot() != null ? event.bot().selfId() : "?", event.envType());
                 doProceed(event, 0);
             } catch (Throwable t) {
                 log.error("[Pipeline] 事件处理未捕获异常: bot={}, type={}, err={}",
                         event.bot() != null ? event.bot().selfId() : "?", event.rawEventType(), t.getMessage(), t);
+            } finally {
+                TraceContext.exit();
             }
         });
     }
@@ -131,6 +140,7 @@ public class BotPipeline implements DisposableBean {
         // 阶段自身耗时 = handle 开始 → 调 next（或 handle 返回）之间。
         long start = System.nanoTime();
         AtomicLong nextBegin = new AtomicLong(-1);
+        log.info("[FLOW] 🧅 洋葱·进入 stage={} order={}", stage.name(), stage.order());
         try {
             PipelineStage.Result result = stage.handle(event, () -> {
                 nextBegin.set(System.nanoTime());
@@ -143,6 +153,7 @@ public class BotPipeline implements DisposableBean {
                 log.warn("[Pipeline] 慢阶段: {} ({}ms)", stage.name(), elapsedMs);
                 slowStageCounts.computeIfAbsent(stage.name(), k -> new AtomicInteger()).incrementAndGet();
             }
+            log.info("[FLOW] 🧅 洋葱·离开 stage={} order={} result={}", stage.name(), stage.order(), result);
             if (result == PipelineStage.Result.ABORT) {
                 log.debug("[Pipeline] {} 中断流水线", stage.name());
             }

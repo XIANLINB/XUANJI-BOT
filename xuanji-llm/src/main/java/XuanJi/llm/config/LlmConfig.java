@@ -144,6 +144,11 @@ public class LlmConfig {
     /** 主动时间段 HH:mm 结束 */
     private String proactiveTimeEnd = "22:00";
 
+    // ──────────── 下游调用护栏（背压，#405） ────────────
+    /** 同时进行的 LLM 出站调用并发上限（背压，防突发打爆供应商 API / 本地线程堆积 OOM）；
+     *  默认 64 宽松值，正常流量无感；≤0 视为未配置，回退默认。 */
+    private int maxConcurrency = 64;
+
     // ──────────── 多模态行为参数（凭据已迁至「供应商管理」+「能力选择」绑定） ────────────
     /** TTS 默认音色（人格未指定音色时用）：冰糖/茉莉/苏打/白桦/Mia/Chloe/Milo/Dean/mimo_default */
     private String ttsVoice = "冰糖";

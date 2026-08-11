@@ -120,6 +120,9 @@ public class XuanJiPluginManager extends DefaultPluginManager {
             if (name.startsWith("copy-")) name = name.substring("copy-".length());
             Path copy = workDir.resolve("copy-" + name);
             try {
+                // 先删除旧副本（best-effort）。上一次热重载若未释放文件锁，delete 会失败但无妨，
+                // 关键修复在调用方 reloadJar 会先 close 旧 ClassLoader 释放锁，此处即可成功覆盖。
+                try { java.nio.file.Files.deleteIfExists(copy); } catch (Exception ignored) { /* 锁未释放时跳过，下方 copy 会兜底报错 */ }
                 java.nio.file.Files.copy(pluginPath, copy, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             } catch (Exception e) {
                 log.warn("[Plugin] 复制插件到工作目录失败，回退直载原 jar: {}", e.getMessage());
@@ -332,7 +335,7 @@ public class XuanJiPluginManager extends DefaultPluginManager {
     public synchronized boolean reloadJar(String id) {
         PluginWrapper old = getPlugin(id);
         if (old == null) return false;
-        Path jarPath = old.getPluginPath();
+        Path jarPath = resolveReloadJar(old);
         XuanJiPluginState prev = states.getOrDefault(id, XuanJiPluginState.LOADED);
         boolean wasEnabled = prev == XuanJiPluginState.ENABLED;
 
@@ -347,6 +350,9 @@ public class XuanJiPluginManager extends DefaultPluginManager {
         // pf4j 原生卸载：停插件 + 从 plugins map 移除路径条目（stopPlugin 不移除，同路径二次加载会报 already loaded）；
         // 不走本类覆写的 unloadPlugin（那会删 stateStore 持久态）
         super.unloadPlugin(id);
+        // 关键修复：PF4J 卸载不会关闭插件 URLClassLoader，导致 .work/copy-*.jar 在 Windows 下持续被占用，
+        // 下次热加载复制失败并回退直载原 jar（从而锁死原 jar，无法再覆盖更新）。此处主动关闭 ClassLoader 释放文件锁。
+        closePluginClassLoader(old);
         log.info("[Plugin] 热加载: 已卸载旧实例 {}", id);
 
         // 2. 重新加载新 jar
@@ -370,6 +376,27 @@ public class XuanJiPluginManager extends DefaultPluginManager {
         log.info("[Plugin] 热加载完成: {} v{} (state={})",
                 id, w.getDescriptor().getVersion(), states.get(id));
         return true;
+    }
+
+    /** 解析热加载应使用的「原始」jar 路径：复制式加载后插件路径可能是 .work/copy-* 副本，
+     *  反推回 plugins/&lt;原名&gt;.jar，确保热加载加载的是用户更新后的内容，而非旧副本。 */
+    private Path resolveReloadJar(PluginWrapper old) {
+        Path p = old.getPluginPath();
+        String fn = p.getFileName().toString();
+        if (fn.startsWith("copy-")) {
+            Path candidate = getPluginsRoot().resolve(fn.substring("copy-".length()));
+            if (java.nio.file.Files.isRegularFile(candidate)) return candidate;
+        }
+        return p;
+    }
+
+    /** 关闭插件 ClassLoader（释放底层 jar 文件句柄）。Windows 下 PF4J 卸载不关闭 URLClassLoader，
+     *  会令 .work/copy-*.jar 持续被占用，下次热加载复制失败并回退直载原 jar（锁死原 jar）。 */
+    private void closePluginClassLoader(PluginWrapper wrapper) {
+        ClassLoader cl = wrapper.getPluginClassLoader();
+        if (cl instanceof java.io.Closeable c) {
+            try { c.close(); } catch (Exception e) { log.debug("[Plugin] 关闭插件 ClassLoader 失败(可忽略): {}", e.getMessage()); }
+        }
     }
 
     private void registerCommands(String id) {
@@ -467,13 +494,16 @@ public class XuanJiPluginManager extends DefaultPluginManager {
     /** 卸载指定插件（关闭其 Spring 子容器 + 反注册指令 + 清理状态） */
     @Override
     public boolean unloadPlugin(String pluginId) {
+        PluginWrapper w = getPlugin(pluginId);
         AnnotationConfigApplicationContext ctx = pluginContexts.remove(pluginId);
         if (ctx != null) ctx.close();
         unregisterCommands(pluginId);
         pluginCommands.remove(pluginId);
         states.remove(pluginId);
         stateStore.delete(pluginId);
-        return stopPlugin(pluginId) == PluginState.STOPPED;
+        boolean stopped = stopPlugin(pluginId) == PluginState.STOPPED;
+        if (w != null) closePluginClassLoader(w);
+        return stopped;
     }
 
     /** 停止所有插件并关闭容器 */
