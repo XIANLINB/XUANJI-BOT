@@ -18,9 +18,13 @@ import io.micrometer.core.instrument.Timer;
 import lombok.extern.slf4j.Slf4j;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
 import XuanJi.api.json.Json;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 群聊消息事件处理器
@@ -296,9 +300,25 @@ public class GroupMessageHandler implements EventHandler {
                 .senderName(raw.getAuthor() != null ? raw.getAuthor().getUsername() : "?")
                 .senderRole(raw.getAuthor() != null ? raw.getAuthor().getMemberRole() : null)
                 .atBot(raw.isAtBot())
+                .mentionedUserIds(extractMentions(data))
                 .chain(chain)
                 .hasAttachments(chain.hasMedia())
                 .platform("qq")
                 .build();
+    }
+
+    /** 从 QQ 群消息报文提取被 @ 的成员 openid 列表（mentions[].member_openid），供插件 @ 命令使用。 */
+    private static List<String> extractMentions(ObjectNode data) {
+        List<String> out = new ArrayList<>();
+        try {
+            JsonNode mentions = data != null ? data.get("mentions") : null;
+            if (mentions != null && mentions.isArray()) {
+                for (JsonNode mn : mentions) {
+                    String mid = mn.path("member_openid").asText("");
+                    if (!mid.isBlank() && !out.contains(mid)) out.add(mid);
+                }
+            }
+        } catch (Exception ignored) { /* 报文异常忽略 */ }
+        return out;
     }
 }
