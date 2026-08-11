@@ -18,7 +18,6 @@ import io.micrometer.core.instrument.Timer;
 import lombok.extern.slf4j.Slf4j;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
-import tools.jackson.databind.JsonNode;
 import XuanJi.api.json.Json;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -300,25 +299,24 @@ public class GroupMessageHandler implements EventHandler {
                 .senderName(raw.getAuthor() != null ? raw.getAuthor().getUsername() : "?")
                 .senderRole(raw.getAuthor() != null ? raw.getAuthor().getMemberRole() : null)
                 .atBot(raw.isAtBot())
-                .mentionedUserIds(extractMentions(data))
+                .mentionedUsers(toSdkMentions(raw.getMentions()))
                 .chain(chain)
                 .hasAttachments(chain.hasMedia())
                 .platform("qq")
                 .build();
     }
 
-    /** 从 QQ 群消息报文提取被 @ 的成员 openid 列表（mentions[].member_openid），供插件 @ 命令使用。 */
-    private static List<String> extractMentions(ObjectNode data) {
-        List<String> out = new ArrayList<>();
-        try {
-            JsonNode mentions = data != null ? data.get("mentions") : null;
-            if (mentions != null && mentions.isArray()) {
-                for (JsonNode mn : mentions) {
-                    String mid = mn.path("member_openid").asText("");
-                    if (!mid.isBlank() && !out.contains(mid)) out.add(mid);
-                }
+    /** 适配器已解析的 mentions[]（含 bot 字段）→ SDK Mention 列表，供插件 @ 命令按消息字段判断。 */
+    private static List<XuanJi.sdk.event.GroupMessageEvent.Mention> toSdkMentions(
+            List<XuanJi.adapter.qqbot.dto.GroupMessageEvent.Mention> mentions) {
+        List<XuanJi.sdk.event.GroupMessageEvent.Mention> out = new ArrayList<>();
+        if (mentions == null) return out;
+        for (var mn : mentions) {
+            String uid = mn.getMemberOpenid() != null ? mn.getMemberOpenid() : mn.getId();
+            if (uid != null && !uid.isBlank()) {
+                out.add(new XuanJi.sdk.event.GroupMessageEvent.Mention(uid, Boolean.TRUE.equals(mn.getBot())));
             }
-        } catch (Exception ignored) { /* 报文异常忽略 */ }
+        }
         return out;
     }
 }

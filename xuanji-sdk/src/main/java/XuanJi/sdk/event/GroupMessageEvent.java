@@ -8,6 +8,10 @@ import java.util.*;
  * 群聊消息事件 — SDK 封装，平台无关。
  */
 public class GroupMessageEvent implements MessageEvent {
+
+    /** 被 @ 的群成员（含是否机器人）。 */
+    public record Mention(String userId, boolean bot) {}
+
     private final String messageId;
     private final String content;
     private final String plainText;
@@ -17,7 +21,7 @@ public class GroupMessageEvent implements MessageEvent {
     private final String senderName;
     private final String senderRole;
     private final boolean atBot;
-    private final List<String> mentionedUserIds;
+    private final List<Mention> mentionedUsers;
     private final String platform;
     private final XuanJiMessage chain;
     private final boolean hasAttachments;
@@ -36,7 +40,7 @@ public class GroupMessageEvent implements MessageEvent {
         this.senderName = b.senderName;
         this.senderRole = b.senderRole;
         this.atBot = b.atBot;
-        this.mentionedUserIds = b.mentionedUserIds != null ? b.mentionedUserIds : List.of();
+        this.mentionedUsers = b.mentionedUsers != null ? b.mentionedUsers : List.of();
         this.platform = b.platform;
         this.chain = b.chain;
         this.hasAttachments = b.hasAttachments;
@@ -53,7 +57,12 @@ public class GroupMessageEvent implements MessageEvent {
     public String getSenderName() { return senderName; }
     public String getSenderRole() { return senderRole; }
     public boolean isAtBot() { return atBot; }
-    public List<String> getMentionedUserIds() { return mentionedUserIds; }
+    /** 被 @ 的群成员列表（含是否机器人，供命令按消息字段判断）。 */
+    public List<Mention> getMentionedUsers() { return mentionedUsers; }
+    /** 被 @ 的群成员 openid 列表（兼容简写）。 */
+    public List<String> getMentionedUserIds() {
+        return mentionedUsers.stream().map(Mention::userId).toList();
+    }
     public String getPlatform() { return platform; }
     /** 已解析消息链（OneBot 直塞；QQ 侧为 null 时调用方自行解析）。 */
     public XuanJiMessage chain() { return chain; }
@@ -74,7 +83,7 @@ public class GroupMessageEvent implements MessageEvent {
         String messageId, content, plainText, groupId, senderId, senderName, senderRole, platform;
         int messageType;
         boolean atBot;
-        List<String> mentionedUserIds;
+        List<Mention> mentionedUsers;
         XuanJiMessage chain;
         boolean hasAttachments;
         String eventType, botId;
@@ -88,7 +97,8 @@ public class GroupMessageEvent implements MessageEvent {
         public Builder senderName(String v) { senderName = v; return this; }
         public Builder senderRole(String v) { senderRole = v; return this; }
         public Builder atBot(boolean v) { atBot = v; return this; }
-        public Builder mentionedUserIds(List<String> v) { mentionedUserIds = v; return this; }
+        /** 被 @ 的群成员（含是否机器人）。 */
+        public Builder mentionedUsers(List<Mention> v) { mentionedUsers = v; return this; }
         public Builder platform(String v) { platform = v; return this; }
         /** 直塞已解析消息链（避免 SDK 事件无 converter/rawJson 时 getChain 恒空）。 */
         public Builder chain(XuanJiMessage v) { chain = v; return this; }

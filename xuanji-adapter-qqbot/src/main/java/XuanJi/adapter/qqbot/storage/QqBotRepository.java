@@ -417,20 +417,6 @@ public class QqBotRepository {
         }
     }
 
-    /** 该 openid 是否是任意机器人在该群内的机器人 openid（防"机器人禁言其他机器人"）。 */
-    public boolean isAnyRobotOpenid(String groupId, String memberOpenid) {
-        if (isBlank(groupId) || isBlank(memberOpenid)) return false;
-        for (String appId : listInstanceIds()) {
-            try {
-                Integer c = jdbc(appId).queryForObject(
-                        "SELECT COUNT(*) FROM qqbot_group_robot WHERE group_id=? AND robot_openid=? AND is_deleted=0",
-                        Integer.class, groupId, memberOpenid);
-                if (c != null && c > 0) return true;
-            } catch (Exception ignored) { /* 单库查询失败忽略，继续其它实例 */ }
-        }
-        return false;
-    }
-
     /** 全局待同步队列：所有 (bot, group) 对按 updated_at 升序（最久未同步/未同步过的排最前）。 */
     public List<Map<String, Object>> listGroupRobotPairs() {
         List<Map<String, Object>> out = new ArrayList<>();

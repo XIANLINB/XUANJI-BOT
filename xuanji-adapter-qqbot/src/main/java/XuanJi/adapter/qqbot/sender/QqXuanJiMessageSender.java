@@ -440,9 +440,9 @@ public class QqXuanJiMessageSender implements XuanJiMessageSender, XuanJi.api.ad
      * 禁言前置校验（失败信息返回给框架开发者，不发送到 QQ 群）：
      * <ol>
      *   <li>机器人必须为群管理（读 qqbot_group_robot.member_role）</li>
-     *   <li>机器人不能禁言其他机器人（读各实例库 qqbot_group_robot.robot_openid）</li>
      *   <li>机器人不能禁言群主/管理员（读 qqbot_group_member.role）</li>
      * </ol>
+     * 「不能禁言其他机器人」由命令调用方按<b>消息事件</b>的 bot 字段（mentions[].bot）判断。
      * 通过返回 null；失败返回 {@code {ok:false, error:"原因"}}。
      */
     private Map<String, Object> validateMute(String groupOpenid, String memberOpenid) {
@@ -460,11 +460,7 @@ public class QqXuanJiMessageSender implements XuanJiMessageSender, XuanJi.api.ad
             return Map.of("ok", false, "error",
                     "禁言被拒：机器人必须为群管理才能禁言（当前角色=" + botRole + "）");
         }
-        // ② 不能禁言其他机器人
-        if (qqBotRepository.isAnyRobotOpenid(groupOpenid, memberOpenid)) {
-            return Map.of("ok", false, "error", "禁言被拒：机器人不能禁言其他机器人");
-        }
-        // ③ 不能禁言群主/管理员（本地角色未同步时放行，交由平台拒绝兜底）
+        // ② 不能禁言群主/管理员（本地角色未同步时放行，交由平台拒绝兜底）
         String memberRole = qqBotRepository.getGroupMemberRole(robotId, groupOpenid, memberOpenid);
         if ("owner".equalsIgnoreCase(memberRole) || "admin".equalsIgnoreCase(memberRole)) {
             return Map.of("ok", false, "error", "禁言被拒：不能禁言群主或管理员");
