@@ -102,7 +102,7 @@ public class TestPlugin extends XuanJiPluginBase {
             // @Arg 解析的分钟数（缺省 10，上限 7 天）；秒级换算由 qqbot 适配器内部完成
             int m = minutes == null ? 10 : Math.min(Math.max(minutes, 0), 10080);
             // 批量禁言：成功/失败原因由框架与适配器提供（如非群管理、不能禁言群主/管理员等）
-            OpResult r = svc.muteMembers(e.getBotId(), e.getGroupId(), targets, m);
+            OpResult r = svc.muteGroupMembers(e.getBotId(), e.getGroupId(), targets, m);
             // 失败信息不发送到 QQ 群（给框架开发者看日志）；成功才回群
             if (r.ok()) return r.message();
             System.out.println("[TestPlugin] 禁言结果: " + r.message());

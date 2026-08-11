@@ -97,12 +97,12 @@ public class PluginServicesImpl implements PluginServices {
     }
 
     @Override
-    public OpResult muteMember(String botKey, String groupOpenid, String memberOpenid, int minutes) {
-        return muteMembers(botKey, groupOpenid, memberOpenid == null ? List.of() : List.of(memberOpenid), minutes);
+    public OpResult muteGroupMember(String botKey, String groupOpenid, String memberOpenid, int minutes) {
+        return muteGroupMembers(botKey, groupOpenid, memberOpenid == null ? List.of() : List.of(memberOpenid), minutes);
     }
 
     @Override
-    public OpResult muteMembers(String botKey, String groupOpenid, List<String> memberOpenids, int minutes) {
+    public OpResult muteGroupMembers(String botKey, String groupOpenid, List<String> memberOpenids, int minutes) {
         if (memberOpenids == null || memberOpenids.isEmpty()) {
             return OpResult.fail("禁言失败：未指定目标成员");
         }
@@ -134,7 +134,7 @@ public class PluginServicesImpl implements PluginServices {
     }
 
     @Override
-    public OpResult recallMessage(String botKey, String groupOpenid, String msgId) {
+    public OpResult recallGroupMessage(String botKey, String groupOpenid, String msgId) {
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("groupOpenid", groupOpenid);
         params.put("msgId", msgId);

@@ -62,7 +62,7 @@ public interface PluginServices {
     Map<String, Object> listGroupJoinRequests(String botKey, String groupOpenid);
 
     /**
-     * 群成员禁言。
+     * 群成员禁言（单目标）。
      *
      * <p>时长参数为<b>分钟</b>（分钟→秒的换算由平台适配器内部完成，插件无需 ×60）。
      *
@@ -70,7 +70,7 @@ public interface PluginServices {
      * @return 执行结果（成功含禁言时长/解除提示；失败含具体原因，如
      *         机器人不是群管理、不能禁言群主/管理员/其他机器人、参数不合法等）
      */
-    OpResult muteMember(String botKey, String groupOpenid, String memberOpenid, int minutes);
+    OpResult muteGroupMember(String botKey, String groupOpenid, String memberOpenid, int minutes);
 
     /**
      * 批量群成员禁言（支持多个目标：可传 {@code Mention} 列表的 userId，
@@ -80,14 +80,14 @@ public interface PluginServices {
      * 成功 N 人、失败明细（成员 + 原因）。已解除/机器人类目标的过滤由调用方（插件）
      * 按消息字段自行处理，框架只负责执行与结果汇总。
      *
-     * @param memberOpenids 目标成员 openid 列表（非空；单个目标请用 {@link #muteMember}）
+     * @param memberOpenids 目标成员 openid 列表（非空；单个目标请用 {@link #muteGroupMember}）
      * @param minutes       禁言分钟数（&lt;=0 解除禁言）
      * @return 汇总结果（含成功数与失败明细）
      */
-    OpResult muteMembers(String botKey, String groupOpenid, List<String> memberOpenids, int minutes);
+    OpResult muteGroupMembers(String botKey, String groupOpenid, List<String> memberOpenids, int minutes);
 
     /** 撤回群消息。 */
-    OpResult recallMessage(String botKey, String groupOpenid, String msgId);
+    OpResult recallGroupMessage(String botKey, String groupOpenid, String msgId);
 
     /**
      * 撤回群内某成员最近 N 条消息（框架负责查库与校验）。
