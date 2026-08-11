@@ -131,6 +131,11 @@ public class XuanJiPluginManager extends DefaultPluginManager {
             return (p != null && java.nio.file.Files.isRegularFile(p)) ? p : null;
         }
 
+        /** 插件卸载后清除陈旧映射，避免内存泄漏与误回读。 */
+        void forget(String pluginId) {
+            originalJarPaths.remove(pluginId);
+        }
+
         @Override
         public synchronized ClassLoader loadPlugin(Path pluginPath, PluginDescriptor descriptor) {
             // 记录用户原始 jar：若传入的是旧副本，反推回 plugins/<原名>.jar
@@ -543,6 +548,7 @@ public class XuanJiPluginManager extends DefaultPluginManager {
         unregisterCommands(pluginId);
         pluginCommands.remove(pluginId);
         states.remove(pluginId);
+        if (copyingLoader != null) copyingLoader.forget(pluginId);
         stateStore.delete(pluginId);
         boolean stopped = stopPlugin(pluginId) == PluginState.STOPPED;
         if (w != null) closePluginClassLoader(w);
