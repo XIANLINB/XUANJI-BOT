@@ -65,8 +65,12 @@ public class TestPlugin extends XuanJiPluginBase {
         }
 
         /**
-         * 监听用户申请加群事件（GROUP_JOIN_REQUEST），收到后调用入群申请列表接口
-         * 并打印接口原始返回，供排查接口字段/数据结构。
+         * 监听用户申请加群事件（GROUP_JOIN_REQUEST），实现自动审批：
+         * <ul>
+         *   <li>未设置入群问题（仅验证消息）→ 自动通过</li>
+         *   <li>设置了入群问题（如「1+1=？」答案 2）→ 比对答案，正确自动通过、错误拒绝</li>
+         * </ul>
+         * 框架层完成拉列表/解析验证信息/答案判断/审批全链路，插件只需传事件里的群与成员。
          */
         @GroupEvent(order = 10)
         public void onGroupJoinRequest(GroupMessageEvent e, PluginServices svc) {
@@ -76,9 +80,9 @@ public class TestPlugin extends XuanJiPluginBase {
             String memberName = e.getSenderName();
             System.out.println("[TestPlugin] 收到入群申请事件: 群=" + groupId
                     + ", 申请者=" + memberId + "(" + memberName + ")");
-            // 调入群申请列表接口，查看原始返回信息（字段结构）
-            Map<String, Object> list = svc.listGroupJoinRequests(e.getBotId(), groupId);
-            System.out.println("[TestPlugin] 入群申请列表接口返回: " + list);
+            // 自动审批：正确答案按群设置的入群问题传入（此处示例问题「1+1=？」答案 2）
+            OpResult r = svc.autoApproveGroupJoin(e.getBotId(), groupId, memberId, "2");
+            System.out.println("[TestPlugin] 自动审批结果: " + r.message());
         }
 
         /** 原始报文 → ```json 代码块；null 时给出平台不支持/查询失败提示。 */

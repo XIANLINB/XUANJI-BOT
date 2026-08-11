@@ -191,6 +191,66 @@ public class PluginServicesImpl implements PluginServices {
     }
 
     @Override
+    public OpResult autoApproveGroupJoin(String botKey, String groupOpenid, String memberOpenid, String expectedAnswer) {
+        if (groupOpenid == null || groupOpenid.isBlank() || memberOpenid == null || memberOpenid.isBlank()) {
+            return OpResult.fail("自动审批被拒：缺少群或成员参数");
+        }
+        // 1. 拉入群申请列表
+        Map<String, Object> listResp = listGroupJoinRequests(botKey, groupOpenid);
+        if (listResp == null) {
+            return OpResult.fail("自动审批失败：入群申请列表为空（机器人非群管理或接口失败）");
+        }
+        // 2. 找该成员的最新申请（listResp 结构：{data:{list:[...]}}，见 TestPlugin 实测日志）
+        @SuppressWarnings("unchecked")
+        Map<String, Object> dataMap = listResp.get("data") instanceof Map<?, ?> dm
+                ? (Map<String, Object>) dm : listResp;
+        Object listObj = dataMap.get("list");
+        if (!(listObj instanceof List<?> list) || list.isEmpty()) {
+            return OpResult.fail("自动审批失败：未找到任何入群申请");
+        }
+        Map<?, ?> targetReq = null;
+        for (Object o : list) {
+            if (o instanceof Map<?, ?> m && memberOpenid.equals(String.valueOf(m.get("member_openid")))) {
+                targetReq = m;
+                break;
+            }
+        }
+        if (targetReq == null) {
+            return OpResult.fail("自动审批失败：未找到该成员的入群申请（member=" + memberOpenid + "）");
+        }
+        // 3. 解析验证信息（框架已注入 _verify_parsed）
+        Object vpObj = targetReq.get("_verify_parsed");
+        boolean qaMode = false;
+        String answer = null;
+        if (vpObj instanceof Map<?, ?> vp) {
+            qaMode = Boolean.TRUE.equals(vp.get("qaMode"));
+            answer = vp.get("answer") == null ? null : String.valueOf(vp.get("answer"));
+        }
+        String reqId = targetReq.get("join_request_id") == null ? "" : String.valueOf(targetReq.get("join_request_id"));
+        // 4. 判定
+        boolean pass;
+        String reason = null;
+        if (!qaMode) {
+            pass = true; // 未设置入群问题 → 自动通过
+        } else {
+            String exp = expectedAnswer == null ? "" : expectedAnswer.trim().toLowerCase();
+            if (exp.isEmpty()) {
+                return OpResult.fail("自动审批拒绝：设置了入群问题但未配置正确答案，无法审核（请传入 expectedAnswer）");
+            }
+            pass = answer != null && answer.trim().toLowerCase().equals(exp);
+            if (!pass) {
+                reason = "入群问题答案不正确";
+            }
+        }
+        // 5. 执行审批
+        OpResult r = approveGroupJoin(botKey, groupOpenid, memberOpenid, pass, reason);
+        if (!r.ok()) return r;
+        return OpResult.ok(pass
+                ? (qaMode ? "已自动通过：入群问题答案正确" : "已自动通过：无需验证问题")
+                : "已自动拒绝：入群问题答案不正确（reqId=" + reqId + "）");
+    }
+
+    @Override
     public Map<String, Object> listGroupJoinRequests(String botKey, String groupOpenid) {
         return actionData(actionHub.dispatch(effectiveBotKey(botKey), PlatformActions.GROUP_JOIN_REQUEST_LIST,
                 Map.of("groupOpenid", groupOpenid)));

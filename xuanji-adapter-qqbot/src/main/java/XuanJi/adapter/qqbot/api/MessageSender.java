@@ -879,15 +879,25 @@ public class MessageSender {
      * @param approved      true=同意入群 false=拒绝
      * @param rejectReason  拒绝理由（拒绝时可选）
      */
+    /**
+     * 入群申请审批（官方 POST /v2/groups/{group_openid}/approval_join_request/{member_openid}）。
+     *
+     * @param approved      true=通过(approve)，false=拒绝(decline)
+     * @param rejectReason  拒绝理由（op=decline 时可选）
+     * @param addBlacklist  是否同时加入群黑名单（op=decline 时可选）
+     */
     public ObjectNode approveGroupJoinRequest(String groupOpenid, String memberOpenid,
-                                              boolean approved, String rejectReason) {
+                                              boolean approved, String rejectReason, Boolean addBlacklist) {
         ObjectNode body = Json.obj();
-        body.put("approved", approved);
+        body.put("op", approved ? "approve" : "decline");
         if (rejectReason != null && !rejectReason.isBlank()) {
             body.put("reject_reason", rejectReason);
         }
+        if (addBlacklist != null && Boolean.TRUE.equals(addBlacklist)) {
+            body.put("add_to_member_blacklist", true);
+        }
         return qqApiService.post(currentRobotId(), currentEnvType(),
-                "/v2/groups/" + groupOpenid + "/approval_join_requests/" + memberOpenid, body);
+                "/v2/groups/" + groupOpenid + "/approval_join_request/" + memberOpenid, body);
     }
 
     /** 查询群禁言状态（当前机器人上下文）。 */

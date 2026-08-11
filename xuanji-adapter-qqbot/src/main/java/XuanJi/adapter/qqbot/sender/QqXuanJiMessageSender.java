@@ -141,7 +141,8 @@ public class QqXuanJiMessageSender implements XuanJiMessageSender, XuanJi.api.ad
         // 入群申请审批
         m.put(PlatformActions.GROUP_APPROVE, p -> {
             ObjectNode resp = messageSender.approveGroupJoinRequest(
-                    str(p, "groupOpenid"), str(p, "memberOpenid"), boolOf(p, "approve"), str(p, "reason"));
+                    str(p, "groupOpenid"), str(p, "memberOpenid"), boolOf(p, "approve"), str(p, "reason"),
+                    p.containsKey("blacklist") ? boolOf(p, "blacklist") : null);
             return Map.of("data", (Object) toMap(resp));
         });
         // 入群申请列表
@@ -650,7 +651,7 @@ public class QqXuanJiMessageSender implements XuanJiMessageSender, XuanJi.api.ad
             return XuanJiSendReceipt.fail("仅支持群入群审批", System.currentTimeMillis() - t0);
         }
         try {
-            ObjectNode resp = messageSender.approveGroupJoinRequest(g.groupOpenid(), requestId, accept, null);
+            ObjectNode resp = messageSender.approveGroupJoinRequest(g.groupOpenid(), requestId, accept, null, null);
             return receipt(resp, t0);
         } catch (Exception e) {
             log.warn("[QQ发送] 入群审批失败: {}", e.getMessage());
