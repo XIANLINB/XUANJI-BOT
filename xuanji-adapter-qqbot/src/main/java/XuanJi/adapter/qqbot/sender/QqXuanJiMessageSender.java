@@ -115,11 +115,17 @@ public class QqXuanJiMessageSender implements XuanJiMessageSender, XuanJi.api.ad
         // 机器人在群内的状态（原始报文转 Map）
         m.put(PlatformActions.GROUP_BOT_STATE,
                 p -> safeGet(() -> toMap(messageSender.getBotGroupState(str(p, "groupOpenid")))));
-        // 群成员禁言（minutes<=0 解除；memberOpenid 为被禁言成员；分钟→秒在此换算）
+        // 群成员禁言（minutes<=0 解除；memberOpenid 为被禁言成员；分钟→秒在此换算）。
+        // 前置校验失败返回 {ok:false, error}（失败信息返回给框架开发者，不发送到 QQ 群）。
         m.put(PlatformActions.GROUP_MUTE, p -> {
             String group = str(p, "groupOpenid");
             String member = str(p, "memberOpenid");
             int minutes = intOf(p, "minutes");
+            Map<String, Object> denied = validateMute(group, member);
+            if (denied != null) {
+                log.warn("[QQ发送] 禁言被拒: {} (group={}, member={})", denied.get("error"), group, member);
+                return denied;
+            }
             int seconds = minutes > 0 ? minutes * 60 : 0;
             String op = seconds > 0 ? "add" : "del";
             String expire = seconds > 0
@@ -428,6 +434,42 @@ public class QqXuanJiMessageSender implements XuanJiMessageSender, XuanJi.api.ad
     private static String fmtRfc3339(long epochSec) {
         return OffsetDateTime.ofInstant(Instant.ofEpochSecond(epochSec), ZoneId.systemDefault())
                 .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+    }
+
+    /**
+     * 禁言前置校验（失败信息返回给框架开发者，不发送到 QQ 群）：
+     * <ol>
+     *   <li>机器人必须为群管理（读 qqbot_group_robot.member_role）</li>
+     *   <li>机器人不能禁言其他机器人（读各实例库 qqbot_group_robot.robot_openid）</li>
+     *   <li>机器人不能禁言群主/管理员（读 qqbot_group_member.role）</li>
+     * </ol>
+     * 通过返回 null；失败返回 {@code {ok:false, error:"原因"}}。
+     */
+    private Map<String, Object> validateMute(String groupOpenid, String memberOpenid) {
+        if (groupOpenid == null || groupOpenid.isBlank() || memberOpenid == null || memberOpenid.isBlank()) {
+            return Map.of("ok", false, "error", "禁言被拒：缺少群或成员参数");
+        }
+        String robotId = messageSender.currentRobotId();
+        // ① 机器人必须为群管理
+        String botRole = qqBotRepository.getGroupRobotRole(robotId, groupOpenid);
+        if (botRole == null || botRole.isBlank()) {
+            return Map.of("ok", false, "error",
+                    "禁言被拒：机器人群角色未知（bot_state 未同步或机器人不在群），请确认机器人已设为群管理");
+        }
+        if (!"admin".equalsIgnoreCase(botRole) && !"owner".equalsIgnoreCase(botRole)) {
+            return Map.of("ok", false, "error",
+                    "禁言被拒：机器人必须为群管理才能禁言（当前角色=" + botRole + "）");
+        }
+        // ② 不能禁言其他机器人
+        if (qqBotRepository.isAnyRobotOpenid(groupOpenid, memberOpenid)) {
+            return Map.of("ok", false, "error", "禁言被拒：机器人不能禁言其他机器人");
+        }
+        // ③ 不能禁言群主/管理员（本地角色未同步时放行，交由平台拒绝兜底）
+        String memberRole = qqBotRepository.getGroupMemberRole(robotId, groupOpenid, memberOpenid);
+        if ("owner".equalsIgnoreCase(memberRole) || "admin".equalsIgnoreCase(memberRole)) {
+            return Map.of("ok", false, "error", "禁言被拒：不能禁言群主或管理员");
+        }
+        return null;
     }
 
     /**

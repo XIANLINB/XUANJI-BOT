@@ -105,20 +105,21 @@ public class TestPlugin extends XuanJiPluginBase {
                         ok++;
                     } else {
                         failed.add(uid);
+                        // 失败详情（如非群管理/禁言群主管理员/禁言机器人）在 qqbot 适配器日志中，
+                        // 只记录给框架开发者，不发送到 QQ 群
+                        System.out.println("[TestPlugin] 禁言被拒（详见适配器日志）: group="
+                                + e.getGroupId() + " member=" + uid + " minutes=" + minutes);
                     }
                 } catch (Exception ex) {
                     failed.add(uid);
+                    System.out.println("[TestPlugin] 禁言异常: member=" + uid + " err=" + ex.getMessage());
                 }
             }
-            StringBuilder sb = new StringBuilder();
+            // 失败信息不发送到 QQ 群（给框架开发者看日志）；只回成功部分；全失败则不回复
             if (ok > 0) {
-                sb.append("已禁言 ").append(ok).append(" 人 ").append(minutes).append(" 分钟");
+                return "已禁言 " + ok + " 人 " + minutes + " 分钟";
             }
-            if (!failed.isEmpty()) {
-                if (sb.length() > 0) sb.append("；");
-                sb.append("禁言失败 ").append(failed.size()).append(" 人（机器人需为群管理）");
-            }
-            return sb.toString();
+            return null;
         }
     }
 }
