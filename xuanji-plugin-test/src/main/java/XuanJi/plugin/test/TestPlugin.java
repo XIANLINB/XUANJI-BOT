@@ -1,5 +1,6 @@
 package XuanJi.plugin.test;
 
+import XuanJi.api.annotation.Arg;
 import XuanJi.api.annotation.Command;
 import XuanJi.api.annotation.XuanJiPlugin;
 import XuanJi.api.json.Json;
@@ -10,11 +11,8 @@ import XuanJi.api.plugin.XuanJiPluginBase;
 import XuanJi.sdk.event.GroupMessageEvent;
 import org.pf4j.PluginWrapper;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * 接口测试插件 — 一键测试 QQ 群基本信息和机器人群内状态两个接口。
@@ -83,39 +81,28 @@ public class TestPlugin extends XuanJiPluginBase {
          * 仅群主/管理员可用（@Command roles）；机器人需为群管理，否则平台返回失败。
          *
          * <p>用法：{@code #禁言 @成员 <分钟>}，例如「#禁言 @小明 5」。未指定分钟默认 10，上限 7 天。
+         * 两种触发形式等价：{@code #禁言@成员 1} / {@code @机器人 #禁言@成员 1}
+         * （命令匹配用的 plainText 已自动剥掉所有 {@code @占位}，数字由 {@link Arg} 解析）。
          *
-         * <p><b>框架负责解析与过滤</b>：{@link GroupMessageEvent#getMentionedUsers()} /
-         * {@link GroupMessageEvent#getMentionedUserIds()} 已自动排除机器人与机器人自己，
-         * 插件拿到即"可操作目标"；群主/管理员等平台限制由适配器执行时校验并返回失败原因。
-         * 目标参数三选一（时长均为分钟，换算由适配器完成）：
-         * <pre>
-         *   // ① 单人禁言：第三个参数传一个 memberOpenid
-         *   OpResult r1 = svc.muteMember(e.getBotId(), e.getGroupId(), "某成员openid", minutes);
-         *
-         *   // ② 消息里 @ 的目标列表（框架已过滤机器人/自己）——最常用，一行搞定
-         *   OpResult r2 = svc.muteMembers(e.getBotId(), e.getGroupId(), e.getMentionedUserIds(), minutes);
-         *
-         *   // ③ 插件自己提供的 memberOpenid 列表
-         *   OpResult r3 = svc.muteMembers(e.getBotId(), e.getGroupId(), List.of("a", "b"), minutes);
-         * </pre>
+         * <p><b>框架负责解析与过滤</b>：
+         * <ul>
+         *   <li>目标成员：{@link GroupMessageEvent#getMentionedUserIds()} 已排除机器人/自己，插件拿到即"可操作目标"</li>
+         *   <li>时长参数：{@link Arg} 自动从命令后文本解析（缺省 null 走默认值），无需手写正则</li>
+         *   <li>群主/管理员等平台限制由适配器执行时校验并返回失败原因</li>
+         * </ul>
          */
         @Command(value = "#禁言", scope = Command.Scope.GROUP, roles = {"owner", "admin"})
-        public String mute(GroupMessageEvent e, PluginServices svc) {
+        public String mute(GroupMessageEvent e, PluginServices svc,
+                           @Arg(value = "分钟", required = false) Integer minutes) {
             // 框架已过滤：getMentionedUserIds() 不含机器人与机器人自己
             List<String> targets = e.getMentionedUserIds();
             if (targets.isEmpty()) {
                 return "用法：#禁言 @成员 <分钟>，例如：#禁言 @小明 5。仅群主/管理员可用，机器人需为群管理。";
             }
-            // 从消息纯文本提取分钟数（QQ 的 @ 占位不含纯数字，提取到的数字即分钟数；默认 10，上限 7 天）
-            // muteMember 时长参数为「分钟」，秒级换算由 qqbot 适配器内部完成
-            int minutes = 10;
-            Matcher m = Pattern.compile("(\\d+)").matcher(e.getPlainText() == null ? "" : e.getPlainText());
-            if (m.find()) {
-                int v = Integer.parseInt(m.group(1));
-                if (v > 0) minutes = Math.min(v, 10080);
-            }
-            // 批量禁言（用法②）：成功/失败原因由框架与适配器提供（如非群管理、不能禁言群主/管理员等）
-            OpResult r = svc.muteMembers(e.getBotId(), e.getGroupId(), targets, minutes);
+            // @Arg 解析的分钟数（缺省 10，上限 7 天）；秒级换算由 qqbot 适配器内部完成
+            int m = minutes == null ? 10 : Math.min(Math.max(minutes, 0), 10080);
+            // 批量禁言：成功/失败原因由框架与适配器提供（如非群管理、不能禁言群主/管理员等）
+            OpResult r = svc.muteMembers(e.getBotId(), e.getGroupId(), targets, m);
             // 失败信息不发送到 QQ 群（给框架开发者看日志）；成功才回群
             if (r.ok()) return r.message();
             System.out.println("[TestPlugin] 禁言结果: " + r.message());
