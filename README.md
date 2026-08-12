@@ -98,10 +98,10 @@
 # 环境：JDK 25+、Maven 3.9+
 mvn clean package -DskipTests
 cd xuanji-starter
-java -jar target/xuanji-starter-1.0.0-SNAPSHOT.jar
+java -jar target/xuanji-starter-1.3.1-SNAPSHOT.jar
 ```
 
-IDEA 直接运行 `dev.xuanji.starter.XuanjiApplication` 主类。
+IDEA 直接运行 `XuanJi.starter.XuanJiApplication` 主类。
 
 ### 打包发布
 
@@ -109,8 +109,11 @@ IDEA 直接运行 `dev.xuanji.starter.XuanjiApplication` 主类。
 
 | 脚本 | 产物 | 说明 |
 |---|---|---|
-| `build-playwright-windows.bat` / `.sh` | **Windows 专用包** | 含 Playwright 渲染（图文卡片），driver 只保留 Win 平台，体积最小 |
-| `build-playwright-linux.bat` / `.sh` | **Linux 专用包** | 含 Playwright 渲染，driver 只保留 Linux 平台 |
+| `build-release.sh` / `build-release.bat` | **完整发布包**（win/linux 双版本，含内置 JRE） | 用户**无需安装 JDK**，下载解压双击启动即可用；自动裁剪 Playwright driver + jlink 生成运行时 + 组装目录 + 压缩 |
+| `build-playwright-windows.bat` / `.sh` | **Windows 精简 jar** | 只裁剪 driver，不含 JRE（需自行 `java -jar`） |
+| `build-playwright-linux.bat` / `.sh` | **Linux 精简 jar** | 同上 |
+
+> 发布包脚本跨平台：**在哪个平台运行就产哪个平台的包**。详细用法见 `scripts/BUILD-USAGE.txt`。
 
 详细用法见 `scripts/BUILD-USAGE.txt`。
 
@@ -123,8 +126,8 @@ IDEA 直接运行 `dev.xuanji.starter.XuanjiApplication` 主类。
 ```java
 package my.plugin;
 
-import dev.xuanji.api.annotation.*;
-import dev.xuanji.api.plugin.XuanjiPluginBase;
+import XuanJi.api.annotation.*;
+import XuanJi.api.plugin.XuanJiPluginBase;
 import org.pf4j.PluginWrapper;
 
 public class MyPlugin extends XuanjiPluginBase {

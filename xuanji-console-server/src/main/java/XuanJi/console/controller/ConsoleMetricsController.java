@@ -251,7 +251,9 @@ public class ConsoleMetricsController {
                         "开发指南页面改四 Tab：开发指南 / 事件（事件类型+对象字段）/ 动作（参考 Shiro 风格，方法+参数+返回值）/ 注解（全注解+字段+示例）",
                         "分享链接生成接入机器人详情页（POST /v2/generate_url_link，可带 callback_data 透传）",
                         "操作日志操作人追踪：控制台来源操作记录来源 IP（console@ip），群命令记录触发者",
-                        "TestPlugin 新增 #按钮 / #按钮2 命令：全面测试内嵌键盘 keyboard（action 跳转/回调/指令 + render_data 样式 + permission 权限 + visited_label + 版本提示）")));
+                        "TestPlugin 新增 #按钮 / #按钮2 命令：全面测试内嵌键盘 keyboard（action 跳转/回调/指令 + render_data 样式 + permission 权限 + visited_label + 版本提示）",
+                        "产品化收尾：补齐对外文档（使用手册 / 插件开发完整指南 / 架构说明）",
+                        "发布包构建：scripts/build-release.sh 产出 win/linux 双版本完整发布包（内置 jlink 精简 JRE，用户无需安装 JDK，解压即用；自动裁剪 Playwright 平台驱动）")));
 
         // ── v1.3.0 插件群管能力（2026-08-12）──
         versions.add(versionEntry("v1.3.0", "2026-08-12", "正式版",

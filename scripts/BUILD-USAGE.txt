@@ -1,0 +1,64 @@
+════════════════════════════════════════════════════════════
+  璇玑 XuanJi · 打包脚本使用说明
+════════════════════════════════════════════════════════════
+
+一、前置环境（构建机，不是运行机）
+────────────────────────────────────────
+  · JDK 25+（推荐 JDK 25；JDK 21 也可）
+  · Maven 3.9+
+  · Python 3（用于裁剪 Playwright 平台驱动 / 组装发布包）
+
+二、脚本一览
+────────────────────────────────────────
+  【推荐】发布包脚本（产出"开箱即用"的完整发布包）：
+    build-release.sh   跨平台：在哪个平台运行就产哪个平台的包
+    build-release.bat  Windows 便捷入口（内部调用 build-release.sh）
+
+  【旧】仅产 slim jar（不含 JRE / 不含启动脚本）：
+    build-playwright-windows.bat / .sh    → Windows 平台精简 jar
+    build-playwright-linux.bat / .sh      → Linux 平台精简 jar
+
+三、发布包脚本怎么用
+────────────────────────────────────────
+  Windows（Git Bash 或双击 .bat）：
+    bash scripts/build-release.sh
+    或直接运行 scripts\build-release.bat
+
+  Linux / macOS：
+    bash scripts/build-release.sh
+
+  脚本自动完成：mvn clean package → 裁剪 Playwright driver →
+  jlink 生成内置 JRE → 组装发布包目录 → 压缩。
+
+四、发布包产物（release/）
+────────────────────────────────────────
+  Windows  → release/xuanji-<版本>-win.zip
+  Linux    → release/xuanji-<版本>-linux.tar.gz
+
+  发布包特性：
+    · 内置精简 JRE（jlink）——用户【无需安装 JDK】
+    · 内置 Playwright 平台驱动（图文卡片渲染可用）
+    · 自带启动脚本（启动.bat / start.sh）+ plugins/ + docs/
+    · 解压即用：启动 → 浏览器打开 http://localhost:8668/xuanji/console/ → 首启引导
+
+五、旧脚本（仅产 slim jar）用法
+────────────────────────────────────────
+  Windows:  双击 build-playwright-windows.bat
+  Linux:    bash scripts/build-playwright-linux.sh
+  产物:     xuanji-starter/target/xuanji-starter-<版本>.jar（平台裁剪后）
+  启动:     java -jar xuanji-starter/target/xuanji-starter-<版本>.jar
+
+六、常见问题
+────────────────────────────────────────
+  Q: 报「未找到 python」？     → 安装 Python 3 并勾选"Add to PATH"。
+  Q: 报「未找到 JDK」？        → 安装 JDK 25 并设置 JAVA_HOME。
+  Q: 报「未找到 Maven」？      → 安装 Maven 3.9+，或设置 MVN_HOME 指向 Maven 安装目录。
+  Q: 为什么打包前要把 data/ 移走？
+     → data/ 是运行时数据（含本机测试残留），不属于源码，
+       正式发布请确保仓库无 data/、logs/、release/ 等目录。
+  Q: 为什么 release/ 目录里有多余文件？
+     → release/ 是发布产物输出目录，可随时删除重建。
+  Q: 只想产 jar 不想产发布包？
+     → 用 build-playwright-* 旧脚本；发布包脚本固定产出完整包。
+
+════════════════════════════════════════════════════════════
