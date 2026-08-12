@@ -6,12 +6,35 @@
     <parent>
         <groupId>dev.xuanji</groupId>
         <artifactId>xuanji-parent</artifactId>
-        <version>1.3.1-SNAPSHOT</version>
+        <version>1.3.1</version>
     </parent>
 
     <artifactId>xuanji-sdk</artifactId>
     <name>XuanJi SDK</name>
     <description>璇玑插件开发 SDK — 插件开发者唯一需要的依赖，后续发布到 Maven Central</description>
+
+    <repositories>
+        <!-- SDK 依赖 xuanji-api（发布在另一个 CNB 制品库），需声明用于 Maven 解析与 verify-deploy -->
+        <repository>
+            <id>cnb-xuanji-api</id>
+            <name>CNB XuanJi API Registry</name>
+            <url>https://maven.cnb.cool/XuanJiBot/xuanji-api/-/packages/releases</url>
+            <releases><enabled>true</enabled></releases>
+            <snapshots><enabled>true</enabled></snapshots>
+        </repository>
+    </repositories>
+
+    <distributionManagement>
+        <snapshotRepository>
+            <id>cnb-xuanji-sdk</id>
+            <url>https://maven.cnb.cool/XuanJiBot/xuanji-sdk/-/packages/snapshots</url>
+            <uniqueVersion>true</uniqueVersion>
+        </snapshotRepository>
+        <repository>
+            <id>cnb-xuanji-sdk</id>
+            <url>https://maven.cnb.cool/XuanJiBot/xuanji-sdk/-/packages/releases</url>
+        </repository>
+    </distributionManagement>
 
     <dependencies>
         <!-- SDK = api 能力封装 + 便捷工具类，插件开发者只需引入这一个 artifact -->

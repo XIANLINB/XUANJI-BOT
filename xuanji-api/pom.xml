@@ -6,12 +6,24 @@
     <parent>
         <groupId>dev.xuanji</groupId>
         <artifactId>xuanji-parent</artifactId>
-        <version>1.3.1-SNAPSHOT</version>
+        <version>1.3.1</version>
     </parent>
 
     <artifactId>xuanji-api</artifactId>
     <name>XuanJi API</name>
     <description>璇玑框架 - 纯接口与模型（零 Spring 依赖方向演进中）</description>
+
+    <distributionManagement>
+        <snapshotRepository>
+            <id>cnb-xuanji-api</id>
+            <url>https://maven.cnb.cool/XuanJiBot/xuanji-api/-/packages/snapshots</url>
+            <uniqueVersion>true</uniqueVersion>
+        </snapshotRepository>
+        <repository>
+            <id>cnb-xuanji-api</id>
+            <url>https://maven.cnb.cool/XuanJiBot/xuanji-api/-/packages/releases</url>
+        </repository>
+    </distributionManagement>
 
     <dependencies>
         <!-- Jackson 3（tools.jackson）：与 Boot 4 / Spring 7 默认一致，统一序列化栈 -->
