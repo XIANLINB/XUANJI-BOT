@@ -1,0 +1,1 @@
+import{u as e}from"./bots-BUYAs9D9.js";import{v as t}from"./index-C4IqoU_F.js";function c(){const o=e(),s=t(()=>o.botOptions),n=t(()=>o.loading);async function a(r=!1){await o.loadBots(r)}return{bots:s,loading:n,loadBots:a}}export{c as u};
