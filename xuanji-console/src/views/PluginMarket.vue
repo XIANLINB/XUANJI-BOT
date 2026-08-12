@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import {
   NCard, NButton, NSpace, NIcon, NText, NTag, NInput, NGrid, NGi, NEmpty,
   NModal, NAlert, useMessage, NSelect, NTabs, NTabPane, NForm, NFormItem,
-  NRadio, NRadioGroup, NRadioButton, NSwitch, NSpin, NDivider, NInputGroup
+  NRadio, NRadioGroup, NRadioButton, NSwitch, NSpin, NDivider
 } from 'naive-ui'
 import {
   StorefrontOutline, RefreshOutline, SearchOutline, SettingsOutline, TrashOutline, CubeOutline,
@@ -230,6 +230,35 @@ const rejectModal = ref(false)
 const rejectTarget = ref<any>(null)
 const rejectReason = ref('')
 const approveOfficial = ref(false)
+// 管理员令牌验证门：验证通过才显示审核内容与操作
+const adminVerified = ref(false)
+const adminTokenInput = ref('')
+const adminVerifying = ref(false)
+const auditLog = ref<any[]>([])
+
+async function verifyAdmin() {
+  if (!adminTokenInput.value) {
+    message.warning('请输入管理员令牌')
+    return
+  }
+  adminVerifying.value = true
+  try {
+    const r = await api.marketVerifyAdmin(adminTokenInput.value)
+    if (r.status === 'ok') {
+      adminVerified.value = true
+      message.success('管理员验证通过')
+      await loadPending()
+      await loadAudit()
+    } else {
+      adminVerified.value = false
+      message.error('管理员令牌错误，无审核权限')
+    }
+  } catch (e: any) {
+    message.error('验证失败：' + (e?.message ?? e))
+  } finally {
+    adminVerifying.value = false
+  }
+}
 
 async function loadPending() {
   auditLoading.value = true
@@ -240,13 +269,24 @@ async function loadPending() {
   }
 }
 
+async function loadAudit() {
+  try {
+    auditLog.value = await api.marketAudit()
+  } catch { /* 不影响 */ }
+}
+
+function pendingDownloadUrl(p: any) {
+  return `/xuanji/api/v1/console/market/pending/${encodeURIComponent(p.submissionId)}/download?adminToken=${encodeURIComponent(adminTokenInput.value)}`
+}
+
 async function doApprove(p: any) {
   try {
-    const r = await api.marketApprove(p.submissionId, approveOfficial.value)
+    const r = await api.marketApprove(p.submissionId, approveOfficial.value, adminTokenInput.value)
     if (r.status === 'ok') {
       message.success('已上架：' + (p.name || p.pluginId))
       await loadPending()
       await loadMarket()
+      await loadAudit()
     } else {
       message.error('操作失败：' + (r.message || '未知错误'))
     }
@@ -263,11 +303,12 @@ function openReject(p: any) {
 
 async function doReject() {
   try {
-    const r = await api.marketReject(rejectTarget.value.submissionId, rejectReason.value)
+    const r = await api.marketReject(rejectTarget.value.submissionId, rejectReason.value, adminTokenInput.value)
     if (r.status === 'ok') {
       message.success('已拒绝：' + (rejectTarget.value.name || rejectTarget.value.pluginId))
       rejectModal.value = false
       await loadPending()
+      await loadAudit()
     } else {
       message.error('操作失败：' + (r.message || '未知错误'))
     }
@@ -277,8 +318,9 @@ async function doReject() {
 }
 
 // ═══════════════ 设置（Tab5） ═══════════════
-const mSettings = ref({ enabled: false, repoUrl: '', gitUser: '', hasToken: false })
-const gitTokenInput = ref('')
+const mSettings = ref({ enabled: false, repoUrl: '', hasUploadToken: false, hasAdminToken: false })
+const uploadTokenInput = ref('')
+const adminTokenSettingInput = ref('')
 const savingSettings = ref(false)
 
 async function loadSettings() {
@@ -293,11 +335,12 @@ async function saveSettings() {
     await api.saveMarketSettings({
       enabled: mSettings.value.enabled,
       repoUrl: mSettings.value.repoUrl,
-      gitUser: mSettings.value.gitUser,
-      gitToken: gitTokenInput.value
+      uploadToken: uploadTokenInput.value,
+      adminToken: adminTokenSettingInput.value
     })
     message.success('设置已保存')
-    gitTokenInput.value = ''
+    uploadTokenInput.value = ''
+    adminTokenSettingInput.value = ''
     await loadSettings()
   } catch (e: any) {
     message.error('保存失败：' + (e?.message ?? e))
@@ -497,42 +540,83 @@ onMounted(() => {
 
       <!-- ══════ Tab4 审核台 ══════ -->
       <NTabPane name="audit" tab="审核台">
-        <NSpace align="center" style="margin-bottom: 12px">
-          <NButton :loading="auditLoading" @click="loadPending">
-            <template #icon><NIcon><RefreshOutline /></NIcon></template>
-            刷新待审
-          </NButton>
-          <NText depth="3" style="font-size: 12px">管理员：下载 jar → 隔离 bot 测试 → 通过上架 / 拒绝</NText>
-        </NSpace>
-        <NEmpty v-if="!auditLoading && !pendingList.length" description="暂无待审核的插件提交" style="padding: 60px 0" />
-        <NCard v-for="p in pendingList" :key="p.submissionId" size="small" class="pending-card">
-          <div class="pending-row">
-            <div class="sub-info">
-              <NText strong>{{ p.name || p.pluginId }}</NText>
-              <NTag size="small" :bordered="false" type="warning" round style="margin-left: 8px">审核中</NTag>
-              <NTag size="small" :bordered="false" type="primary" round>{{ CATEGORY_LABEL[p.category] || '其他' }}</NTag>
-              <div style="margin-top: 2px">
-                <NText depth="3" style="font-size: 12px">{{ p.pluginId }} · v{{ p.version }} · 提交人 {{ p.submitter || 'unknown' }} · {{ (p.submittedAt || '').replace('T', ' ').slice(0, 19) }}</NText>
-              </div>
-              <NText v-if="p.description" depth="3" style="font-size: 12px; display: block; margin-top: 4px">{{ p.description }}</NText>
-            </div>
-            <div class="pending-ops">
-              <NSwitch v-model:value="approveOfficial" size="small" style="margin-right: 8px">
-                <template #checked>官方</template>
-                <template #unchecked>社区</template>
-              </NSwitch>
-              <NButton size="small" tag="a" :href="p.downloadUrl" target="_blank" download secondary>
-                <template #icon><NIcon size="14"><DownloadOutline /></NIcon></template>下载测试
-              </NButton>
-              <NButton size="small" type="success" @click="doApprove(p)">
-                <template #icon><NIcon size="14"><CheckmarkOutline /></NIcon></template>通过
-              </NButton>
-              <NButton size="small" type="error" ghost @click="openReject(p)">
-                <template #icon><NIcon size="14"><CloseOutline /></NIcon></template>拒绝
-              </NButton>
-            </div>
-          </div>
+        <!-- 管理员令牌验证门 -->
+        <NAlert v-if="!adminVerified" type="warning" :show-icon="true" style="max-width: 640px; margin-bottom: 12px"
+                title="需要管理员令牌">
+          审核台仅管理员可用。请输入管理员令牌（设置页配置的 market.admin_token）验证权限，
+          验证通过后才能查看待审插件并执行通过/拒绝操作。
+        </NAlert>
+        <NCard v-if="!adminVerified" size="small" style="max-width: 640px">
+          <NSpace align="center">
+            <NInput v-model:value="adminTokenInput" type="password" show-password-on="click"
+                    placeholder="输入管理员令牌" style="width: 320px" />
+            <NButton type="primary" :loading="adminVerifying" @click="verifyAdmin">
+              <template #icon><NIcon><CheckmarkOutline /></NIcon></template>
+              验证身份
+            </NButton>
+          </NSpace>
         </NCard>
+
+        <template v-if="adminVerified">
+          <NSpace align="center" style="margin-bottom: 12px">
+            <NButton :loading="auditLoading" @click="loadPending">
+              <template #icon><NIcon><RefreshOutline /></NIcon></template>
+              刷新待审
+            </NButton>
+            <NButton quaternary @click="loadAudit">
+              <template #icon><NIcon><RefreshOutline /></NIcon></template>
+              刷新记录
+            </NButton>
+            <NText depth="3" style="font-size: 12px">管理员：下载 jar → 隔离 bot 测试 → 通过上架 / 拒绝</NText>
+          </NSpace>
+          <NEmpty v-if="!auditLoading && !pendingList.length" description="暂无待审核的插件提交" style="padding: 40px 0" />
+          <NCard v-for="p in pendingList" :key="p.submissionId" size="small" class="pending-card">
+            <div class="pending-row">
+              <div class="sub-info">
+                <NText strong>{{ p.name || p.pluginId }}</NText>
+                <NTag size="small" :bordered="false" type="warning" round style="margin-left: 8px">审核中</NTag>
+                <NTag size="small" :bordered="false" type="primary" round>{{ CATEGORY_LABEL[p.category] || '其他' }}</NTag>
+                <div style="margin-top: 2px">
+                  <NText depth="3" style="font-size: 12px">{{ p.pluginId }} · v{{ p.version }} · 提交人 {{ p.submitter || 'unknown' }} · {{ (p.submittedAt || '').replace('T', ' ').slice(0, 19) }}</NText>
+                </div>
+                <NText v-if="p.description" depth="3" style="font-size: 12px; display: block; margin-top: 4px">{{ p.description }}</NText>
+              </div>
+              <div class="pending-ops">
+                <NSwitch v-model:value="approveOfficial" size="small" style="margin-right: 8px">
+                  <template #checked>官方</template>
+                  <template #unchecked>社区</template>
+                </NSwitch>
+                <NButton size="small" tag="a" :href="pendingDownloadUrl(p)" target="_blank" download secondary>
+                  <template #icon><NIcon size="14"><DownloadOutline /></NIcon></template>下载测试
+                </NButton>
+                <NButton size="small" type="success" @click="doApprove(p)">
+                  <template #icon><NIcon size="14"><CheckmarkOutline /></NIcon></template>通过
+                </NButton>
+                <NButton size="small" type="error" ghost @click="openReject(p)">
+                  <template #icon><NIcon size="14"><CloseOutline /></NIcon></template>拒绝
+                </NButton>
+              </div>
+            </div>
+          </NCard>
+
+          <!-- 审核记录 -->
+          <NCard title="审核记录" size="small" style="margin-top: 16px">
+            <NEmpty v-if="!auditLog.length" description="暂无审核记录" style="padding: 24px 0" />
+            <div v-for="a in auditLog" :key="a.submissionId + a.time" class="sub-row">
+              <div class="sub-info">
+                <NText strong>{{ a.name || a.pluginId }}</NText>
+                <NText depth="3" style="font-size: 12px; margin-left: 8px">{{ a.pluginId }} · v{{ a.version }}</NText>
+                <NTag size="small" :bordered="false" :type="a.action === 'APPROVED' ? 'success' : 'error'" round style="margin-left: 8px">
+                  {{ a.action === 'APPROVED' ? '已上架' : '已拒绝' }}
+                </NTag>
+                <NTag v-if="a.official" size="small" :bordered="false" type="info" round style="margin-left: 4px">官方</NTag>
+              </div>
+              <NText depth="3" style="font-size: 12px; display: block; margin-top: 2px">
+                {{ (a.time || '').replace('T', ' ').slice(0, 19) }}{{ a.reason ? ' · 理由：' + a.reason : '' }}
+              </NText>
+            </div>
+          </NCard>
+        </template>
 
         <NModal v-model:show="rejectModal" preset="card" title="拒绝插件" style="width: 420px; max-width: 92vw" :bordered="false">
           <NInput v-model:value="rejectReason" type="textarea" :rows="3" placeholder="拒绝理由（开发者可见，选填）" />
@@ -547,26 +631,37 @@ onMounted(() => {
 
       <!-- ══════ Tab5 设置 ══════ -->
       <NTabPane name="settings" tab="设置">
-        <NCard title="插件市场配置" size="small" style="max-width: 640px">
-          <NForm label-placement="left" label-width="120">
+        <NCard title="插件市场配置" size="small" style="max-width: 680px">
+          <NForm label-placement="left" label-width="130">
             <NFormItem label="启用市场">
               <NSwitch v-model:value="mSettings.enabled" />
             </NFormItem>
             <NFormItem label="市场仓库地址">
               <NInput v-model:value="mSettings.repoUrl" placeholder="https://cnb.cool/org/repo.git" />
+              <NText depth="3" style="font-size: 12px; margin-top: 4px; display: block">
+                已加密存储；仅显示掩码（{{ mSettings.repoUrl || '未配置' }}），防止抓包/日志暴露仓库地址
+              </NText>
             </NFormItem>
-            <NFormItem label="git 用户名">
-              <NInput v-model:value="mSettings.gitUser" placeholder="cnb" style="width: 240px" />
+            <NFormItem label="上传令牌">
+              <NInput v-model:value="uploadTokenInput" type="password" show-password-on="click"
+                      :placeholder="mSettings.hasUploadToken ? '已配置（留空不修改）' : '开发者上传插件用的 git 令牌'" />
+              <NText depth="3" style="font-size: 12px; margin-top: 4px; display: block">
+                仅用于「上传插件」提交到待审区；不授予审核权限
+              </NText>
             </NFormItem>
-            <NFormItem label="git 凭据">
-              <NInputGroup>
-                <NInput v-model:value="gitTokenInput" type="password" show-password-on="click" :placeholder="mSettings.hasToken ? '已配置（留空不修改）' : '部署令牌 / 访问令牌'" />
-              </NInputGroup>
+            <NFormItem label="管理员令牌">
+              <NInput v-model:value="adminTokenSettingInput" type="password" show-password-on="click"
+                      :placeholder="mSettings.hasAdminToken ? '已配置（留空不修改）' : '审核台验证/通过/拒绝所需'" />
+              <NText depth="3" style="font-size: 12px; margin-top: 4px; display: block">
+                进入审核台需验证此令牌；持有者才能执行上架/拒绝
+              </NText>
             </NFormItem>
             <NFormItem label="">
-              <NSpace>
+              <NSpace vertical align="start">
                 <NButton type="primary" :loading="savingSettings" @click="saveSettings">保存配置</NButton>
-                <NText depth="3" style="font-size: 12px">浏览/安装无需凭据；上传与审核需要管理员 git 凭据</NText>
+                <NText depth="3" style="font-size: 12px">
+                  浏览/安装无需任何凭据（后端代理下载）；上传需上传令牌；审核需管理员令牌。所有令牌与仓库地址均加密落库
+                </NText>
               </NSpace>
             </NFormItem>
           </NForm>

@@ -32,10 +32,12 @@ export const pluginsApi = {
   marketSubmit: (form: FormData) => upload('/console/market/submit', form),
   mySubmissions: () => get('/console/market/submissions'),
   marketPending: () => get('/console/market/pending'),
-  marketApprove: (id: string, official: boolean) =>
-    post(`/console/market/pending/${encodeURIComponent(id)}/approve` + qs({ official })),
-  marketReject: (id: string, reason: string) =>
-    post(`/console/market/pending/${encodeURIComponent(id)}/reject`, { reason }),
+  marketVerifyAdmin: (adminToken: string) => post('/console/market/pending/verify', { adminToken }),
+  marketApprove: (id: string, official: boolean, adminToken: string) =>
+    post(`/console/market/pending/${encodeURIComponent(id)}/approve`, { official, adminToken }),
+  marketReject: (id: string, reason: string, adminToken: string) =>
+    post(`/console/market/pending/${encodeURIComponent(id)}/reject`, { reason, adminToken }),
+  marketAudit: () => get('/console/market/audit'),
   marketInstall: (pluginId: string, version: string) =>
     post('/console/market/install', { pluginId, version })
 }

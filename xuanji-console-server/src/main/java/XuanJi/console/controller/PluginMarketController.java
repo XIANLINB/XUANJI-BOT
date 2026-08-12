@@ -5,6 +5,9 @@ import XuanJi.console.market.PluginMarketService;
 import XuanJi.console.service.AuditService;
 import XuanJi.core.web.XuanJiApi;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -15,8 +18,12 @@ import java.util.Map;
 /**
  * 控制台 · 插件市场（中央插件库：浏览 / 上传 / 审核 / 安装）。
  *
- * <p>市场仓库为公开 git 仓库（默认 CNB 官方市场），浏览与安装走 raw 匿名读取（无需凭据）；
- * 上传/审核为 git 写操作，需管理员在设置页配置 git 凭据。
+ * <p>安全模型：
+ * <ul>
+ *   <li>浏览/安装经<b>后端代理</b>（jar 下载端点），前端不接触仓库真实地址</li>
+ *   <li>上传用<b>上传令牌</b>（开发者配置）；审核台需先验证<b>管理员令牌</b>，通过/拒绝操作再校验</li>
+ *   <li>审核通过/拒绝均写入本地审核记录（audit-log）</li>
+ * </ul>
  */
 @Slf4j
 @XuanJiApi
@@ -35,32 +42,46 @@ public class PluginMarketController {
         this.auditService = auditService;
     }
 
-    /** 市场已上架插件列表（匿名 raw 读取）。 */
+    /** 市场已上架插件列表（后端代理拉取；downloadUrl 为框架端点，不暴露仓库地址）。 */
     @GetMapping("/plugins")
     public List<Map<String, Object>> listMarket() {
         return marketService.listMarket();
     }
 
-    /** 市场配置（token 不回显）。 */
+    /** 已上架 jar 代理下载（浏览器直接下载；内部从仓库 raw 拉取）。 */
+    @GetMapping("/download")
+    public ResponseEntity<byte[]> download(@RequestParam String pluginId, @RequestParam String version) {
+        byte[] jar = marketService.downloadPluginJar(pluginId, version);
+        if (jar == null || jar.length == 0) {
+            return ResponseEntity.notFound().build();
+        }
+        String name = safeFileName(pluginId + "-" + version + ".jar");
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + name + "\"")
+                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .body(jar);
+    }
+
+    /** 市场配置（掩码显示；token 仅返回是否已配置）。 */
     @GetMapping("/settings")
     public Map<String, Object> settings() {
         return settings.view();
     }
 
-    /** 保存市场配置（仓库地址 + 管理员 git 凭据）。 */
+    /** 保存市场配置（仓库地址 + 上传令牌 + 管理员令牌，敏感项加密落库）。 */
     @PutMapping("/settings")
     public Map<String, Object> saveSettings(@RequestBody Map<String, Object> body,
                                             jakarta.servlet.http.HttpServletRequest req) {
         settings.save(
                 str(body.get("repoUrl")),
-                str(body.get("gitUser")),
-                str(body.get("gitToken")),
+                str(body.get("uploadToken")),
+                str(body.get("adminToken")),
                 body.get("enabled") == null ? null : Boolean.parseBoolean(String.valueOf(body.get("enabled"))));
         auditService.record("MARKET_SETTINGS", "保存插件市场配置", req);
         return Map.of("status", "ok", "settings", settings.view());
     }
 
-    /** 开发者上传插件（multipart：name/description/version/category/submitter + jar 文件）。 */
+    /** 开发者上传插件（需已配置上传令牌；multipart：name/description/version/category/submitter + jar）。 */
     @PostMapping("/submit")
     public Map<String, Object> submit(@RequestParam(value = "name", required = false) String name,
                                       @RequestParam(value = "description", required = false) String description,
@@ -75,7 +96,7 @@ public class PluginMarketController {
             auditService.record("MARKET_SUBMIT",
                     "上传插件: " + r.get("pluginId") + "@" + r.get("version") + "（审核中）", req);
             return r;
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException | IllegalStateException | SecurityException e) {
             return Map.of("status", "error", "message", e.getMessage());
         } catch (Exception e) {
             log.error("[PluginMarket] 上传插件失败", e);
@@ -83,13 +104,13 @@ public class PluginMarketController {
         }
     }
 
-    /** 我的提交（本机发起的上传，含当前状态）。 */
+    /** 我的提交（本机发起的上传，含当前状态与拒绝理由）。 */
     @GetMapping("/submissions")
     public List<Map<String, Object>> mySubmissions() {
         return marketService.mySubmissions();
     }
 
-    /** 待审列表（管理员）。 */
+    /** 待审列表（仅审核中 PENDING；已拒绝不再展示）。 */
     @GetMapping("/pending")
     public List<Map<String, Object>> pending() {
         try {
@@ -100,36 +121,75 @@ public class PluginMarketController {
         }
     }
 
-    /** 通过审核（上架）。 */
+    /** 验证管理员令牌（进入审核台鉴权；通过才显示内容与操作）。 */
+    @PostMapping("/pending/verify")
+    public Map<String, Object> verifyAdmin(@RequestBody Map<String, Object> body) {
+        String token = body == null ? null : str(body.get("adminToken"));
+        boolean ok = settings.verifyAdminToken(token);
+        return Map.of("status", ok ? "ok" : "error",
+                "message", ok ? "管理员验证通过" : "管理员令牌错误，无审核权限");
+    }
+
+    /** 待审 jar 代理下载（审核用，需管理员令牌 query；不暴露仓库地址）。 */
+    @GetMapping("/pending/{id}/download")
+    public ResponseEntity<byte[]> downloadPending(@PathVariable String id,
+                                                  @RequestParam String adminToken) {
+        if (!settings.verifyAdminToken(adminToken)) {
+            return ResponseEntity.status(403).build();
+        }
+        byte[] jar = marketService.downloadPendingJar(id, adminToken);
+        if (jar == null || jar.length == 0) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"pending-" + id + ".jar\"")
+                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .body(jar);
+    }
+
+    /** 通过审核（上架；需管理员令牌）。 */
     @PostMapping("/pending/{id}/approve")
     public Map<String, Object> approve(@PathVariable String id,
-                                       @RequestParam(value = "official", defaultValue = "false") boolean official,
+                                       @RequestBody(required = false) Map<String, Object> body,
                                        jakarta.servlet.http.HttpServletRequest req) {
+        boolean official = body != null && Boolean.parseBoolean(String.valueOf(body.getOrDefault("official", false)));
+        String token = body == null ? null : str(body.get("adminToken"));
         try {
-            Map<String, Object> r = marketService.approve(id, official);
+            Map<String, Object> r = marketService.approve(id, official, token);
             auditService.record("MARKET_APPROVE",
                     "插件上架: " + r.get("pluginId") + "@" + r.get("version") + (official ? "（官方）" : ""), req);
             return r;
+        } catch (SecurityException e) {
+            return Map.of("status", "error", "message", e.getMessage());
         } catch (Exception e) {
             log.error("[PluginMarket] 审核通过失败", e);
             return Map.of("status", "error", "message", e.getMessage());
         }
     }
 
-    /** 拒绝审核（附理由）。 */
+    /** 拒绝审核（附理由；需管理员令牌）。 */
     @PostMapping("/pending/{id}/reject")
     public Map<String, Object> reject(@PathVariable String id,
                                       @RequestBody(required = false) Map<String, Object> body,
                                       jakarta.servlet.http.HttpServletRequest req) {
+        String token = body == null ? null : str(body.get("adminToken"));
+        String reason = body == null ? null : str(body.get("reason"));
         try {
-            String reason = body == null ? null : str(body.get("reason"));
-            Map<String, Object> r = marketService.reject(id, reason);
+            Map<String, Object> r = marketService.reject(id, reason, token);
             auditService.record("MARKET_REJECT", "插件拒绝: " + id + (reason == null ? "" : " 理由=" + reason), req);
             return r;
+        } catch (SecurityException e) {
+            return Map.of("status", "error", "message", e.getMessage());
         } catch (Exception e) {
             log.error("[PluginMarket] 审核拒绝失败", e);
             return Map.of("status", "error", "message", e.getMessage());
         }
+    }
+
+    /** 本地审核记录（通过/拒绝历史，含官方标注与理由）。 */
+    @GetMapping("/audit")
+    public List<Map<String, Object>> auditLog() {
+        return marketService.auditLog();
     }
 
     /** 安装插件到本地 plugins/ 并热加载（downloadUrl + sha256 校验）。 */
@@ -150,5 +210,9 @@ public class PluginMarketController {
 
     private static String str(Object o) {
         return o == null ? null : String.valueOf(o);
+    }
+
+    private static String safeFileName(String name) {
+        return name.replaceAll("[^a-zA-Z0-9._\\-]", "_");
     }
 }
