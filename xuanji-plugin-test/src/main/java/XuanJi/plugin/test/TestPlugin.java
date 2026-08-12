@@ -298,6 +298,113 @@ public class TestPlugin extends XuanJiPluginBase {
             return null;
         }
 
+        /**
+         * 内嵌键盘测试③：验证「permission 必传」修复 + 全部渲染样式 + visited_label 对空白的影响。
+         *
+         * <p>测试结论依据（#按钮/#按钮2 实测）：不带 {@code permission} 的按钮点击一律
+         * 「无权限操作」（客户端本地拦截，后端收不到 INTERACTION_CREATE）；必须显式传
+         * {@code permission:{type:2}}（所有人）才能点击。
+         * 本命令所有按钮都显式带 permission.type=2，用于复测 跳转/回调/指令 三种 action，
+         * 并对比 回调按钮有/无 visited_label 的点击后表现。
+         */
+        @Command(value = "#按钮3", scope = Command.Scope.GROUP)
+        public String button3(GroupMessageEvent e, PluginServices svc) {
+            Map<String, Object> row1Btn1 = btn("jump_3", "跳转官网", 1,
+                    new LinkedHashMap<>() {{
+                        put("type", 0);
+                        put("data", "https://bot.q.qq.com");
+                        put("permission", Map.of("type", 2));
+                    }});
+            Map<String, Object> row1Btn2 = btn("cb_no_visited", "回调(无visited)", 1,
+                    new LinkedHashMap<>() {{
+                        put("type", 1);
+                        put("data", "cb_no_visited");
+                        put("permission", Map.of("type", 2));
+                    }});
+            Map<String, Object> visitedRender = new LinkedHashMap<>();
+            visitedRender.put("label", "回调(有visited)");
+            visitedRender.put("visited_label", "已点击✓");
+            visitedRender.put("style", 3);
+            Map<String, Object> row1Btn3 = Map.of(
+                    "id", "cb_visited",
+                    "render_data", visitedRender,
+                    "action", new LinkedHashMap<>() {{
+                        put("type", 1);
+                        put("data", "cb_visited");
+                        put("permission", Map.of("type", 2));
+                    }});
+            Map<String, Object> row2Btn1 = btn("cmd_3", "指令签到", 3,
+                    new LinkedHashMap<>() {{
+                        put("type", 2);
+                        put("data", "/签到");
+                        put("permission", Map.of("type", 2));
+                        put("enter", true);
+                    }});
+            Map<String, Object> row2Btn2 = btn("st0_3", "style0灰线", 0,
+                    new LinkedHashMap<>() {{
+                        put("type", 1); put("data", "st0"); put("permission", Map.of("type", 2));
+                    }});
+            Map<String, Object> row2Btn3 = btn("st1_3", "style1蓝线", 1,
+                    new LinkedHashMap<>() {{
+                        put("type", 1); put("data", "st1"); put("permission", Map.of("type", 2));
+                    }});
+            Map<String, Object> row3Btn1 = btn("st2_3", "style2白字", 2,
+                    new LinkedHashMap<>() {{
+                        put("type", 1); put("data", "st2"); put("permission", Map.of("type", 2));
+                    }});
+            Map<String, Object> row3Btn2 = btn("st3_3", "style3蓝底白字", 3,
+                    new LinkedHashMap<>() {{
+                        put("type", 1); put("data", "st3"); put("permission", Map.of("type", 2));
+                    }});
+            XuanJiMessageElement.Keyboard kb = keyboard(List.of(
+                    List.of(row1Btn1, row1Btn2, row1Btn3),
+                    List.of(row2Btn1, row2Btn2, row2Btn3),
+                    List.of(row3Btn1, row3Btn2)));
+            return sendKeyboard(svc, e, "**按钮测试③**（全部显式 permission=所有人；对比回调 无/有 visited_label）", kb);
+        }
+
+        /**
+         * 内嵌键盘测试④：权限矩阵对比（同一批按钮分别配置 所有人/管理员/指定用户），
+         * 验证权限拦截边界——请分别用群主 与 普通成员 各点一遍。
+         *
+         * <ul>
+         *   <li>所有人按钮：普通成员也应能点（若仍无权限则说明客户端缓存/平台限制）</li>
+         *   <li>仅管理员按钮：群主可点、普通成员「无权限操作」</li>
+         *   <li>仅我按钮（指定本群命令发送者）：只有发送者本人可点</li>
+         *   <li>跳转按钮 + 所有人：验证跳转 URL 在权限修复后是否正常</li>
+         *   <li>指令按钮 + enter：插入输入框 @bot data</li>
+         * </ul>
+         */
+        @Command(value = "#按钮4", scope = Command.Scope.GROUP)
+        public String button4(GroupMessageEvent e, PluginServices svc) {
+            Map<String, Object> row1Btn1 = btn("perm_all", "所有人", 1,
+                    new LinkedHashMap<>() {{
+                        put("type", 1); put("data", "perm_all"); put("permission", Map.of("type", 2));
+                    }});
+            Map<String, Object> row1Btn2 = btn("perm_admin", "仅管理员", 1,
+                    new LinkedHashMap<>() {{
+                        put("type", 1); put("data", "perm_admin"); put("permission", Map.of("type", 1));
+                    }});
+            Map<String, Object> row1Btn3 = btn("perm_me", "仅我", 1,
+                    new LinkedHashMap<>() {{
+                        put("type", 1); put("data", "perm_me");
+                        put("permission", Map.of("type", 0, "specify_user_ids", List.of(e.getSenderId())));
+                    }});
+            Map<String, Object> row2Btn1 = btn("jump_4", "跳转(所有人)", 1,
+                    new LinkedHashMap<>() {{
+                        put("type", 0); put("data", "https://bot.q.qq.com/wiki/develop/api-v2/");
+                        put("permission", Map.of("type", 2));
+                    }});
+            Map<String, Object> row2Btn2 = btn("cmd_4", "指令(所有人)", 3,
+                    new LinkedHashMap<>() {{
+                        put("type", 2); put("data", "#按钮4"); put("permission", Map.of("type", 2)); put("enter", true);
+                    }});
+            XuanJiMessageElement.Keyboard kb = keyboard(List.of(
+                    List.of(row1Btn1, row1Btn2, row1Btn3),
+                    List.of(row2Btn1, row2Btn2)));
+            return sendKeyboard(svc, e, "**按钮测试④**（权限矩阵：所有人/仅管理员/仅我，请用群主+普通成员各点一遍）", kb);
+        }
+
         /** 构造单个按钮（render_data + action）。 */
         private static Map<String, Object> btn(String id, String label, int style, Map<String, Object> action) {
             Map<String, Object> b = new LinkedHashMap<>();
