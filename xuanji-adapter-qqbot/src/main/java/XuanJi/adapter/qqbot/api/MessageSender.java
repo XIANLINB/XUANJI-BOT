@@ -751,8 +751,22 @@ public class MessageSender {
     // ==================== 内部方法 ====================
 
     private ObjectNode toJsonObject(Object obj) {
-        if (obj instanceof ObjectNode) return (ObjectNode) obj;
-        return Json.parseObj(obj.toString());
+        if (obj instanceof ObjectNode on) return on;
+        if (obj instanceof tools.jackson.databind.JsonNode jn) {
+            // 已是 JSON 节点：对象直接返回，标量包一层（保持对象结构）
+            return jn.isObject() ? (ObjectNode) jn : Json.obj().set("value", jn);
+        }
+        if (obj instanceof String s) {
+            // 字符串按 JSON 解析（兼容调用方传 JSON 文本）；解析失败则作为字面值
+            try {
+                return Json.parseObj(s);
+            } catch (Exception ignored) {
+                return Json.obj().put("value", s);
+            }
+        }
+        // Map / List / POJO：用 Jackson 正确序列化为 JSON 树（不能依赖 obj.toString() 当 JSON 解析，
+        // Map.toString() 输出 {key=value} 不是合法 JSON，会导致 keyboard 等嵌套结构发送失败）
+        return (ObjectNode) Json.mapper().valueToTree(obj);
     }
 
     private String truncate(String str, int max) {
