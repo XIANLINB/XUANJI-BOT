@@ -45,6 +45,13 @@
             <scope>provided</scope>
         </dependency>
 
+        <!-- 插件市场：JGit 操作 CNB 公开 git 仓库（上传/审核/上架），纯 Java 实现，无需系统 git -->
+        <dependency>
+            <groupId>org.eclipse.jgit</groupId>
+            <artifactId>org.eclipse.jgit</artifactId>
+            <version>7.7.1.202607240634-r</version>
+        </dependency>
+
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>

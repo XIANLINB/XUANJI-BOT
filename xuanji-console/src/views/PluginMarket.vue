@@ -1,15 +1,14 @@
 <script setup lang="ts">
-import {
-  ref, computed, onMounted, h
-} from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NCard, NButton, NSpace, NIcon, NText, NTag, NInput, NGrid, NGi, NEmpty,
-  NPopconfirm, NModal, NAlert, useMessage, NSelect, NSpin
+  NModal, NAlert, useMessage, NSelect, NTabs, NTabPane, NForm, NFormItem,
+  NRadio, NRadioGroup, NRadioButton, NSwitch, NSpin, NDivider, NInputGroup
 } from 'naive-ui'
 import {
   StorefrontOutline, RefreshOutline, SearchOutline, SettingsOutline, TrashOutline, CubeOutline,
-  PlayOutline, StopOutline
+  PlayOutline, StopOutline, DownloadOutline, AddOutline, CheckmarkOutline, CloseOutline
 } from '@vicons/ionicons5'
 import PageHero from '../components/PageHero.vue'
 import StatCard from '../components/StatCard.vue'
@@ -17,13 +16,14 @@ import api from '../api'
 
 const router = useRouter()
 const message = useMessage()
+
+// ═══════════════ 本地插件（Tab1） ═══════════════
 const rows = ref<any[]>([])
 const keyword = ref('')
 const category = ref('all')
 const loading = ref(false)
 const scanning = ref(false)
 
-// 插件分类（五大类）
 const CATEGORIES = [
   { value: 'all', label: '全部' },
   { value: 'entertainment', label: '娱乐' },
@@ -36,7 +36,6 @@ const CATEGORY_LABEL: Record<string, string> = {
   entertainment: '娱乐', tool: '工具', 'group-admin': '群管', service: '服务', other: '其他'
 }
 
-// 命令执行统计（风控数据源）
 const cmdStat = ref<Record<string, any>>({ execCount: 0, failCount: 0, successRate: 100, rateLimitHits: 0 })
 async function loadCmdStat() {
   try {
@@ -118,7 +117,6 @@ async function unload(p: any) {
   }
 }
 
-// ===== 卸载确认弹窗 =====
 const showUnloadModal = ref(false)
 const confirmPlugin = ref<any>(null)
 function askUnload(p: any) {
@@ -129,98 +127,454 @@ function doUnload() {
   if (confirmPlugin.value) unload(confirmPlugin.value)
   showUnloadModal.value = false
 }
-
 function openPage(p: any) {
   router.push('/plugins/p/' + p.id)
 }
 
-onMounted(() => { load(); loadCmdStat() })
+// ═══════════════ 插件市场（Tab2） ═══════════════
+const marketPlugins = ref<any[]>([])
+const marketLoading = ref(false)
+const installingId = ref('')
+
+async function loadMarket() {
+  marketLoading.value = true
+  try {
+    marketPlugins.value = await api.marketList()
+  } catch (e: any) {
+    message.error('拉取插件市场失败：' + (e?.message ?? e))
+  } finally {
+    marketLoading.value = false
+  }
+}
+
+async function install(p: any) {
+  installingId.value = p.pluginId + '@' + p.version
+  try {
+    const r = await api.marketInstall(p.pluginId, p.version)
+    if (r.status === 'ok') {
+      message.success(`已下载安装 ${p.pluginId}@${p.version}，正在加载...`)
+      await api.scanPlugins()
+      message.success('插件已加载，可到「本地插件」查看')
+      await load()
+    } else {
+      message.error('安装失败：' + (r.message || '未知错误'))
+    }
+  } catch (e: any) {
+    message.error('安装失败：' + (e?.message ?? e))
+  } finally {
+    installingId.value = ''
+  }
+}
+
+// ═══════════════ 上传 / 我的提交（Tab3） ═══════════════
+const submitForm = ref({ name: '', description: '', version: '', category: 'tool', submitter: '' })
+const submitJar = ref<File | null>(null)
+const submitting = ref(false)
+const mySubs = ref<any[]>([])
+
+const STATUS_LABEL: Record<string, { text: string; type: 'default' | 'info' | 'success' | 'error' | 'warning' }> = {
+  PENDING: { text: '审核中', type: 'warning' },
+  APPROVED: { text: '已上架', type: 'success' },
+  REJECTED: { text: '已拒绝', type: 'error' }
+}
+
+async function loadMySubs() {
+  try {
+    mySubs.value = await api.mySubmissions()
+  } catch { /* 不影响 */ }
+}
+
+function onJarChange(e: Event) {
+  const input = e.target as HTMLInputElement
+  submitJar.value = input.files?.[0] || null
+}
+
+async function doSubmit() {
+  if (!submitForm.value.name || !submitForm.value.version) {
+    message.warning('请填写插件名称和版本')
+    return
+  }
+  if (!submitJar.value) {
+    message.warning('请选择要上传的 jar 包')
+    return
+  }
+  submitting.value = true
+  try {
+    const fd = new FormData()
+    fd.append('name', submitForm.value.name)
+    fd.append('description', submitForm.value.description || '')
+    fd.append('version', submitForm.value.version)
+    fd.append('category', submitForm.value.category || 'other')
+    fd.append('submitter', submitForm.value.submitter || '')
+    fd.append('jar', submitJar.value)
+    const r = await api.marketSubmit(fd)
+    if (r.status === 'ok') {
+      message.success('提交成功，等待审核')
+      submitForm.value = { name: '', description: '', version: '', category: 'tool', submitter: '' }
+      submitJar.value = null
+      await loadMySubs()
+    } else {
+      message.error('提交失败：' + (r.message || '未知错误'))
+    }
+  } catch (e: any) {
+    message.error('提交失败：' + (e?.message ?? e))
+  } finally {
+    submitting.value = false
+  }
+}
+
+// ═══════════════ 审核台（Tab4） ═══════════════
+const pendingList = ref<any[]>([])
+const auditLoading = ref(false)
+const rejectModal = ref(false)
+const rejectTarget = ref<any>(null)
+const rejectReason = ref('')
+const approveOfficial = ref(false)
+
+async function loadPending() {
+  auditLoading.value = true
+  try {
+    pendingList.value = await api.marketPending()
+  } catch { /* 不影响 */ } finally {
+    auditLoading.value = false
+  }
+}
+
+async function doApprove(p: any) {
+  try {
+    const r = await api.marketApprove(p.submissionId, approveOfficial.value)
+    if (r.status === 'ok') {
+      message.success('已上架：' + (p.name || p.pluginId))
+      await loadPending()
+      await loadMarket()
+    } else {
+      message.error('操作失败：' + (r.message || '未知错误'))
+    }
+  } catch (e: any) {
+    message.error('操作失败：' + (e?.message ?? e))
+  }
+}
+
+function openReject(p: any) {
+  rejectTarget.value = p
+  rejectReason.value = ''
+  rejectModal.value = true
+}
+
+async function doReject() {
+  try {
+    const r = await api.marketReject(rejectTarget.value.submissionId, rejectReason.value)
+    if (r.status === 'ok') {
+      message.success('已拒绝：' + (rejectTarget.value.name || rejectTarget.value.pluginId))
+      rejectModal.value = false
+      await loadPending()
+    } else {
+      message.error('操作失败：' + (r.message || '未知错误'))
+    }
+  } catch (e: any) {
+    message.error('操作失败：' + (e?.message ?? e))
+  }
+}
+
+// ═══════════════ 设置（Tab5） ═══════════════
+const mSettings = ref({ enabled: false, repoUrl: '', gitUser: '', hasToken: false })
+const gitTokenInput = ref('')
+const savingSettings = ref(false)
+
+async function loadSettings() {
+  try {
+    mSettings.value = await api.marketSettings()
+  } catch { /* 不影响 */ }
+}
+
+async function saveSettings() {
+  savingSettings.value = true
+  try {
+    await api.saveMarketSettings({
+      enabled: mSettings.value.enabled,
+      repoUrl: mSettings.value.repoUrl,
+      gitUser: mSettings.value.gitUser,
+      gitToken: gitTokenInput.value
+    })
+    message.success('设置已保存')
+    gitTokenInput.value = ''
+    await loadSettings()
+  } catch (e: any) {
+    message.error('保存失败：' + (e?.message ?? e))
+  } finally {
+    savingSettings.value = false
+  }
+}
+
+onMounted(() => {
+  load()
+  loadCmdStat()
+  loadMarket()
+  loadMySubs()
+  loadPending()
+  loadSettings()
+})
 </script>
 
 <template>
   <div>
-    <PageHero title="插件市场" subtitle="卡片式管理全部插件 · 扫描 / 启停 / 热重载 / 卸载" :icon="StorefrontOutline">
-      <NSpace align="center">
-        <NButton type="primary" :loading="scanning" @click="scan">
-          <template #icon><NIcon><RefreshOutline /></NIcon></template>
-          扫描新插件
-        </NButton>
-        <NInput v-model:value="keyword" placeholder="搜索插件名 / ID / 描述" clearable style="width: 220px">
-          <template #prefix><NIcon :component="SearchOutline" /></template>
-        </NInput>
-      </NSpace>
-    </PageHero>
+    <PageHero title="插件市场" subtitle="本地插件管理 + 中央插件库（浏览 / 上传 / 审核 / 安装）" :icon="StorefrontOutline" />
 
-    <!-- 分类筛选 -->
-    <NSpace align="center" style="margin-bottom: 12px">
-      <NSelect v-model:value="category" :options="CATEGORIES" size="small" style="width: 140px" />
-      <NText depth="3" style="font-size: 12px">分类：娱乐 / 工具 / 群管 / 服务 / 其他 · 来源：官方 / 社区</NText>
-    </NSpace>
+    <NTabs type="line" animated>
+      <!-- ══════ Tab1 本地插件 ══════ -->
+      <NTabPane name="local" tab="本地插件">
+        <NSpace align="center" style="margin-bottom: 12px">
+          <NButton type="primary" :loading="scanning" @click="scan">
+            <template #icon><NIcon><RefreshOutline /></NIcon></template>
+            扫描新插件
+          </NButton>
+          <NInput v-model:value="keyword" placeholder="搜索插件名 / ID / 描述" clearable style="width: 220px">
+            <template #prefix><NIcon :component="SearchOutline" /></template>
+          </NInput>
+          <NSelect v-model:value="category" :options="CATEGORIES" size="small" style="width: 140px" />
+        </NSpace>
 
-    <NEmpty v-if="!loading && !filtered.length" description="暂无插件，点「扫描新插件」或把 jar 放入 plugins/ 目录" style="padding: 60px 0" />
+        <NEmpty v-if="!loading && !filtered.length" description="暂无插件，点「扫描新插件」或把 jar 放入 plugins/ 目录" style="padding: 60px 0" />
 
-    <!-- 插件执行统计（来自框架命令注册表） -->
-    <NGrid :cols="24" :x-gap="12" :y-gap="12" responsive="screen" item-responsive style="margin-bottom: 16px">
-      <NGi span="24 s:12 m:8 l:6">
-        <StatCard :icon="PlayOutline" color="#5b5bd6" :value="Number(cmdStat.execCount ?? 0)" label="命令执行次数（进程累计）" />
-      </NGi>
-      <NGi span="24 s:12 m:8 l:6">
-        <StatCard :icon="StopOutline" color="#e5484d" :value="Number(cmdStat.failCount ?? 0)" label="命令执行异常" />
-      </NGi>
-      <NGi span="24 s:12 m:8 l:6">
-        <StatCard :icon="PlayOutline" color="#18a058" :value="(cmdStat.successRate ?? 100) + '%'" label="命令成功率" :animate="false" />
-      </NGi>
-      <NGi span="24 s:12 m:8 l:6">
-        <StatCard :icon="SettingsOutline" color="#f0a020" :value="Number(cmdStat.rateLimitHits ?? 0)" label="命令限速命中（@Command rateLimit）" />
-      </NGi>
-    </NGrid>
+        <NGrid :cols="24" :x-gap="12" :y-gap="12" responsive="screen" item-responsive style="margin-bottom: 16px">
+          <NGi span="24 s:12 m:8 l:6">
+            <StatCard :icon="PlayOutline" color="#5b5bd6" :value="Number(cmdStat.execCount ?? 0)" label="命令执行次数（进程累计）" />
+          </NGi>
+          <NGi span="24 s:12 m:8 l:6">
+            <StatCard :icon="StopOutline" color="#e5484d" :value="Number(cmdStat.failCount ?? 0)" label="命令执行异常" />
+          </NGi>
+          <NGi span="24 s:12 m:8 l:6">
+            <StatCard :icon="PlayOutline" color="#18a058" :value="(cmdStat.successRate ?? 100) + '%'" label="命令成功率" :animate="false" />
+          </NGi>
+          <NGi span="24 s:12 m:8 l:6">
+            <StatCard :icon="SettingsOutline" color="#f0a020" :value="Number(cmdStat.rateLimitHits ?? 0)" label="命令限速命中（@Command rateLimit）" />
+          </NGi>
+        </NGrid>
 
-    <NGrid :cols="24" :x-gap="16" :y-gap="16" responsive="screen" item-responsive class="grid">
-      <NGi v-for="p in filtered" :key="p.id" span="24 m:12 l:8 xl:6">
-        <NCard hoverable class="p-card" @click="openPage(p)">
-          <div class="p-head">
-            <div class="p-icon"><NIcon size="20"><CubeOutline /></NIcon></div>
-            <div class="p-title">
-              <div class="p-name">
-                <NText strong>{{ p.name || p.id }}</NText>
-                <NTag size="small" :bordered="false" :type="p.running ? 'success' : 'default'" round>{{ p.running ? '运行中' : '已停用' }}</NTag>
-                <NTag size="small" :bordered="false" :type="p.origin === 'official' ? 'info' : 'warning'" round>{{ p.origin === 'official' ? '官方' : '社区' }}</NTag>
-                <NTag size="small" :bordered="false" type="primary" round>{{ CATEGORY_LABEL[p.category] || '其他' }}</NTag>
+        <NGrid :cols="24" :x-gap="16" :y-gap="16" responsive="screen" item-responsive class="grid">
+          <NGi v-for="p in filtered" :key="p.id" span="24 m:12 l:8 xl:6">
+            <NCard hoverable class="p-card" @click="openPage(p)">
+              <div class="p-head">
+                <div class="p-icon"><NIcon size="20"><CubeOutline /></NIcon></div>
+                <div class="p-title">
+                  <div class="p-name">
+                    <NText strong>{{ p.name || p.id }}</NText>
+                    <NTag size="small" :bordered="false" :type="p.running ? 'success' : 'default'" round>{{ p.running ? '运行中' : '已停用' }}</NTag>
+                    <NTag size="small" :bordered="false" :type="p.origin === 'official' ? 'info' : 'warning'" round>{{ p.origin === 'official' ? '官方' : '社区' }}</NTag>
+                    <NTag size="small" :bordered="false" type="primary" round>{{ CATEGORY_LABEL[p.category] || '其他' }}</NTag>
+                  </div>
+                  <NText depth="3" style="font-size: 12px">{{ p.id }} · v{{ p.version }}</NText>
+                </div>
               </div>
-              <NText depth="3" style="font-size: 12px">{{ p.id }} · v{{ p.version }}</NText>
+              <NText depth="3" class="p-desc">{{ p.description || '—' }}</NText>
+              <div class="p-author">作者：{{ p.provider || '—' }}</div>
+              <div class="p-ops" @click.stop>
+                <NButton
+                  size="small" block
+                  :type="p.running ? 'warning' : 'primary'"
+                  :disabled="loading"
+                  class="op-main"
+                  @click="toggle(p)"
+                >
+                  <template #icon><NIcon size="14"><component :is="p.running ? StopOutline : PlayOutline" /></NIcon></template>
+                  {{ p.running ? '停用' : '启用' }}
+                </NButton>
+                <NGrid :cols="3" :x-gap="6" class="op-sub">
+                  <NGi><NButton size="small" secondary block @click="reload(p)">
+                    <template #icon><NIcon size="14"><RefreshOutline /></NIcon></template>重载
+                  </NButton></NGi>
+                  <NGi><NButton size="small" secondary block @click="openPage(p)">
+                    <template #icon><NIcon size="14"><SettingsOutline /></NIcon></template>配置
+                  </NButton></NGi>
+                  <NGi><NButton size="small" type="error" ghost block @click="askUnload(p)">
+                    <template #icon><NIcon size="14"><TrashOutline /></NIcon></template>卸载
+                  </NButton></NGi>
+                </NGrid>
+              </div>
+            </NCard>
+          </NGi>
+        </NGrid>
+      </NTabPane>
+
+      <!-- ══════ Tab2 插件市场 ══════ -->
+      <NTabPane name="store" tab="插件市场">
+        <NSpace align="center" style="margin-bottom: 12px">
+          <NButton :loading="marketLoading" @click="loadMarket">
+            <template #icon><NIcon><RefreshOutline /></NIcon></template>
+            刷新市场
+          </NButton>
+          <NText depth="3" style="font-size: 12px">
+            {{ mSettings.repoUrl || 'https://cnb.cool/...' }} · 已上架 {{ marketPlugins.length }} 个插件
+          </NText>
+        </NSpace>
+        <NEmpty v-if="!marketLoading && !marketPlugins.length" description="市场暂无已上架插件" style="padding: 60px 0" />
+        <NGrid :cols="24" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
+          <NGi v-for="p in marketPlugins" :key="p.pluginId + '@' + p.version" span="24 m:12 l:8 xl:6">
+            <NCard hoverable class="p-card">
+              <div class="p-head">
+                <div class="p-icon"><NIcon size="20"><CubeOutline /></NIcon></div>
+                <div class="p-title">
+                  <div class="p-name">
+                    <NText strong>{{ p.name || p.pluginId }}</NText>
+                    <NTag v-if="p.official" size="small" :bordered="false" type="info" round>官方</NTag>
+                    <NTag size="small" :bordered="false" type="primary" round>{{ CATEGORY_LABEL[p.category] || '其他' }}</NTag>
+                  </div>
+                  <NText depth="3" style="font-size: 12px">{{ p.pluginId }} · v{{ p.version }}</NText>
+                </div>
+              </div>
+              <NText depth="3" class="p-desc">{{ p.description || '—' }}</NText>
+              <div class="p-author">作者：{{ p.author || '—' }}</div>
+              <NButton
+                type="primary" size="small" block
+                :loading="installingId === p.pluginId + '@' + p.version"
+                @click="install(p)"
+              >
+                <template #icon><NIcon size="14"><DownloadOutline /></NIcon></template>
+                一键安装
+              </NButton>
+            </NCard>
+          </NGi>
+        </NGrid>
+      </NTabPane>
+
+      <!-- ══════ Tab3 上传插件 ══════ -->
+      <NTabPane name="submit" tab="上传插件">
+        <NGrid :cols="24" :x-gap="20" responsive="screen" item-responsive>
+          <NGi span="24 l:12">
+            <NCard title="提交插件到市场" size="small">
+              <NForm label-placement="left" label-width="80">
+                <NFormItem label="插件名称"><NInput v-model:value="submitForm.name" placeholder="如：接口测试插件" /></NFormItem>
+                <NFormItem label="版本"><NInput v-model:value="submitForm.version" placeholder="如：1.3.1" style="width: 200px" /></NFormItem>
+                <NFormItem label="分类">
+                  <NRadioGroup v-model:value="submitForm.category">
+                    <NRadioButton value="entertainment">娱乐</NRadioButton>
+                    <NRadioButton value="tool">工具</NRadioButton>
+                    <NRadioButton value="group-admin">群管</NRadioButton>
+                    <NRadioButton value="service">服务</NRadioButton>
+                    <NRadioButton value="other">其他</NRadioButton>
+                  </NRadioGroup>
+                </NFormItem>
+                <NFormItem label="作者"><NInput v-model:value="submitForm.submitter" placeholder="昵称（选填）" style="width: 240px" /></NFormItem>
+                <NFormItem label="描述"><NInput v-model:value="submitForm.description" type="textarea" :rows="3" placeholder="插件功能说明（选填）" /></NFormItem>
+                <NFormItem label="jar 包">
+                  <input type="file" accept=".jar" class="jar-input" @change="onJarChange" />
+                  <NText v-if="submitJar" depth="3" style="font-size: 12px; margin-left: 8px">
+                    {{ submitJar.name }}（{{ (submitJar.size / 1024).toFixed(1) }} KB）
+                  </NText>
+                </NFormItem>
+                <NSpace>
+                  <NButton type="primary" :loading="submitting" @click="doSubmit">
+                    <template #icon><NIcon><AddOutline /></NIcon></template>
+                    提交审核
+                  </NButton>
+                  <NText depth="3" style="font-size: 12px">提交后状态为「审核中」，管理员通过后自动上架</NText>
+                </NSpace>
+              </NForm>
+            </NCard>
+          </NGi>
+          <NGi span="24 l:12">
+            <NCard title="我的提交" size="small">
+              <NEmpty v-if="!mySubs.length" description="还没有提交过插件" style="padding: 40px 0" />
+              <div v-for="s in mySubs" :key="s.submissionId" class="sub-row">
+                <div class="sub-info">
+                  <NText strong>{{ s.name || s.pluginId }}</NText>
+                  <NText depth="3" style="font-size: 12px; margin-left: 8px">{{ s.pluginId }} · v{{ s.version }}</NText>
+                </div>
+                <NTag size="small" :bordered="false" :type="STATUS_LABEL[s.status]?.type || 'default'" round>
+                  {{ STATUS_LABEL[s.status]?.text || s.status }}
+                </NTag>
+                <NText v-if="s.status === 'REJECTED' && s.rejectReason" depth="3" style="font-size: 12px; display: block; margin-top: 2px">
+                  拒绝理由：{{ s.rejectReason }}
+                </NText>
+              </div>
+              <NButton v-if="mySubs.length" size="small" quaternary @click="loadMySubs">
+                <template #icon><NIcon><RefreshOutline /></NIcon></template>刷新状态
+              </NButton>
+            </NCard>
+          </NGi>
+        </NGrid>
+      </NTabPane>
+
+      <!-- ══════ Tab4 审核台 ══════ -->
+      <NTabPane name="audit" tab="审核台">
+        <NSpace align="center" style="margin-bottom: 12px">
+          <NButton :loading="auditLoading" @click="loadPending">
+            <template #icon><NIcon><RefreshOutline /></NIcon></template>
+            刷新待审
+          </NButton>
+          <NText depth="3" style="font-size: 12px">管理员：下载 jar → 隔离 bot 测试 → 通过上架 / 拒绝</NText>
+        </NSpace>
+        <NEmpty v-if="!auditLoading && !pendingList.length" description="暂无待审核的插件提交" style="padding: 60px 0" />
+        <NCard v-for="p in pendingList" :key="p.submissionId" size="small" class="pending-card">
+          <div class="pending-row">
+            <div class="sub-info">
+              <NText strong>{{ p.name || p.pluginId }}</NText>
+              <NTag size="small" :bordered="false" type="warning" round style="margin-left: 8px">审核中</NTag>
+              <NTag size="small" :bordered="false" type="primary" round>{{ CATEGORY_LABEL[p.category] || '其他' }}</NTag>
+              <div style="margin-top: 2px">
+                <NText depth="3" style="font-size: 12px">{{ p.pluginId }} · v{{ p.version }} · 提交人 {{ p.submitter || 'unknown' }} · {{ (p.submittedAt || '').replace('T', ' ').slice(0, 19) }}</NText>
+              </div>
+              <NText v-if="p.description" depth="3" style="font-size: 12px; display: block; margin-top: 4px">{{ p.description }}</NText>
+            </div>
+            <div class="pending-ops">
+              <NSwitch v-model:value="approveOfficial" size="small" style="margin-right: 8px">
+                <template #checked>官方</template>
+                <template #unchecked>社区</template>
+              </NSwitch>
+              <NButton size="small" tag="a" :href="p.downloadUrl" target="_blank" download secondary>
+                <template #icon><NIcon size="14"><DownloadOutline /></NIcon></template>下载测试
+              </NButton>
+              <NButton size="small" type="success" @click="doApprove(p)">
+                <template #icon><NIcon size="14"><CheckmarkOutline /></NIcon></template>通过
+              </NButton>
+              <NButton size="small" type="error" ghost @click="openReject(p)">
+                <template #icon><NIcon size="14"><CloseOutline /></NIcon></template>拒绝
+              </NButton>
             </div>
           </div>
-          <NText depth="3" class="p-desc">{{ p.description || '—' }}</NText>
-          <div class="p-author">作者：{{ p.provider || '—' }}</div>
-          <div class="p-ops" @click.stop>
-            <NButton
-              size="small"
-              block
-              :type="p.running ? 'warning' : 'primary'"
-              :disabled="loading"
-              class="op-main"
-              @click="toggle(p)"
-            >
-              <template #icon><NIcon size="14"><component :is="p.running ? StopOutline : PlayOutline" /></NIcon></template>
-              {{ p.running ? '停用' : '启用' }}
-            </NButton>
-            <NGrid :cols="3" :x-gap="6" class="op-sub">
-              <NGi><NButton size="small" secondary block @click="reload(p)">
-                <template #icon><NIcon size="14"><RefreshOutline /></NIcon></template>重载
-              </NButton></NGi>
-              <NGi><NButton size="small" secondary block @click="openPage(p)">
-                <template #icon><NIcon size="14"><SettingsOutline /></NIcon></template>配置
-              </NButton></NGi>
-              <NGi><NButton size="small" type="error" ghost block @click="askUnload(p)">
-                <template #icon><NIcon size="14"><TrashOutline /></NIcon></template>卸载
-              </NButton></NGi>
-            </NGrid>
-          </div>
         </NCard>
-      </NGi>
-    </NGrid>
 
-    <!-- 卸载确认弹窗 -->
+        <NModal v-model:show="rejectModal" preset="card" title="拒绝插件" style="width: 420px; max-width: 92vw" :bordered="false">
+          <NInput v-model:value="rejectReason" type="textarea" :rows="3" placeholder="拒绝理由（开发者可见，选填）" />
+          <template #footer>
+            <NSpace justify="end">
+              <NButton size="small" @click="rejectModal = false">取消</NButton>
+              <NButton size="small" type="error" @click="doReject">确认拒绝</NButton>
+            </NSpace>
+          </template>
+        </NModal>
+      </NTabPane>
+
+      <!-- ══════ Tab5 设置 ══════ -->
+      <NTabPane name="settings" tab="设置">
+        <NCard title="插件市场配置" size="small" style="max-width: 640px">
+          <NForm label-placement="left" label-width="120">
+            <NFormItem label="启用市场">
+              <NSwitch v-model:value="mSettings.enabled" />
+            </NFormItem>
+            <NFormItem label="市场仓库地址">
+              <NInput v-model:value="mSettings.repoUrl" placeholder="https://cnb.cool/org/repo.git" />
+            </NFormItem>
+            <NFormItem label="git 用户名">
+              <NInput v-model:value="mSettings.gitUser" placeholder="cnb" style="width: 240px" />
+            </NFormItem>
+            <NFormItem label="git 凭据">
+              <NInputGroup>
+                <NInput v-model:value="gitTokenInput" type="password" show-password-on="click" :placeholder="mSettings.hasToken ? '已配置（留空不修改）' : '部署令牌 / 访问令牌'" />
+              </NInputGroup>
+            </NFormItem>
+            <NFormItem label="">
+              <NSpace>
+                <NButton type="primary" :loading="savingSettings" @click="saveSettings">保存配置</NButton>
+                <NText depth="3" style="font-size: 12px">浏览/安装无需凭据；上传与审核需要管理员 git 凭据</NText>
+              </NSpace>
+            </NFormItem>
+          </NForm>
+        </NCard>
+      </NTabPane>
+    </NTabs>
+
+    <!-- 卸载确认弹窗（本地插件） -->
     <NModal
       v-model:show="showUnloadModal"
       preset="card"
@@ -245,7 +599,6 @@ onMounted(() => { load(); loadCmdStat() })
         </NSpace>
       </template>
     </NModal>
-
   </div>
 </template>
 
@@ -259,7 +612,7 @@ onMounted(() => { load(); loadCmdStat() })
   display: flex; align-items: center; justify-content: center;
 }
 .p-title { min-width: 0; flex: 1; }
-.p-name { display: flex; align-items: center; gap: 8px; }
+.p-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .p-desc {
   display: block; font-size: 12px; min-height: 36px; line-height: 1.5;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
@@ -269,4 +622,10 @@ onMounted(() => { load(); loadCmdStat() })
 .op-main { border-radius: 7px; }
 .op-sub :deep(.n-button) { border-radius: 6px; padding-left: 6px; padding-right: 6px; }
 .unload-list { margin: 0; padding-left: 20px; line-height: 1.9; font-size: 13px; color: var(--n-text-color-2); }
+.jar-input { font-size: 13px; }
+.sub-row { display: flex; flex-direction: column; padding: 10px 0; border-bottom: 1px dashed var(--n-border-color); }
+.sub-info { display: flex; align-items: center; flex-wrap: wrap; }
+.pending-card { margin-bottom: 12px; }
+.pending-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.pending-ops { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 </style>
