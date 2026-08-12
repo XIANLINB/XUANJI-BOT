@@ -89,7 +89,7 @@ svc.sendToGroup(botKey, groupOpenid, msg);
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `label` | string | 否 | 按钮文字，**最多 10 字符** |
-| `visited_label` | string | 否 | 点击后文字，不传则保持不变（实测：回调按钮点击后无 visited_label 可能变空白，建议传） |
+| `visited_label` | string | **建议必配** | 点击后文字。**实测：跳转/回调按钮点击后 label 一律被清空为空白**，必须配 visited_label 才能显示点击后文字（如"已点击✓"，实测有效） |
 | `style` | integer | 否 | **0=灰线框 1=蓝线框 2=白字 3=蓝底白字** |
 
 > ⚠️ **style 只有这 4 档**，官方未定义红框/红字/蓝字等其他颜色，传其他值无效（实测客户端渲染还有差异：白字按钮电脑 QQ 显示无边框、手机 QQ 显示灰边框——同一 style 不同客户端表现不完全一致，属平台行为）。
@@ -121,8 +121,8 @@ svc.sendToGroup(botKey, groupOpenid, msg);
 
 | type | 名称 | 点击行为 | 实测 |
 |---|---|---|---|
-| **0** | 跳转按钮 | 跳转 http URL 或小程序 | 配 permission 后可正常跳转（未配 permission 时「无权限操作」） |
-| **1** | 回调按钮 | 回调后台接口，`data` 传给后台 | 触发 `INTERACTION_CREATE`（type=11）→ 后端须 `PUT /interactions/{id}` 回应；**点击后按钮文字可能变空白**（见下文） |
+| **0** | 跳转按钮 | 跳转 http URL 或小程序 | 配 permission 后正常弹出网页；**不触发 INTERACTION_CREATE（后端无日志）**；点击后按钮文字清空 → 需 visited_label |
+| **1** | 回调按钮 | 回调后台接口，`data` 传给后台 | 触发 `INTERACTION_CREATE`（type=11）→ 后端须 `PUT /interactions/{id}` 回应；**无 visited_label 时点击后按钮文字变空白，有 visited_label 时显示点击后文字（实测"已点击✓"有效）** |
 | **2** | 指令按钮 | 输入框自动插入 `@bot data` | 正常；配 `enter:true` 时点击直接发送 |
 
 ### 回调按钮（type=1）点击后的完整链路
@@ -131,7 +131,9 @@ svc.sendToGroup(botKey, groupOpenid, msg);
 2. 后端须在有效时间内回应 `PUT /interactions/{id}` body `{"code":0}`，否则客户端一直 loading 直到超时
 3. **同一 interaction_id 只能回应一次**；code：0=成功 1=操作失败 2=操作频繁 3=重复操作 4=没有权限 5=仅管理员操作
 
-> ⚠️ **实测：回调按钮点击成功后按钮文字会变空白**（仅管理员/仅我这类带权限按钮点击成功后被清空）。官方互动响应接口只能回 `code`，**不能回传按钮内容**；给 `visited_label` 也不能完全避免（平台行为）。若产品上需要"点击后按钮保持/变化"，需要二次发送新消息替换，或接受平台现状。
+> ⚠️ **实测：跳转/回调按钮点击后按钮 label 都会被清空为空白**（平台通用行为，非配置错误）。
+> **解决办法：给按钮配 `render_data.visited_label`**（点击后显示的文字，如"已点击✓"）——实测有效。
+> 官方互动响应接口只能回 `code`、不能回传按钮内容，所以 `visited_label` 是按钮点击后的唯一前端反馈手段。
 
 ---
 
@@ -193,12 +195,13 @@ public String button(GroupMessageEvent e, PluginServices svc) {
 | 配置 | 结果 |
 |---|---|
 | 按钮**不传 permission** | 点击一律「无权限操作」（群主也一样），后端无日志 —— **必须显式传 permission** |
-| `permission.type=2`（所有人） | 群主、普通成员均可点 ✓ |
+| `permission.type=2`（所有人） | 群主、普通成员均可点 ✓（#按钮3 全员配 type=2 后全部可点验证通过） |
 | `permission.type=1`（管理员） | 群主可点、普通成员「无权限操作」 ✓ |
 | `permission.type=0` + `specify_user_ids` | 仅指定用户可点，其他人「无权限操作」 ✓ |
 | `action.type=2` + `enter:true` | 点击自动在输入框插入 `@bot data`，可直接发送 ✓ |
-| `action.type=1`（回调）点击成功 | 触发 INTERACTION_CREATE；按钮文字**变空白**（平台行为，无 visited_label 时） |
-| `action.type=0`（跳转） | 配 permission 后可跳转 |
+| `action.type=1`（回调）无 visited_label | 触发 INTERACTION_CREATE；点击后按钮**变空白** |
+| `action.type=1`（回调）+ `visited_label` | 触发 INTERACTION_CREATE；点击后显示 visited_label（如"已点击✓"）✓ |
+| `action.type=0`（跳转） | 配 permission 后正常弹出网页；**不触发交互事件（后端无日志）**；点击后按钮文字清空，需 visited_label |
 | `render_data.style` 0-3 | 正常渲染；不同客户端表现有差异（白字电脑无边框/手机灰边框） |
 | style 其他值（如想红框红字） | **不支持**，官方仅 0-3 |
 | 指令按钮电脑 vs 手机 | 电脑灰线框黑字、手机灰线框红字（客户端差异，非配置问题） |
@@ -220,9 +223,9 @@ public String button(GroupMessageEvent e, PluginServices svc) {
 
 1. **permission 必传**（建议统一 `{"type": 2}`）
 2. **键盘只能挂 Markdown 消息**（msg_type=2）
-3. 回调按钮点击后要回应 `PUT /interactions/{id}`（`{"code":0}`），同一 id 只能回应一次
+3. 回调按钮点击后要回应 `PUT /interactions/{id}`（`{"code":0}`），同一 id 只能回应一次；跳转按钮不触发交互事件
 4. `label` 最多 10 字符
 5. `style` 只有 0-3，无其他颜色
-6. 回调按钮点击成功可能清空按钮文字（平台行为，可接受或二次发消息替换）
+6. **按钮（跳转/回调）点击后 label 一律清空** → 必须配 `visited_label` 显示点击后文字（实测"已点击✓"有效）
 7. `enter:true` 仅单聊指令按钮可用；群聊指令按钮点击是插入输入框不自动发
 8. 同一键盘按钮 `id` 必须唯一
