@@ -36,6 +36,7 @@
         <module>xuanji-llm</module>
         <module>xuanji-plugin-demo</module>
         <module>xuanji-plugin-groupnotify</module>
+        <module>xuanji-plugin-groupadmin</module>
         <module>xuanji-plugin-test</module>
         <module>xuanji-starter</module>
     </modules>
