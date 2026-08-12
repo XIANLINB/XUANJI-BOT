@@ -5,7 +5,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jgit.api.Git;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
@@ -31,19 +30,19 @@ import java.util.jar.JarFile;
 /**
  * 插件市场业务 — 基于「公开 git 仓库 + raw 匿名读取」的中央插件市场。
  *
- * <p>仓库约定结构（CNB 公开仓库，已验证链路）：
+ * <p>仓库结构（每个插件独立文件夹 + 专属清单，只保留一个上架版本）：
  * <pre>
- *   index.json                    已上架插件清单（公开，raw 匿名读取）
- *   plugins/&lt;pluginId&gt;/&lt;version&gt;/xxx.jar   已上架插件 jar（raw 匿名下载）
+ *   plugins/&lt;pluginId&gt;/plugin.json          该插件专属清单（覆盖式，记录当前上架版本）
+ *   plugins/&lt;pluginId&gt;/&lt;version&gt;/xxx.jar   当前上架版本 jar（旧版本上架时被清理）
  *   .pending/&lt;submissionId&gt;/meta.json       待审提交元数据
  *   .pending/&lt;submissionId&gt;/xxx.jar         待审 jar
  * </pre>
  *
  * <p>权限模型：
  * <ul>
- *   <li>上传（开发者）：用<b>上传令牌</b> git push 到 {@code .pending/}，状态 PENDING（无公开入口，不可发现）</li>
- *   <li>审核（管理员）：进入审核台需验证<b>管理员令牌</b>；通过（移入 {@code plugins/} + 更新 index.json）/ 拒绝（meta 标 REJECTED），操作持久化到本地审核记录</li>
- *   <li>公开：所有实例经<b>框架后端代理</b>拉 index.json + 下载 jar（sha256 校验），前端不接触仓库真实地址</li>
+ *   <li>上传（所有框架实例使用者）：用内置<b>上传令牌</b> git push 到 {@code .pending/}，状态 PENDING（无公开入口，不可发现）</li>
+ *   <li>审核（管理员）：进入审核台需验证内置<b>审核令牌</b>；通过（jar 移入 plugins/ 单版本 + 写 plugin.json）/ 拒绝（meta 标 REJECTED）</li>
+ *   <li>公开：所有实例经<b>框架后端代理</b>拉清单 + 下载 jar（sha256 校验），前端不接触仓库真实地址</li>
  * </ul>
  */
 @Slf4j
@@ -67,46 +66,54 @@ public class PluginMarketService {
 
     // ═══════════════════ 公开读取（匿名，后端代理） ═══════════════════
 
-    /** 拉取已上架插件清单（后端代理；downloadUrl 返回框架端点，不暴露仓库真实地址）。 */
+    /** 拉取已上架插件清单：JGit 工作副本遍历各插件 plugin.json（downloadUrl 返回框架代理端点）。 */
     public List<Map<String, Object>> listMarket() {
-        try {
-            byte[] body = httpGet(rawUrl(settings, MarketSettings.INDEX_PATH));
-            if (body == null) return List.of();
-            JsonNode root = Json.mapper().readTree(body);
-            JsonNode plugins = root == null ? null : root.get("plugins");
-            if (plugins == null || !plugins.isArray()) return List.of();
-            List<Map<String, Object>> list = new ArrayList<>();
-            for (JsonNode p : plugins) {
-                Map<String, Object> row = obj(p);
-                // 前端只拿框架代理下载端点（仓库真实地址不出后端）
-                row.put("downloadUrl", "/console/market/download?pluginId=" + p.path("pluginId").asText()
-                        + "&version=" + p.path("version").asText());
-                list.add(row);
+        List<Map<String, Object>> out = new ArrayList<>();
+        try (Git git = gitService.openOrPull(settings)) {
+            Path pluginsRoot = gitService.repoDir().resolve(MarketSettings.PLUGINS_DIR);
+            if (!Files.isDirectory(pluginsRoot)) return out;
+            List<Path> dirs;
+            try (var stream = Files.list(pluginsRoot)) {
+                dirs = stream.filter(Files::isDirectory).toList();
             }
-            return list;
+            for (Path dir : dirs) {
+                Path manifest = dir.resolve(MarketSettings.PLUGIN_MANIFEST);
+                if (!Files.isRegularFile(manifest)) continue;
+                try {
+                    Map<String, Object> row = obj(Json.mapper().readTree(Files.readAllBytes(manifest)));
+                    row.put("downloadUrl", "/console/market/download?pluginId=" + row.get("pluginId")
+                            + "&version=" + row.get("version"));
+                    out.add(row);
+                } catch (Exception e) {
+                    log.warn("[PluginMarket] 读取插件清单失败 {}: {}", dir.getFileName(), e.getMessage());
+                }
+            }
         } catch (Exception e) {
             log.warn("[PluginMarket] 拉取市场清单失败: {}", e.getMessage());
             return List.of();
         }
+        out.sort(Comparator.comparing(r -> String.valueOf(r.getOrDefault("updatedAt", "")), Comparator.reverseOrder()));
+        return out;
     }
 
-    /** 已上架 jar 下载（后端代理）：从 index.json 找真实 raw 地址，匿名拉取。 */
+    /** 已上架 jar 下载（后端代理）：从 plugin.json 读当前版本 jar 路径，匿名拉取。 */
     public byte[] downloadPluginJar(String pluginId, String version) {
         try {
-            JsonNode root = Json.mapper().readTree(httpGet(rawUrl(settings, MarketSettings.INDEX_PATH)));
-            if (root == null || !root.path("plugins").isArray()) return null;
-            for (JsonNode p : root.path("plugins")) {
-                if (pluginId.equals(p.path("pluginId").asText()) && version.equals(p.path("version").asText())) {
-                    return httpGet(p.path("downloadUrl").asText());
-                }
-            }
+            JsonNode m = Json.mapper().readTree(httpGet(rawUrl(settings,
+                    MarketSettings.PLUGINS_DIR + "/" + pluginId + "/" + MarketSettings.PLUGIN_MANIFEST)));
+            if (m == null) return null;
+            // 只提供当前上架版本；旧版本已被清理
+            if (!version.equals(m.path("version").asText())) return null;
+            String jarName = m.path("jarName").asText();
+            if (jarName.isBlank()) return null;
+            return httpGet(rawUrl(settings, MarketSettings.PLUGINS_DIR + "/" + pluginId + "/" + version + "/" + safeName(jarName)));
         } catch (Exception e) {
             log.warn("[PluginMarket] 下载插件失败 {}@{}: {}", pluginId, version, e.getMessage());
+            return null;
         }
-        return null;
     }
 
-    /** 安装插件到本地 plugins/（downloadUrl 拉取 + sha256 校验）。 */
+    /** 安装插件到本地 plugins/（代理拉取 + sha256 校验）。 */
     public Map<String, Object> install(String pluginId, String version) throws Exception {
         Map<String, Object> target = null;
         for (Map<String, Object> p : listMarket()) {
@@ -133,10 +140,11 @@ public class PluginMarketService {
                         + expectedSha + " 实际 " + actual);
             }
         }
-        String fileName = safeName(fileNameFromUrl((String) target.get("downloadUrl")));
+        // jar 文件名取自 plugin.json jarName（后端内部），前端拿不到
+        String jarName = safeName(String.valueOf(target.getOrDefault("jarName", pluginId + "-" + version + ".jar")));
         Path pluginsDir = Paths.get("plugins");
         Files.createDirectories(pluginsDir);
-        Path dest = pluginsDir.resolve(fileName);
+        Path dest = pluginsDir.resolve(jarName);
         Files.write(dest, jar);
         log.info("[PluginMarket] 已安装插件包: {} -> {} ({}B)", pluginId, dest, jar.length);
         Map<String, Object> r = new LinkedHashMap<>();
@@ -150,7 +158,7 @@ public class PluginMarketService {
 
     // ═══════════════════ 上传 / 我的提交 ═══════════════════
 
-    /** 开发者上传插件 → .pending/&lt;id&gt;/ → 审核中（用上传令牌 git push）。 */
+    /** 开发者上传插件 → .pending/&lt;id&gt;/ → 审核中（用内置上传令牌 git push）。 */
     public Map<String, Object> submit(String name, String description, String version, String category,
                                       String submitter, String jarFileName, byte[] jarBytes) throws Exception {
         if (name == null || name.isBlank()) throw new IllegalArgumentException("插件名称不能为空");
@@ -160,9 +168,6 @@ public class PluginMarketService {
         if (!jarFileName.toLowerCase().endsWith(".jar")) throw new IllegalArgumentException("仅支持 .jar 插件包");
 
         String gitToken = settings.getUploadToken();
-        if (gitToken == null || gitToken.isBlank()) {
-            throw new IllegalStateException("上传插件需要配置「上传令牌」（设置页填写，获取后仅用于提交）");
-        }
 
         // 从 jar manifest 读取插件 ID（PF4J 插件必需）
         String pluginId = readPluginId(jarBytes);
@@ -193,6 +198,7 @@ public class PluginMarketService {
             meta.put("status", "PENDING");
             meta.putNull("rejectReason");
             meta.put("jar", pendingDir + "/" + safeName(jarFileName));
+            meta.put("jarName", safeName(jarFileName));
             meta.put("sha256", sha);
             meta.put("submittedAt", Instant.now().toString());
             Files.write(targetDir.resolve("meta.json"), Json.mapper().writerWithDefaultPrettyPrinter().writeValueAsBytes(meta));
@@ -244,10 +250,8 @@ public class PluginMarketService {
                 if (!Files.isRegularFile(meta)) continue;
                 try {
                     JsonNode node = Json.mapper().readTree(Files.readAllBytes(meta));
-                    // 只展示审核中；已拒绝（REJECTED）不进入审核台
                     if (!"PENDING".equals(node.path("status").asText())) continue;
                     Map<String, Object> row = obj(node);
-                    // 审核下载地址走框架代理（带管理员令牌校验，后端不暴露仓库地址）
                     row.put("downloadUrl", "/console/market/pending/" + node.path("submissionId").asText() + "/download");
                     out.add(row);
                 } catch (Exception e) {
@@ -273,7 +277,10 @@ public class PluginMarketService {
         }
     }
 
-    /** 通过审核（需管理员令牌）：jar 移入 plugins/ + 更新 index.json + 删除 .pending/<id>。 */
+    /**
+     * 通过审核（需管理员令牌）：jar 移入 plugins/&lt;pluginId&gt;/&lt;version&gt;/ + 写/覆盖 plugin.json
+     * + 清理该插件旧版本目录（只保留当前上架版本）+ 删除 .pending/&lt;id&gt;。
+     */
     public Map<String, Object> approve(String submissionId, boolean official, String adminToken) throws Exception {
         requireAdmin(adminToken);
         try (Git git = gitService.openOrPull(settings)) {
@@ -281,62 +288,56 @@ public class PluginMarketService {
             Path pending = repo.resolve(MarketSettings.PENDING_DIR + "/" + submissionId);
             if (!Files.isDirectory(pending)) throw new IllegalStateException("待审提交不存在: " + submissionId);
             ObjectNode meta = (ObjectNode) Json.mapper().readTree(Files.readAllBytes(pending.resolve("meta.json")));
-            String pluginId = meta.path("pluginId").asText();
-            String version = meta.path("version").asText();
-            String jarPath = meta.path("jar").asText();
-            String jarName = jarPath.substring(jarPath.lastIndexOf('/') + 1);
+            String pluginId = safeName(meta.path("pluginId").asText());
+            String version = safeName(meta.path("version").asText());
+            String jarName = meta.path("jarName").asText();
+            if (jarName.isBlank()) {
+                String jarPath = meta.path("jar").asText();
+                jarName = jarPath.substring(jarPath.lastIndexOf('/') + 1);
+            }
+            jarName = safeName(jarName);
             String sha = meta.path("sha256").asText();
             String name = meta.path("name").asText();
             String category = meta.path("category").asText();
             String description = meta.path("description").asText();
             String submitter = meta.path("submitter").asText();
 
-            Path srcJar = pending.resolve(safeName(jarName));
-            if (!Files.isRegularFile(srcJar)) throw new IllegalStateException("待审 jar 缺失: " + jarPath);
-            Path destDir = repo.resolve(MarketSettings.PLUGINS_DIR + "/" + pluginId + "/" + version);
-            Files.createDirectories(destDir);
-            Files.move(srcJar, destDir.resolve(safeName(jarName)), StandardCopyOption.REPLACE_EXISTING);
+            // 1) jar 移入当前版本目录
+            Path srcJar = pending.resolve(jarName);
+            if (!Files.isRegularFile(srcJar)) throw new IllegalStateException("待审 jar 缺失: " + jarName);
+            Path pluginDir = repo.resolve(MarketSettings.PLUGINS_DIR + "/" + pluginId);
+            Path versionDir = pluginDir.resolve(version);
+            Files.createDirectories(versionDir);
+            Files.move(srcJar, versionDir.resolve(jarName), StandardCopyOption.REPLACE_EXISTING);
 
-            // 更新 index.json
-            Path indexFile = repo.resolve(MarketSettings.INDEX_PATH);
-            ObjectNode index;
-            if (Files.isRegularFile(indexFile)) {
-                index = (ObjectNode) Json.mapper().readTree(Files.readAllBytes(indexFile));
-            } else {
-                index = Json.obj();
-                index.put("market", "xuanji-plugins");
-                index.put("schemaVersion", 1);
-                index.put("updatedAt", Instant.now().toString());
-                index.set("plugins", Json.arr());
-            }
-            if (!index.has("plugins")) index.set("plugins", Json.arr());
-            ArrayNode plugins = (ArrayNode) index.get("plugins");
-
-            ObjectNode entry = Json.obj();
-            entry.put("pluginId", pluginId);
-            entry.put("name", name);
-            entry.put("version", version);
-            entry.put("category", category == null || category.isBlank() ? "other" : category);
-            entry.put("official", official);
-            entry.put("description", description == null ? "" : description);
-            entry.put("author", submitter == null ? "" : submitter);
-            entry.put("publishedAt", Instant.now().toString());
-            entry.put("downloadUrl", rawUrl(settings, MarketSettings.PLUGINS_DIR + "/" + pluginId + "/" + version + "/" + safeName(jarName)));
-            entry.put("sha256", sha);
-
-            boolean replaced = false;
-            for (int i = 0; i < plugins.size(); i++) {
-                JsonNode old = plugins.get(i);
-                if (pluginId.equals(old.path("pluginId").asText()) && version.equals(old.path("version").asText())) {
-                    plugins.set(i, entry);
-                    replaced = true;
-                    break;
+            // 2) 清理旧版本目录（只保留当前上架版本）
+            if (Files.isDirectory(pluginDir)) {
+                List<Path> stale;
+                try (var stream = Files.list(pluginDir)) {
+                    stale = stream.filter(Files::isDirectory)
+                            .filter(d -> !d.getFileName().toString().equals(version))
+                            .toList();
                 }
+                for (Path d : stale) deleteRecursively(d);
             }
-            if (!replaced) plugins.add(entry);
-            index.put("updatedAt", Instant.now().toString());
-            Files.write(indexFile, Json.mapper().writerWithDefaultPrettyPrinter().writeValueAsBytes(index));
 
+            // 3) 写/覆盖该插件专属清单 plugin.json
+            ObjectNode manifest = Json.obj();
+            manifest.put("pluginId", pluginId);
+            manifest.put("name", name);
+            manifest.put("version", version);
+            manifest.put("category", category == null || category.isBlank() ? "other" : category);
+            manifest.put("official", official);
+            manifest.put("description", description == null ? "" : description);
+            manifest.put("author", submitter == null ? "" : submitter);
+            manifest.put("jarName", jarName);
+            manifest.put("sha256", sha);
+            manifest.put("publishedAt", Instant.now().toString());
+            manifest.put("updatedAt", Instant.now().toString());
+            Files.write(pluginDir.resolve(MarketSettings.PLUGIN_MANIFEST),
+                    Json.mapper().writerWithDefaultPrettyPrinter().writeValueAsBytes(manifest));
+
+            // 4) 删除待审目录
             deleteRecursively(pending);
 
             gitService.commitAndPush(git, settings.getAdminToken(), "approve: " + pluginId + " " + version + " 已上架");
@@ -372,23 +373,19 @@ public class PluginMarketService {
 
     // ═══════════════════ 工具 ═══════════════════
 
-    /** 探测本机提交的当前状态：已上架 / 已拒绝（含理由） / 审核中。 */
+    /** 探测本机提交的当前状态：已上架（plugin.json 存在且版本一致）/ 已拒绝（含理由） / 审核中。 */
     private Map<String, Object> probeStatus(String pluginId, String version, String submissionId) {
         Map<String, Object> r = new LinkedHashMap<>();
         r.put("status", "PENDING");
         r.put("rejectReason", null);
         try {
-            // 已上架：index.json 中存在
-            byte[] idx = httpGet(rawUrl(settings, MarketSettings.INDEX_PATH));
-            if (idx != null) {
-                JsonNode root = Json.mapper().readTree(idx);
-                if (root != null && root.path("plugins").isArray()) {
-                    for (JsonNode p : root.path("plugins")) {
-                        if (pluginId.equals(p.path("pluginId").asText()) && version.equals(p.path("version").asText())) {
-                            r.put("status", "APPROVED");
-                            return r;
-                        }
-                    }
+            // 已上架：plugins/<pluginId>/plugin.json 存在且 version 一致
+            byte[] m = httpGet(rawUrl(settings, MarketSettings.PLUGINS_DIR + "/" + pluginId + "/" + MarketSettings.PLUGIN_MANIFEST));
+            if (m != null) {
+                JsonNode node = Json.mapper().readTree(m);
+                if (version.equals(node.path("version").asText())) {
+                    r.put("status", "APPROVED");
+                    return r;
                 }
             }
             // 已拒绝：.pending/<id>/meta.json 标 REJECTED
@@ -409,7 +406,7 @@ public class PluginMarketService {
 
     private void requireAdmin(String adminToken) {
         if (!settings.verifyAdminToken(adminToken)) {
-            throw new SecurityException("无管理员审核权限（管理员令牌错误或未配置）");
+            throw new SecurityException("无管理员审核权限（审核令牌错误）");
         }
     }
 
@@ -464,13 +461,8 @@ public class PluginMarketService {
 
     /** 文件名安全化：仅保留字母数字 ._- ，防止路径穿越。 */
     private static String safeName(String name) {
-        String n = name.replaceAll("[^a-zA-Z0-9._\\-]", "_");
+        String n = name == null ? "" : name.replaceAll("[^a-zA-Z0-9._\\-]", "_");
         return n.startsWith(".") ? "_" + n : n;
-    }
-
-    private static String fileNameFromUrl(String url) {
-        String p = url.substring(url.lastIndexOf('/') + 1);
-        return p.isEmpty() ? "plugin.jar" : p;
     }
 
     private static Map<String, Object> obj(JsonNode node) {

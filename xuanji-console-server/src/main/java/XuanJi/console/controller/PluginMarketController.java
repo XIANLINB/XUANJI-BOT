@@ -62,23 +62,28 @@ public class PluginMarketController {
                 .body(jar);
     }
 
-    /** 市场配置（掩码显示；token 仅返回是否已配置）。 */
+    /** 市场配置状态（令牌/仓库均为内置，只返回是否就绪，无需设置页）。 */
     @GetMapping("/settings")
     public Map<String, Object> settings() {
-        return settings.view();
+        return Map.of(
+                "enabled", settings.isEnabled(),
+                "repoUrl", maskUrl(settings.getRepoUrl()),
+                "hasUploadToken", settings.hasUploadToken(),
+                "hasAdminToken", settings.hasAdminToken());
     }
 
-    /** 保存市场配置（仓库地址 + 上传令牌 + 管理员令牌，敏感项加密落库）。 */
-    @PutMapping("/settings")
-    public Map<String, Object> saveSettings(@RequestBody Map<String, Object> body,
-                                            jakarta.servlet.http.HttpServletRequest req) {
-        settings.save(
-                str(body.get("repoUrl")),
-                str(body.get("uploadToken")),
-                str(body.get("adminToken")),
-                body.get("enabled") == null ? null : Boolean.parseBoolean(String.valueOf(body.get("enabled"))));
-        auditService.record("MARKET_SETTINGS", "保存插件市场配置", req);
-        return Map.of("status", "ok", "settings", settings.view());
+    private static String maskUrl(String url) {
+        try {
+            int scheme = url.indexOf("://");
+            if (scheme < 0) return "***";
+            String head = url.substring(0, scheme + 3);
+            String rest = url.substring(scheme + 3);
+            int slash = rest.indexOf('/');
+            String host = slash < 0 ? rest : rest.substring(0, slash);
+            return head + host + "/***";
+        } catch (Exception e) {
+            return "***";
+        }
     }
 
     /** 开发者上传插件（需已配置上传令牌；multipart：name/description/version/category/submitter + jar）。 */

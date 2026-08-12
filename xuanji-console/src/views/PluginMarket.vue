@@ -317,36 +317,13 @@ async function doReject() {
   }
 }
 
-// ═══════════════ 设置（Tab5） ═══════════════
-const mSettings = ref({ enabled: false, repoUrl: '', hasUploadToken: false, hasAdminToken: false })
-const uploadTokenInput = ref('')
-const adminTokenSettingInput = ref('')
-const savingSettings = ref(false)
+// ═══════════════ 市场状态（内置配置，无需设置页） ═══════════════
+const marketStatus = ref({ enabled: true, repoUrl: '', hasUploadToken: true, hasAdminToken: true })
 
-async function loadSettings() {
+async function loadStatus() {
   try {
-    mSettings.value = await api.marketSettings()
+    marketStatus.value = await api.marketSettings()
   } catch { /* 不影响 */ }
-}
-
-async function saveSettings() {
-  savingSettings.value = true
-  try {
-    await api.saveMarketSettings({
-      enabled: mSettings.value.enabled,
-      repoUrl: mSettings.value.repoUrl,
-      uploadToken: uploadTokenInput.value,
-      adminToken: adminTokenSettingInput.value
-    })
-    message.success('设置已保存')
-    uploadTokenInput.value = ''
-    adminTokenSettingInput.value = ''
-    await loadSettings()
-  } catch (e: any) {
-    message.error('保存失败：' + (e?.message ?? e))
-  } finally {
-    savingSettings.value = false
-  }
 }
 
 onMounted(() => {
@@ -355,7 +332,7 @@ onMounted(() => {
   loadMarket()
   loadMySubs()
   loadPending()
-  loadSettings()
+  loadStatus()
 })
 </script>
 
@@ -447,7 +424,7 @@ onMounted(() => {
             刷新市场
           </NButton>
           <NText depth="3" style="font-size: 12px">
-            {{ mSettings.repoUrl || 'https://cnb.cool/...' }} · 已上架 {{ marketPlugins.length }} 个插件
+            {{ marketStatus.repoUrl || '官方市场仓库' }} · 已上架 {{ marketPlugins.length }} 个插件
           </NText>
         </NSpace>
         <NEmpty v-if="!marketLoading && !marketPlugins.length" description="市场暂无已上架插件" style="padding: 60px 0" />
@@ -629,44 +606,6 @@ onMounted(() => {
         </NModal>
       </NTabPane>
 
-      <!-- ══════ Tab5 设置 ══════ -->
-      <NTabPane name="settings" tab="设置">
-        <NCard title="插件市场配置" size="small" style="max-width: 680px">
-          <NForm label-placement="left" label-width="130">
-            <NFormItem label="启用市场">
-              <NSwitch v-model:value="mSettings.enabled" />
-            </NFormItem>
-            <NFormItem label="市场仓库地址">
-              <NInput v-model:value="mSettings.repoUrl" placeholder="https://cnb.cool/org/repo.git" />
-              <NText depth="3" style="font-size: 12px; margin-top: 4px; display: block">
-                已加密存储；仅显示掩码（{{ mSettings.repoUrl || '未配置' }}），防止抓包/日志暴露仓库地址
-              </NText>
-            </NFormItem>
-            <NFormItem label="上传令牌">
-              <NInput v-model:value="uploadTokenInput" type="password" show-password-on="click"
-                      :placeholder="mSettings.hasUploadToken ? '已配置（留空不修改）' : '开发者上传插件用的 git 令牌'" />
-              <NText depth="3" style="font-size: 12px; margin-top: 4px; display: block">
-                仅用于「上传插件」提交到待审区；不授予审核权限
-              </NText>
-            </NFormItem>
-            <NFormItem label="管理员令牌">
-              <NInput v-model:value="adminTokenSettingInput" type="password" show-password-on="click"
-                      :placeholder="mSettings.hasAdminToken ? '已配置（留空不修改）' : '审核台验证/通过/拒绝所需'" />
-              <NText depth="3" style="font-size: 12px; margin-top: 4px; display: block">
-                进入审核台需验证此令牌；持有者才能执行上架/拒绝
-              </NText>
-            </NFormItem>
-            <NFormItem label="">
-              <NSpace vertical align="start">
-                <NButton type="primary" :loading="savingSettings" @click="saveSettings">保存配置</NButton>
-                <NText depth="3" style="font-size: 12px">
-                  浏览/安装无需任何凭据（后端代理下载）；上传需上传令牌；审核需管理员令牌。所有令牌与仓库地址均加密落库
-                </NText>
-              </NSpace>
-            </NFormItem>
-          </NForm>
-        </NCard>
-      </NTabPane>
     </NTabs>
 
     <!-- 卸载确认弹窗（本地插件） -->

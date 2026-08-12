@@ -152,31 +152,45 @@ public class ConsolePluginController {
         return Map.of("status", "ok", "loaded", loaded);
     }
 
-    /** 卸载插件：关闭容器 + 反注册指令 + 删除 jar 文件 + 清除持久化数据（不可恢复）。 */
+    /** 卸载插件：关闭容器 + 反注册指令 + 从 PF4J 仓库移除 + 删除原 jar + 清除持久化数据（不可恢复）。 */
     @PostMapping("/plugins/{pluginId}/unload")
     public Map<String, Object> unloadPlugin(@PathVariable String pluginId,
                                             jakarta.servlet.http.HttpServletRequest request) {
-        java.nio.file.Path jarPath = null;
-        for (PluginWrapper w : pluginManager.getPlugins()) {
-            if (w.getPluginId().equals(pluginId)) {
-                jarPath = w.getPluginPath();
-                break;
-            }
-        }
         boolean ok = pluginManager.unloadPlugin(pluginId);
-        if (ok && jarPath != null) {
-            try {
-                java.nio.file.Files.deleteIfExists(jarPath);
-            } catch (Exception e) {
-                log.warn("[Plugin] 删除 jar 失败（可手动清理）: {} error={}", jarPath, e.getMessage());
-            }
-        }
+        // 删除 plugins/ 目录下该插件的原 jar（.work 副本由 unloadPlugin 内 sweepCopies 清理）
+        java.util.List<String> deletedJars = deletePluginJars(pluginId);
         // 清除该插件的持久化数据（KV + 机器人绑定；命令/配置注销已由 pluginManager.unloadPlugin 完成）
         pluginKvStore.clear(pluginId);
         bindingService.deleteAll(pluginId);
-        auditService.record("PLUGIN_UNLOAD", pluginId + (jarPath != null ? " (" + jarPath.getFileName() + ")" : ""),
+        auditService.record("PLUGIN_UNLOAD", pluginId + (deletedJars.isEmpty() ? "" : " (" + String.join(", ", deletedJars) + ")"),
                 request.getRemoteAddr());
-        return Map.of("status", ok ? "ok" : "error");
+        return Map.of("status", ok ? "ok" : "error", "deletedJars", deletedJars);
+    }
+
+    /** 删除 plugins/ 目录下匹配插件 ID 的 jar 文件，返回已删除文件名列表。 */
+    private java.util.List<String> deletePluginJars(String pluginId) {
+        java.util.List<String> deleted = new ArrayList<>();
+        try {
+            java.nio.file.Path pluginsDir = java.nio.file.Paths.get("plugins");
+            if (!java.nio.file.Files.isDirectory(pluginsDir)) return deleted;
+            try (var stream = java.nio.file.Files.list(pluginsDir)) {
+                for (java.nio.file.Path jar : stream.filter(p -> p.getFileName().toString().endsWith(".jar")).toList()) {
+                    try (java.util.jar.JarFile jf = new java.util.jar.JarFile(jar.toFile())) {
+                        String id = jf.getManifest() == null ? null
+                                : jf.getManifest().getMainAttributes().getValue("Plugin-Id");
+                        if (pluginId.equals(id == null ? null : id.trim())) {
+                            java.nio.file.Files.deleteIfExists(jar);
+                            deleted.add(jar.getFileName().toString());
+                        }
+                    } catch (Exception ignored) {
+                        // 单个 jar 读取失败跳过（可能正被占用/非插件）
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[Plugin] 删除原 jar 失败: {}", e.getMessage());
+        }
+        return deleted;
     }
 
     // ===== 插件-机器人绑定（P1-C）=====

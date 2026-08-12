@@ -547,10 +547,12 @@ public class XuanJiPluginManager extends DefaultPluginManager {
 
     public record PluginInfo(String id, String version, String state, boolean enabled) {}
 
-    /** 卸载指定插件（关闭其 Spring 子容器 + 反注册指令 + 清理状态） */
+    /** 卸载指定插件（关闭其 Spring 子容器 + 反注册指令 + 清理状态 + 从 PF4J 仓库移除 + 删除原 jar） */
     @Override
     public boolean unloadPlugin(String pluginId) {
         PluginWrapper w = getPlugin(pluginId);
+        // 记录原 jar 路径（super.unloadPlugin 从仓库移除后无法再取）
+        java.nio.file.Path origJar = copyingLoader != null ? copyingLoader.originalJarOf(pluginId) : null;
         AnnotationConfigApplicationContext ctx = pluginContexts.remove(pluginId);
         if (ctx != null) ctx.close();
         unregisterCommands(pluginId);
@@ -564,7 +566,25 @@ public class XuanJiPluginManager extends DefaultPluginManager {
             copyingLoader.forget(pluginId);
         }
         stateStore.delete(pluginId);
-        return stopped;
+        // 关键：必须调用父类，把插件从 PF4J 内部仓库移除，否则 getPlugins()/前端列表仍显示已卸载插件
+        boolean removed;
+        try {
+            removed = super.unloadPlugin(pluginId);
+        } catch (Exception e) {
+            log.warn("[Plugin] super.unloadPlugin 异常（忽略，副本已清理）: {} error={}", pluginId, e.getMessage());
+            removed = true;
+        }
+        // 删除用户原 jar（ClassLoader 已关闭、PF4J 已移除后再删，避免 Windows 文件锁）
+        if (origJar != null) {
+            try {
+                java.nio.file.Files.deleteIfExists(origJar);
+                log.info("[Plugin] 已删除原 jar: {}", origJar.getFileName());
+            } catch (Exception e) {
+                log.warn("[Plugin] 删除原 jar 失败（可手动清理或重启后自动处理）: {} error={}", origJar, e.getMessage());
+            }
+        }
+        log.info("[Plugin] 已卸载: {} (stopped={}, removed={})", pluginId, stopped, removed);
+        return stopped || removed;
     }
 
     /** 停止所有插件并关闭容器 */
