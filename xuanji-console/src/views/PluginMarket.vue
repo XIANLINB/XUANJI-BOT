@@ -135,16 +135,34 @@ function openPage(p: any) {
 const marketPlugins = ref<any[]>([])
 const marketLoading = ref(false)
 const installingId = ref('')
+// 本地已装插件映射（pluginId → version），用于市场列表标记 已安装/有更新
+const localInstalled = ref<Record<string, string>>({})
+
+async function loadLocalInstalled() {
+  try {
+    const list: any[] = await api.getPlugins()
+    const m: Record<string, string> = {}
+    for (const p of list) m[p.id] = String(p.version)
+    localInstalled.value = m
+  } catch { /* 不影响 */ }
+}
 
 async function loadMarket() {
   marketLoading.value = true
   try {
     marketPlugins.value = await api.marketList()
+    await loadLocalInstalled()
   } catch (e: any) {
     message.error('拉取插件市场失败：' + (e?.message ?? e))
   } finally {
     marketLoading.value = false
   }
+}
+
+function localState(p: any): 'installed' | 'update' | null {
+  const v = localInstalled.value[p.pluginId]
+  if (v === undefined) return null
+  return v === String(p.version) ? 'installed' : 'update'
 }
 
 async function install(p: any) {
@@ -438,13 +456,32 @@ onMounted(() => {
                     <NText strong>{{ p.name || p.pluginId }}</NText>
                     <NTag v-if="p.official" size="small" :bordered="false" type="info" round>官方</NTag>
                     <NTag size="small" :bordered="false" type="primary" round>{{ CATEGORY_LABEL[p.category] || '其他' }}</NTag>
+                    <NTag v-if="localState(p) === 'installed'" size="small" :bordered="false" type="success" round>已安装</NTag>
+                    <NTag v-else-if="localState(p) === 'update'" size="small" :bordered="false" type="warning" round>有更新</NTag>
                   </div>
                   <NText depth="3" style="font-size: 12px">{{ p.pluginId }} · v{{ p.version }}</NText>
                 </div>
               </div>
               <NText depth="3" class="p-desc">{{ p.description || '—' }}</NText>
-              <div class="p-author">作者：{{ p.author || '—' }}</div>
+              <div class="p-author">
+                作者：{{ p.author || '—' }}
+                <span v-if="localState(p) === 'update'" style="color: var(--n-text-color-3)">
+                  · 本地已装 v{{ localInstalled[p.pluginId] }}
+                </span>
+              </div>
               <NButton
+                v-if="localState(p) === 'installed'" size="small" block disabled
+              >
+                <template #icon><NIcon size="14"><CheckmarkOutline /></NIcon></template>
+                已安装
+              </NButton>
+              <NButton
+                v-else-if="localState(p) === 'update'" size="small" block disabled type="default"
+              >
+                已安装旧版 v{{ localInstalled[p.pluginId] }}，请先卸载
+              </NButton>
+              <NButton
+                v-else
                 type="primary" size="small" block
                 :loading="installingId === p.pluginId + '@' + p.version"
                 @click="install(p)"

@@ -113,8 +113,13 @@ public class PluginMarketService {
         }
     }
 
-    /** 安装插件到本地 plugins/（代理拉取 + sha256 校验）。 */
+    /** 安装插件到本地 plugins/（代理拉取 + sha256 校验）。已安装同 ID 插件时拒绝，防止重复安装。 */
     public Map<String, Object> install(String pluginId, String version) throws Exception {
+        // 已安装检测：本地 plugins/ 已有同 Plugin-Id 的 jar → 拒绝（除非先卸载）
+        String installed = findInstalledJar(pluginId);
+        if (installed != null) {
+            throw new IllegalStateException("本地已安装插件 " + pluginId + "（" + installed + "），如需更新请先到「本地插件」卸载后再安装");
+        }
         Map<String, Object> target = null;
         for (Map<String, Object> p : listMarket()) {
             if (pluginId.equals(p.get("pluginId")) && version.equals(p.get("version"))) {
@@ -154,6 +159,30 @@ public class PluginMarketService {
         r.put("jar", dest.getFileName().toString());
         r.put("size", jar.length);
         return r;
+    }
+
+    /** 查找本地 plugins/ 目录中已安装的指定插件 jar 文件名；未安装返回 null。 */
+    private static String findInstalledJar(String pluginId) {
+        try {
+            Path pluginsDir = Paths.get("plugins");
+            if (!Files.isDirectory(pluginsDir)) return null;
+            try (var stream = Files.list(pluginsDir)) {
+                for (Path jar : stream.filter(p -> p.getFileName().toString().endsWith(".jar")).toList()) {
+                    try (JarFile jf = new JarFile(jar.toFile())) {
+                        String id = jf.getManifest() == null ? null
+                                : jf.getManifest().getMainAttributes().getValue("Plugin-Id");
+                        if (pluginId.equals(id == null ? null : id.trim())) {
+                            return jar.getFileName().toString();
+                        }
+                    } catch (Exception ignored) {
+                        // 被占用/非插件 jar 跳过
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[PluginMarket] 已安装检测失败: {}", e.getMessage());
+        }
+        return null;
     }
 
     // ═══════════════════ 上传 / 我的提交 ═══════════════════
