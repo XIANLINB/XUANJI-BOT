@@ -124,7 +124,10 @@ public class CommandRegistry {
     private void collectCommands(java.util.List<HandlerEntry> entries,
                                  Map<String, Map<String, Object>> byKey, boolean group) {
         for (HandlerEntry e : entries) {
-            String cmd = e.filter().cmd();
+            // @GroupMessage/@PrivateMessage 等消息监听 handler 的 filter 可能为 null（非 @Command），不是命令，跳过
+            XuanJi.api.annotation.MessageFilter f = e.filter();
+            if (f == null) continue;
+            String cmd = f.cmd();
             if (cmd == null || cmd.isEmpty()) continue;
             String key = cmd + "|" + e.pluginId + "|" + e.method.getName();
             Map<String, Object> m = byKey.computeIfAbsent(key, k -> {
