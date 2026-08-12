@@ -237,6 +237,12 @@ public class ConsoleMetricsController {
     public Map<String, Object> versionLog() {
         List<Map<String, Object>> versions = new ArrayList<>();
 
+        // ── v1.3.2 插件市场实装 + 插件信息类型化（2026-08-13）──
+        versions.add(versionEntry("v1.3.2", "2026-08-13", "正式版",
+                List.of(
+                        "插件市场实装：CNB 公开 git 仓库中央插件库（浏览 / 上传 / 审核 / 一键安装），审核台隐藏入口（左下角版本号彩蛋）+ 管理员令牌验证，仓库地址不出后端",
+                        "插件信息类型化：入群申请 JoinRequest / 群信息 GroupInfo / 成员 / 群状态等全部封装为类型化对象，插件告别裸 JSON")));
+
         // ── v1.3.1 入群申请审批能力（2026-08-12）──
         versions.add(versionEntry("v1.3.1", "2026-08-12", "正式版",
                 List.of(
@@ -318,7 +324,7 @@ public class ConsoleMetricsController {
                         "控制台最早形态：登录引导 / 基础页面框架")));
 
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("current", "v1.3.1");
+        m.put("current", "v1.3.2");
         m.put("versions", versions);
         return m;
     }

@@ -130,11 +130,11 @@ import XuanJi.api.annotation.*;
 import XuanJi.api.plugin.XuanJiPluginBase;
 import org.pf4j.PluginWrapper;
 
-public class MyPlugin extends XuanjiPluginBase {
+public class MyPlugin extends XuanJiPluginBase {
 
     public MyPlugin(PluginWrapper wrapper) { super(wrapper); }
 
-    @XuanjiPlugin(id = "my-plugin", name = "我的插件", version = "1.0.0",
+    @XuanJiPlugin(id = "my-plugin", name = "我的插件", version = "1.0.0",
             author = "我", description = "示例插件", rateLimit = 0)
     public static class Commands {
 
@@ -165,9 +165,11 @@ public class MyPlugin extends XuanjiPluginBase {
 ### 打包与热加载
 
 ```bash
-mvn package -pl xuanji-plugin-demo -am -DskipTests   # 打包（-am 必加：连带构建依赖）
-Copy-Item xuanji-plugin-demo\target\*.jar plugins\   # 放入插件目录
+mvn package -pl xuanji-plugin-groupadmin -am -DskipTests   # 打包（-am 必加：连带构建依赖）
+Copy-Item xuanji-plugin-groupadmin\target\*.jar plugins\    # 放入插件目录
 ```
+
+> 框架 SDK/API 已发布到 CNB 公开 Maven 制品库（`dev.xuanji:xuanji-api:1.3.1` / `dev.xuanji:xuanji-sdk:1.3.1`，scope=provided），插件 pom 直接依赖即可，详见《插件开发完整指南》第十四节。
 
 控制台「插件」页 → **热加载** → 新代码生效，**无需重启框架**。
 
@@ -186,7 +188,8 @@ xuanji/
 ├── xuanji-console-server/   # 控制台后端 API
 ├── xuanji-console/          # 控制台前端（Vue3 + Naive UI）
 ├── xuanji-starter/          # 启动器（主类）
-├── xuanji-plugin-demo/      # 演示插件
+├── xuanji-plugin-groupadmin/# 群管插件（禁言/撤回/针对撤回/入群审批）
+├── xuanji-plugin-test/      # 接口测试插件
 ├── plugins/                 # 插件目录（.jar 放这里）
 ├── scripts/                 # 打包 / 运维脚本
 └── data/                    # 运行数据（数据库 / 媒体 / 配置，运行时自动生成）

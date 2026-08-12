@@ -87,7 +87,7 @@ public class BackupService {
             ObjectNode manifest = objectMapper.createObjectNode();
             manifest.put("createdAt", System.currentTimeMillis() / 1000L);
             manifest.put("scope", sc);
-            manifest.put("appVersion", "1.3.1");
+            manifest.put("appVersion", "1.3.2");
             manifest.set("dbs", dbArr);
             objectMapper.writeValue(tmp.resolve("manifest.json").toFile(), manifest);
 

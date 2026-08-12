@@ -14,7 +14,7 @@ const annotationsDoc = ref('')
 const GUIDE_DOC = `
 # 璇玑插件开发指南
 
-插件是扩展机器人能力的单元（打 jar 放入 \`plugins/\` 目录即可热加载）。完整可运行示例请看自带「演示插件」源码：\`xuanji-plugin-demo\`。
+插件是扩展机器人能力的单元（打 jar 放入 \`plugins/\` 目录即可热加载）。完整可运行示例请看自带「群管插件」源码：\`xuanji-plugin-groupadmin\`。
 
 ## 一、插件目录结构
 
@@ -34,8 +34,8 @@ xuanji-plugin-xxx/
   <configuration>
     <archive>
       <manifestEntries>
-        <Plugin-Id>demo-plugin</Plugin-Id>
-        <Plugin-Class>XuanJi.plugin.demo.DemoPlugin</Plugin-Class>
+        <Plugin-Id>groupadmin-plugin</Plugin-Id>
+        <Plugin-Class>XuanJi.plugin.groupadmin.GroupAdminPlugin</Plugin-Class>
       </manifestEntries>
     </archive>
   </configuration>
@@ -51,7 +51,7 @@ public class DemoPlugin extends XuanJiPluginBase {
     @Override public void onDisable() { /* 插件停用时 */ }
 
     // @XuanJiPlugin 注册插件元信息 + 命令/事件方法所在的静态类
-    @XuanJiPlugin(id = "demo-plugin", name = "演示插件", version = "1.0.0",
+    @XuanJiPlugin(id = "groupadmin-plugin", name = "群管插件", version = "1.0.0",
         author = "XuanJi Team", description = "说明文字")
     public static class Commands {
         // 命令 / 事件方法写在这里
@@ -272,9 +272,9 @@ public String info(GroupMessageEvent e, PluginServices svc, Bot bot) {
 
 ## 十、完整示例
 
-参考自带「演示插件」（\`xuanji-plugin-demo\`）：群聊/单聊/两者命令、参数 rest、角色权限、@模式、签到持久化、@GroupMessage/@PrivateMessage/@OnMessage、@GroupEvent 进群欢迎、@PrivateEvent、PluginServices、富媒体、Markdown，全部有可运行用例。
+参考自带「群管插件」（\`xuanji-plugin-groupadmin\`）：\`#禁言\`/\`#解禁\`（批量 + @Arg 分钟）、\`#撤回\`、\`#针对撤回\`/\`#解除针对\`（@GroupMessage 监听 + PluginStorage 持久化名单）、\`#入群申请列表\`/\`#同意\`/\`#拒绝\`/\`#全部同意\`/\`#全部拒绝\`（@用户 或 openid 审批），全部走 PluginServices 类型化能力。另有「接口测试插件」（\`xuanji-plugin-test\`）覆盖键盘按钮等测试用例。
 
-> 开发流程：新建模块 → 写插件类 → \`mvn package\` → 把 jar 放入运行目录 \`plugins/\` → 控制台「插件管理」启用 → 群里发「演示帮助」。
+> 开发流程：新建模块 → 写插件类 → \`mvn package\` → 把 jar 放入运行目录 \`plugins/\` → 控制台「插件管理」启用 → 群里发「群管帮助」。
 `
 
 const EVENTS_DOC = `
@@ -525,7 +525,7 @@ const ANNOTATIONS_DOC = `
 | platforms | 限定平台（空=全部） |
 
 \`\`\`java
-@XuanJiPlugin(id = "demo-plugin", name = "演示插件", version = "1.0.0",
+@XuanJiPlugin(id = "groupadmin-plugin", name = "群管插件", version = "1.0.0",
     author = "XuanJi Team", description = "说明")
 public static class Commands { ... }
 \`\`\`

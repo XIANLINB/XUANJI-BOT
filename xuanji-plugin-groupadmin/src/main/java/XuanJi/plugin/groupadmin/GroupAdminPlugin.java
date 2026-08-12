@@ -48,7 +48,7 @@ public class GroupAdminPlugin extends XuanJiPluginBase {
     @Override public void onDisable() { System.out.println("[GroupAdmin] 群管插件已停用"); }
 
     @XuanJiPlugin(id = "groupadmin-plugin", name = "群管插件", version = "1.0.0",
-            author = "XuanJi Team", description = "群管理：禁言 / 撤回 / 针对撤回 / 入群申请审批", rateLimit = 0)
+            author = "XuanJi Team", description = "群管理：禁言 / 撤回 / 针对撤回 / 入群审批管理", rateLimit = 0)
     public static class Commands {
 
         // ═══════════════ 帮助 ═══════════════
@@ -57,9 +57,9 @@ public class GroupAdminPlugin extends XuanJiPluginBase {
         @Command(value = "#群管帮助", scope = Command.Scope.GROUP, roles = {"owner", "admin"})
         public String help() {
             return "#群管帮助 — 查看帮助\n"
-                    + "#禁言 @用户 <分钟> — 禁言（缺省10，0解除，上限7天）\n"
+                    + "#禁言 @用户 <分钟> — 禁言（缺省10，0解除，上限30天）\n"
                     + "#解禁 @用户 — 解除禁言\n"
-                    + "#撤回 @用户 [条数] — 撤回最近N条（缺省1，上限50）\n"
+                    + "#撤回 @用户 [条数] — 撤回最近N条（缺省1）\n"
                     + "#针对撤回 @用户 — 该用户每次发消息自动撤回\n"
                     + "#解除针对 @用户 — 解除针对撤回\n"
                     + "#入群申请列表 — 查看入群申请\n"
