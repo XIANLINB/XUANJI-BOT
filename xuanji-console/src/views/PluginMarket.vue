@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NCard, NButton, NSpace, NIcon, NText, NTag, NInput, NGrid, NGi, NEmpty,
@@ -344,6 +344,14 @@ async function loadStatus() {
   } catch { /* 不影响 */ }
 }
 
+// ═══════════════ 审核台隐藏入口 ═══════════════
+// 平时不显示审核台 Tab；在左下角 v1.0 版本号 10 秒内点击 6 次解锁后显示
+const AUDIT_UNLOCK_KEY = 'xuanji_audit_unlocked'
+const showAuditTab = ref(false)
+function checkAuditUnlock() {
+  showAuditTab.value = sessionStorage.getItem(AUDIT_UNLOCK_KEY) === '1'
+}
+
 onMounted(() => {
   load()
   loadCmdStat()
@@ -351,6 +359,12 @@ onMounted(() => {
   loadMySubs()
   loadPending()
   loadStatus()
+  checkAuditUnlock()
+  window.addEventListener('xuanji-audit-unlocked', checkAuditUnlock)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('xuanji-audit-unlocked', checkAuditUnlock)
 })
 </script>
 
@@ -552,15 +566,10 @@ onMounted(() => {
         </NGrid>
       </NTabPane>
 
-      <!-- ══════ Tab4 审核台 ══════ -->
-      <NTabPane name="audit" tab="审核台">
+      <!-- ══════ Tab4 审核台（隐藏入口：左下角 v1.0 点 6 次解锁） ══════ -->
+      <NTabPane v-if="showAuditTab" name="audit" tab="审核台">
         <!-- 管理员令牌验证门 -->
-        <NAlert v-if="!adminVerified" type="warning" :show-icon="true" style="max-width: 640px; margin-bottom: 12px"
-                title="需要管理员令牌">
-          审核台仅管理员可用。请输入管理员令牌（设置页配置的 market.admin_token）验证权限，
-          验证通过后才能查看待审插件并执行通过/拒绝操作。
-        </NAlert>
-        <NCard v-if="!adminVerified" size="small" style="max-width: 640px">
+        <NCard v-if="!adminVerified" size="small" style="max-width: 560px">
           <NSpace align="center">
             <NInput v-model:value="adminTokenInput" type="password" show-password-on="click"
                     placeholder="输入管理员令牌" style="width: 320px" />
@@ -581,7 +590,6 @@ onMounted(() => {
               <template #icon><NIcon><RefreshOutline /></NIcon></template>
               刷新记录
             </NButton>
-            <NText depth="3" style="font-size: 12px">管理员：下载 jar → 隔离 bot 测试 → 通过上架 / 拒绝</NText>
           </NSpace>
           <NEmpty v-if="!auditLoading && !pendingList.length" description="暂无待审核的插件提交" style="padding: 40px 0" />
           <NCard v-for="p in pendingList" :key="p.submissionId" size="small" class="pending-card">

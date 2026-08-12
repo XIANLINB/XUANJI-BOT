@@ -175,6 +175,21 @@ async function logout() {
 
 const collapsed = ref(false)
 
+// ===== 版本号彩蛋：10 秒内点击左下角 v1.0 共 6 次 → 解锁插件市场审核台 =====
+const UNLOCK_KEY = 'xuanji_audit_unlocked'
+const verClicks = ref<number[]>([])
+function onVerClick() {
+  const now = Date.now()
+  verClicks.value.push(now)
+  verClicks.value = verClicks.value.filter((t) => now - t <= 10000)
+  if (verClicks.value.length >= 6) {
+    verClicks.value = []
+    sessionStorage.setItem(UNLOCK_KEY, '1')
+    window.dispatchEvent(new Event('xuanji-audit-unlocked'))
+    // 无提示：静默解锁（审核台入口保持隐蔽）
+  }
+}
+
 onMounted(loadPluginsMenu)
 // 每次导航刷新插件菜单（插件市场扫描/卸载后，菜单能同步新增/移除插件页面）
 watch(() => route.fullPath, loadPluginsMenu)
@@ -248,7 +263,7 @@ watch(
               </template>
               框架运行中
             </NTooltip>
-            <span v-if="!collapsed" class="ver">v1.0</span>
+            <span v-if="!collapsed" class="ver" @click="onVerClick">v1.0</span>
           </div>
         </div>
       </div>
