@@ -1,5 +1,7 @@
 package XuanJi.console.controller;
 
+import XuanJi.api.action.PlatformActionHub;
+import XuanJi.api.action.PlatformActions;
 import XuanJi.console.service.AuditService;
 import XuanJi.console.service.ConsoleQueryService;
 import XuanJi.core.config.XuanJiRobotProperties;
@@ -17,7 +19,7 @@ import java.util.Map;
 import static XuanJi.console.service.ConsoleQueryService.strOrEmpty;
 
 /**
- * 控制台 · XuanJiBot 管理（列表 / 详情 / 启停）。
+ * 控制台 · XuanJiBot 管理（列表 / 详情 / 启停 / 分享链接）。
  *
  * <p>机器人清单数据来源：框架库 {@code xuanji_bot}（跨平台注册索引）；
  * 群/好友/消息等统计经 {@link PlatformDataProvider} 按平台聚合，core 不出现平台字样。
@@ -31,12 +33,14 @@ public class ConsoleBotController {
     private final ConsoleQueryService queryService;
     private final XuanJiRobotProperties robotProperties;
     private final AuditService auditService;
+    private final PlatformActionHub actionHub;
 
     public ConsoleBotController(ConsoleQueryService queryService, XuanJiRobotProperties robotProperties,
-                                AuditService auditService) {
+                                AuditService auditService, PlatformActionHub actionHub) {
         this.queryService = queryService;
         this.robotProperties = robotProperties;
         this.auditService = auditService;
+        this.actionHub = actionHub;
     }
 
     /** 机器人列表（卡片页数据源）。 */
@@ -291,5 +295,32 @@ public class ConsoleBotController {
             log.error("[Console] 启用机器人失败: appId={}, {}", appId, e.getMessage(), e);
             return Map.of("error", e.getMessage());
         }
+    }
+
+    /**
+     * 生成机器人分享链接（邀请用户添加机器人为好友）。
+     *
+     * <p>经 {@link PlatformActionHub} 平台无关分发（qqbot 实现 POST /v2/generate_url_link，50 QPS），
+     * 走动作审计自动记录操作日志。
+     *
+     * @param botKey 机器人键（或 appId）
+     * @param body   {callbackData?: string} 自定义透传参数（可选，≤32 字符，添加机器人时透传给开发者）
+     * @return {ok, urlLink} 或 {error}
+     */
+    @PostMapping("/bots/{botKey}/share-link")
+    public Map<String, Object> generateShareLink(@PathVariable String botKey,
+                                                 @RequestBody(required = false) Map<String, Object> body) {
+        String appId = queryService.resolveAppId(botKey);
+        if (appId == null) return Map.of("ok", false, "error", "XuanJiBot not found");
+        String callbackData = body == null ? "" : strOrEmpty(body.get("callbackData"));
+        if (callbackData.length() > 32) callbackData = callbackData.substring(0, 32);
+        Map<String, Object> out = actionHub.dispatch(appId, PlatformActions.GENERATE_SHARE_LINK,
+                Map.of("callbackData", callbackData));
+        if (out != null && Boolean.TRUE.equals(out.get("ok")) && out.get("data") instanceof Map<?, ?> dm) {
+            String link = dm.get("urlLink") == null ? "" : String.valueOf(dm.get("urlLink"));
+            return Map.of("ok", true, "urlLink", link);
+        }
+        return Map.of("ok", false, "error",
+                out == null ? "平台无响应" : String.valueOf(out.get("error")));
     }
 }

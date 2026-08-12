@@ -281,6 +281,13 @@ public class QqXuanJiMessageSender implements XuanJiMessageSender, XuanJi.api.ad
             java.util.List<Map<String, Object>> list = qqBotRepository.listUsers(messageSender.currentRobotId());
             return Map.of("data", (Object) (list == null ? java.util.List.of() : list));
         });
+
+        // 生成机器人分享链接（POST /v2/generate_url_link，50 QPS；callbackData ≤32 字符透传）
+        m.put(PlatformActions.GENERATE_SHARE_LINK, p -> {
+            String callbackData = str(p, "callbackData");
+            String link = messageSender.generateShareLink(callbackData);
+            return Map.of("data", (Object) Map.of("urlLink", link == null ? "" : link));
+        });
         return m;
     }
 

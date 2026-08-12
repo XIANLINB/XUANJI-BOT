@@ -942,5 +942,17 @@ public class MessageSender {
                 "/v2/groups/" + groupOpenid + "/restrict_chat_setting", body);
     }
 
+    /**
+     * 生成机器人分享链接（POST /v2/generate_url_link，50 QPS）。
+     *
+     * <p>用户通过分享链接添加机器人时 {@code callbackData} 会透传给开发者（最长 32 字符）。
+     *
+     * @param callbackData 自定义透传参数（可选，≤32 字符）
+     * @return 分享链接；平台失败返回 null
+     */
+    public String generateShareLink(String callbackData) {
+        return qqApiService.generateShareLink(currentRobotId(), currentEnvType(), null, callbackData);
+    }
+
     private record RobotContext(String robotId, String envType) {}
 }

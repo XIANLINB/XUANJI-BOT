@@ -61,7 +61,7 @@ public class QqOperationAuditSink implements OperationAuditSink {
         }
         if (act == null) act = "run";
 
-        // 操作人：显式参数优先，否则取命令上下文（群命令触发者）
+        // 操作人：显式参数优先，否则取命令上下文（群命令触发者）；控制台无账号体系 → 取来源 IP
         String operatorId = str(p.get("operatorId"));
         String operatorName = str(p.get("operatorName"));
         String operatorRole = str(p.get("operatorRole"));
@@ -71,6 +71,14 @@ public class QqOperationAuditSink implements OperationAuditSink {
         }
         if (operatorId == null || operatorId.isBlank()) {
             operatorId = CommandRegistry.getCurrentUser();
+        }
+        if (operatorId == null || operatorId.isBlank()) {
+            String consoleIp = currentConsoleIp();
+            if (consoleIp != null && !consoleIp.isBlank()) {
+                operatorId = "console@" + consoleIp;
+                operatorName = "控制台 (" + consoleIp + ")";
+                operatorRole = "console";
+            }
         }
 
         repository.insertOpLog(botKey, opType, act, groupId, userId, targetMsgId, durationSec,
@@ -85,8 +93,21 @@ public class QqOperationAuditSink implements OperationAuditSink {
             case PlatformActions.GROUP_RECALL -> "recall";
             case PlatformActions.GROUP_RECALL_PRIVATE -> "recall_private";
             case PlatformActions.GROUP_APPROVE -> "join_approve";
+            case PlatformActions.GENERATE_SHARE_LINK -> "share_link";
             default -> null;
         };
+    }
+
+    /** 当前 HTTP 请求的来源 IP（控制台场景操作人标识；AuthFilter 认证通过后写入 request attribute）。 */
+    private static String currentConsoleIp() {
+        try {
+            var attrs = org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+            if (attrs instanceof org.springframework.web.context.request.ServletRequestAttributes sra) {
+                Object v = sra.getRequest().getAttribute("xuanji.console.operator");
+                return v == null ? null : String.valueOf(v);
+            }
+        } catch (Exception ignored) { /* 非 Web 线程（群命令/定时任务）无 request，返回 null */ }
+        return null;
     }
 
     private static String str(Object v) {

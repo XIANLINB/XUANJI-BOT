@@ -5,6 +5,7 @@ import XuanJi.api.annotation.Command;
 import XuanJi.api.annotation.XuanJiPlugin;
 import XuanJi.api.json.Json;
 import XuanJi.api.message.XuanJiMessage;
+import XuanJi.api.message.XuanJiMessageElement;
 import XuanJi.api.plugin.BotGroupState;
 import XuanJi.api.plugin.GroupInfo;
 import XuanJi.api.plugin.JoinRequest;
@@ -12,9 +13,12 @@ import XuanJi.api.plugin.JoinRequestList;
 import XuanJi.api.plugin.OpResult;
 import XuanJi.api.plugin.PluginServices;
 import XuanJi.api.plugin.XuanJiPluginBase;
+import XuanJi.api.sender.XuanJiSendReceipt;
 import XuanJi.sdk.event.GroupMessageEvent;
 import org.pf4j.PluginWrapper;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -219,6 +223,97 @@ public class TestPlugin extends XuanJiPluginBase {
             if (r.ok()) return r.message();
             System.out.println("[TestPlugin] 撤回结果: " + r.message());
             return null;
+        }
+
+        /**
+         * 内嵌键盘（keyboard）测试①：三种 action 类型 + 四种渲染样式 + 权限。
+         *
+         * <p>对照官方 {@code keyboard.content.rows[].buttons[]} 结构（原样透传，见
+         * {@link XuanJiMessageElement.Keyboard}）：发出一条 Markdown + 键盘消息。
+         * <ul>
+         *   <li>action.type：0=跳转(URL) / 1=回调(data 回传后台) / 2=指令(输入框插入 @bot data)</li>
+         *   <li>render_data.style：0=灰线框 1=蓝线框 2=白字 3=蓝底白字</li>
+         *   <li>permission.type：0=指定用户 1=仅管理员 2=所有人</li>
+         * </ul>
+         */
+        @Command(value = "#按钮", scope = Command.Scope.GROUP)
+        public String button(GroupMessageEvent e, PluginServices svc) {
+            Map<String, Object> row1Btn1 = btn("url_1", "跳转官网", 1,
+                    Map.of("type", 0, "data", "https://bot.q.qq.com"));
+            Map<String, Object> row1Btn2 = btn("cb_1", "回调", 1,
+                    Map.of("type", 1, "data", "btn_cb_1"));
+            Map<String, Object> row1Btn3 = btn("cmd_1", "指令签到", 3,
+                    Map.of("type", 2, "data", "/签到", "permission", Map.of("type", 2), "enter", true));
+            Map<String, Object> row2Btn1 = btn("style_0", "灰线框", 0,
+                    Map.of("type", 1, "data", "style_0"));
+            Map<String, Object> row2Btn2 = btn("style_2", "白字", 2,
+                    Map.of("type", 1, "data", "style_2"));
+            Map<String, Object> row2Btn3 = btn("admin_1", "仅管理员", 1,
+                    Map.of("type", 1, "data", "admin_only", "permission", Map.of("type", 1)));
+            XuanJiMessageElement.Keyboard kb = keyboard(List.of(
+                    List.of(row1Btn1, row1Btn2, row1Btn3),
+                    List.of(row2Btn1, row2Btn2, row2Btn3)));
+            return sendKeyboard(svc, e, "**按钮测试①**（action 跳转/回调/指令 + 样式 0/1/2/3 + 权限）", kb);
+        }
+
+        /**
+         * 内嵌键盘（keyboard）测试②：visited_label / unsupport_tips / 指定用户权限 / 多行布局。
+         *
+         * <ul>
+         *   <li>visited_label：点击后按钮文字（不传则保持不变）</li>
+         *   <li>unsupport_tips：客户端版本过低时的提示文案</li>
+         *   <li>permission.type=0 + specify_user_ids：仅指定成员可点</li>
+         * </ul>
+         */
+        @Command(value = "#按钮2", scope = Command.Scope.GROUP)
+        public String button2(GroupMessageEvent e, PluginServices svc) {
+            Map<String, Object> visitedRender = new LinkedHashMap<>();
+            visitedRender.put("label", "点击我");
+            visitedRender.put("visited_label", "已点击");
+            visitedRender.put("style", 3);
+            Map<String, Object> row1Btn1 = Map.of(
+                    "id", "visit_1",
+                    "render_data", visitedRender,
+                    "action", Map.of("type", 1, "data", "visited",
+                            "unsupport_tips", "请升级 QQ 后再试"));
+            Map<String, Object> row1Btn2 = btn("only_me", "仅我", 1,
+                    Map.of("type", 1, "data", "only_me",
+                            "permission", Map.of("type", 0, "specify_user_ids", List.of(e.getSenderId()))));
+            Map<String, Object> row2Btn1 = btn("enter_cmd", "发送指令", 3,
+                    Map.of("type", 2, "data", "#按钮2", "permission", Map.of("type", 2), "enter", true));
+            Map<String, Object> row2Btn2 = btn("blue_1", "蓝线框", 1,
+                    Map.of("type", 1, "data", "blue_1"));
+            XuanJiMessageElement.Keyboard kb = keyboard(List.of(
+                    List.of(row1Btn1, row1Btn2),
+                    List.of(row2Btn1, row2Btn2)));
+            return sendKeyboard(svc, e, "**按钮测试②**（点击后文字 / 版本提示 / 指定成员可点 / 指令按钮）", kb);
+        }
+
+        /** 发送 Markdown + 键盘消息；成功回提示，失败打控制台不发群。 */
+        private String sendKeyboard(PluginServices svc, GroupMessageEvent e, String md, XuanJiMessageElement.Keyboard kb) {
+            XuanJiMessage msg = XuanJiMessage.builder().markdown(md).add(kb).build();
+            XuanJiSendReceipt r = svc.sendToGroup(e.getBotId(), e.getGroupId(), msg);
+            if (r.success()) return "已发送：" + md;
+            System.out.println("[TestPlugin] 按钮消息发送失败: " + r.errorMessage());
+            return null;
+        }
+
+        /** 构造单个按钮（render_data + action）。 */
+        private static Map<String, Object> btn(String id, String label, int style, Map<String, Object> action) {
+            Map<String, Object> b = new LinkedHashMap<>();
+            b.put("id", id);
+            b.put("render_data", Map.of("label", label, "style", style));
+            if (action != null) b.put("action", action);
+            return b;
+        }
+
+        /** 把多行按钮包装成官方 keyboard 结构（content.rows[].buttons[]）。 */
+        private static XuanJiMessageElement.Keyboard keyboard(List<List<Map<String, Object>>> rows) {
+            List<Map<String, Object>> rowList = new ArrayList<>();
+            for (List<Map<String, Object>> row : rows) {
+                rowList.add(Map.of("buttons", row));
+            }
+            return new XuanJiMessageElement.Keyboard(Map.of("content", Map.of("rows", rowList)));
         }
     }
 }

@@ -58,6 +58,9 @@ public class AuthFilter extends OncePerRequestFilter {
 
         String token = readCookie(request);
         if (token != null && sessionStore.isValid(token)) {
+            // 记录操作人标识（控制台为 PIN 单口令，无账号体系 → 用来源 IP 区分操作者），
+            // 供平台动作审计（qqbot_op_log 的 operator_*）在 console 来源时读取。
+            request.setAttribute("xuanji.console.operator", clientIp(request));
             chain.doFilter(request, response);
             return;
         }
@@ -65,6 +68,17 @@ public class AuthFilter extends OncePerRequestFilter {
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
         response.setContentType("application/json;charset=UTF-8");
         response.getWriter().write("{\"error\":\"未登录或会话已过期\"}");
+    }
+
+    /** 客户端 IP（优先取 X-Forwarded-For 首个，兜底 remoteAddr）。 */
+    private static String clientIp(HttpServletRequest request) {
+        String fwd = request.getHeader("X-Forwarded-For");
+        if (fwd != null && !fwd.isBlank()) {
+            String first = fwd.split(",")[0].trim();
+            if (!first.isBlank()) return first;
+        }
+        String addr = request.getRemoteAddr();
+        return addr == null ? "" : addr;
     }
 
     private boolean isWhitelisted(String uri) {

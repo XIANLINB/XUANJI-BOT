@@ -60,5 +60,10 @@ public final class PlatformActions {
     /** 单聊用户列表（查本地库）。参数：无。返回：{data:[…]}。 */
     public static final String USER_LIST = "user.list";
 
+    // ──────────── 机器人级动作 ────────────
+
+    /** 生成机器人分享链接（邀请用户添加机器人为好友）。参数：callbackData(可选,≤32字符)。返回：{urlLink}。 */
+    public static final String GENERATE_SHARE_LINK = "bot.generate_share_link";
+
     private PlatformActions() {}
 }

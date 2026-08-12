@@ -21,5 +21,8 @@ export const botsApi = {
   restoreBot: (id: number | string) => post(`/bot-config/archives/${id}/restore`),
   // 变动数据（统计卡用）
   getBotGroupVariation: (botKey: string) => get(`/console/bots/${encodeURIComponent(botKey)}/group-variation`),
-  getBotFriendVariation: (botKey: string) => get(`/console/bots/${encodeURIComponent(botKey)}/friend-variation`)
+  getBotFriendVariation: (botKey: string) => get(`/console/bots/${encodeURIComponent(botKey)}/friend-variation`),
+  // 生成机器人分享链接（callbackData 可选，≤32 字符，添加机器人时透传给开发者）
+  generateShareLink: (botKey: string, callbackData?: string) =>
+    post(`/console/bots/${encodeURIComponent(botKey)}/share-link`, { callbackData: callbackData || '' })
 }

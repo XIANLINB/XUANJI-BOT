@@ -127,6 +127,25 @@ async function saveWelcome() {
   finally { welcomeSaving.value = false }
 }
 
+// ============ 分享链接主动生成（POST /v2/generate_url_link，可带 callback_data） ============
+const shareDraft = ref('')
+const shareGenerating = ref(false)
+const generatedLink = ref('')
+async function genShareLink() {
+  shareGenerating.value = true
+  try {
+    const r: any = await api.generateShareLink(detail.value.botKey, shareDraft.value.trim())
+    if (r?.ok) {
+      generatedLink.value = r.urlLink || ''
+      message.success('分享链接已生成')
+    } else {
+      message.error(r?.error || '生成失败')
+    }
+  } catch (e: any) {
+    message.error('生成失败：' + (e?.message ?? e))
+  } finally { shareGenerating.value = false }
+}
+
 // ============ 模块2：启停 + 切换连接方式 ============
 const switching = ref(false)
 const switchingError = ref('')
@@ -559,20 +578,37 @@ async function onAdd() {
             <div class="share-section">
               <div class="section-head">
                 <span class="section-title">分享链接</span>
-                <NSpace v-if="detail.shareUrl" :size="6">
-                  <NInput :value="detail.shareUrl" readonly size="small" style="width: 260px" />
-                  <NButton size="tiny" @click="copy(detail.shareUrl)">
-                    <template #icon><NIcon size="14"><CopyOutline /></NIcon></template>
-                    复制
+                <NSpace :size="6" style="flex-wrap: wrap">
+                  <NInput
+                    v-model:value="shareDraft"
+                    placeholder="callback_data（可选，≤32字符）"
+                    size="small"
+                    style="width: 170px"
+                    :maxlength="32"
+                    clearable
+                  />
+                  <NButton size="tiny" type="primary" :loading="shareGenerating" @click="genShareLink">
+                    生成分享链接
                   </NButton>
+                  <template v-if="generatedLink">
+                    <NInput :value="generatedLink" readonly size="small" style="width: 260px" />
+                    <NButton size="tiny" @click="copy(generatedLink)">
+                      <template #icon><NIcon size="14"><CopyOutline /></NIcon></template>
+                      复制
+                    </NButton>
+                  </template>
                 </NSpace>
-                <NText v-else depth="3" style="font-size: 12px">未返回（QQ 开放平台未下发）</NText>
+              </div>
+              <div v-if="!generatedLink && !detail.shareUrl" style="margin-top: 4px">
+                <NText depth="3" style="font-size: 12px">
+                  未返回（QQ 开放平台未下发；可点上方「生成分享链接」主动生成，带 callback_data 可追踪来源）
+                </NText>
               </div>
               <div class="qrcode-area">
                 <div class="qrcode-wrap">
                   <NQrCode
-                    v-if="detail.shareUrl"
-                    :value="detail.shareUrl"
+                    v-if="generatedLink || detail.shareUrl"
+                    :value="generatedLink || detail.shareUrl"
                     :size="140"
                     type="svg"
                     error-correction-level="M"
