@@ -43,3 +43,9 @@ plugins/.work/
 backups/
 browser/
 xuanji-console-server/package-lock.json
+
+# ===== 插件模块（可选扩展，与框架核心运行无关，按需单独提交）=====
+xuanji-plugin-groupadmin/
+xuanji-plugin-test/
+xuanji-plugin-signin/
+modules/
