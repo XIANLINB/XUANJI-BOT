@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, watch, h } from 'vue'
 import {
   NCard, NGrid, NGi, NStatistic, NRadioGroup, NRadioButton, NEmpty, NSpin, NText,
-  NTooltip, NTag, NIcon, NSelect, NButton, NNumberAnimation, useMessage
+  NTooltip, NTag, NIcon, NSelect, NButton, NNumberAnimation, NDatePicker, useMessage
 } from 'naive-ui'
 import {
   StatsChartOutline, ChatbubbleOutline, PeopleOutline, PersonOutline,
@@ -19,13 +19,20 @@ const message = useMessage()
 const botsStore = useBotsStore()
 const loading = ref(false)
 const err = ref('')
-const days = ref(30)
+const days = ref<number | null>(30)
 const botKey = ref('')  // 空 = 全部机器人
+const dateRange = ref<[number, number] | null>(null)  // 自定义时间范围（ms）
 const RANGES = [
+  { label: '近 24 小时', value: 1 },
   { label: '近 7 天', value: 7 },
   { label: '近 30 天', value: 30 },
   { label: '近 90 天', value: 90 }
 ]
+// 快捷范围单选：选自定义时间范围时取消高亮
+const rangeValue = computed<number | null>({
+  get: () => (dateRange.value ? null : days.value),
+  set: (v) => { dateRange.value = null; days.value = v as number }
+})
 
 /** 机器人筛选选项：默认"全部机器人"+ 来自 BotStore 的机器人列表 */
 const botOptions = computed(() => {
@@ -247,7 +254,10 @@ async function load() {
   err.value = ''
   try {
     await botsStore.loadBots()
-    stats.value = await api.getStats(days.value, botKey.value)
+    const [start, end] = dateRange.value
+      ? [Math.floor(dateRange.value[0] / 1000), Math.floor(dateRange.value[1] / 1000)]
+      : [0, 0]
+    stats.value = await api.getStats(days.value ?? 30, botKey.value, start, end)
   } catch (e: any) {
     err.value = e?.message ?? e
     message.error('统计加载失败：' + err.value)
@@ -256,8 +266,7 @@ async function load() {
   }
 }
 
-watch(days, load)
-watch(botKey, load)
+watch([days, botKey, dateRange], load)
 onMounted(load)
 </script>
 
@@ -271,9 +280,10 @@ onMounted(load)
         placeholder="选择机器人"
         style="width: 180px"
       />
-      <NRadioGroup v-model:value="days" size="small">
+      <NRadioGroup v-model:value="rangeValue" size="small">
         <NRadioButton v-for="r in RANGES" :key="r.value" :value="r.value">{{ r.label }}</NRadioButton>
       </NRadioGroup>
+      <NDatePicker v-model:value="dateRange" type="daterange" clearable size="small" style="width: 220px" placeholder="自定义时间范围" />
       <NButton secondary :loading="loading" @click="load">刷新</NButton>
     </PageHero>
 

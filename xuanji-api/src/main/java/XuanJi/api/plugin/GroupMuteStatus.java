@@ -3,7 +3,7 @@ package XuanJi.api.plugin;
 import java.util.Map;
 
 /**
- * 群禁言状态（类型化封装，{@link PluginServices#getGroupMuteStatus}）。
+ * 群禁言状态（类型化封装，{@code Bot.getGroupMuteStatus()}）。
  *
  * <p>来自平台 {@code GET /v2/groups/{openid}/restrict_chat_setting}；字段缺失时返回 null/0，
  * 插件可依据 {@link #isMuted()} 快速判断。

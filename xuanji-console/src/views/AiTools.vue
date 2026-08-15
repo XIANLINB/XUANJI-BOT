@@ -1,19 +1,47 @@
 <script setup lang="ts">
-import { ref, onMounted, h } from 'vue'
+import { ref, onMounted, h, computed } from 'vue'
 import { useMessage } from 'naive-ui'
 import {
-  NCard, NButton, NDataTable, NTag, NIcon, NEmpty, NSpin, NTooltip, NSpace
+  NCard, NButton, NDataTable, NTag, NIcon, NSpin, NTooltip, NSpace, NInput
 } from 'naive-ui'
 import {
-  ExtensionPuzzleOutline, ShieldCheckmarkOutline, FlashOutline, RefreshOutline
+  ExtensionPuzzleOutline, ShieldCheckmarkOutline, FlashOutline, RefreshOutline, SearchOutline
 } from '@vicons/ionicons5'
 import api from '../api'
 import type { LlmToolInfo } from '../api/llm'
 import PageHero from '../components/PageHero.vue'
+import EmptyState from '../components/EmptyState.vue'
 
 const message = useMessage()
 const tools = ref<LlmToolInfo[]>([])
 const loading = ref(false)
+const search = ref('')
+
+// 搜索（名称/中文释义/描述）+ 按名称排序
+const filteredTools = computed(() => {
+  const kw = search.value.trim().toLowerCase()
+  const list = kw
+    ? tools.value.filter(t =>
+        (t.name || '').toLowerCase().includes(kw) ||
+        (t.descriptionZh || '').toLowerCase().includes(kw) ||
+        (t.description || '').toLowerCase().includes(kw))
+    : [...tools.value]
+  return list.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+})
+
+/** 参数摘要：name:type(必填) 逗号连接。 */
+function paramSummary(t: LlmToolInfo): string {
+  const props = t.parameters?.properties as Record<string, any> | undefined
+  if (!props) return '（无）'
+  const required = Array.isArray(t.parameters?.required) ? (t.parameters.required as string[]) : []
+  const entries = Object.entries(props)
+  if (!entries.length) return '（无）'
+  return entries.map(([k, v]) => {
+    const type = (v as any)?.type || (v as any)?.format || ''
+    const req = required.includes(k) ? '·必填' : ''
+    return type ? `${k}:${type}${req}` : `${k}${req}`
+  }).join('、')
+}
 
 async function load() {
   loading.value = true
@@ -38,10 +66,7 @@ const columns = [
       r.confirm
         ? h(NTag, { size: 'small', type: 'warning' }, { default: () => '需确认' })
         : h(NTag, { size: 'small', type: 'success' }, { default: () => '直接执行' }) },
-  { title: '参数', key: 'params', ellipsis: { tooltip: true }, render: (r: LlmToolInfo) =>
-      r.parameters && (r.parameters.properties as Record<string, any>)
-        ? Object.keys(r.parameters.properties as Record<string, any>).join('、')
-        : '（无）' },
+  { title: '参数', key: 'params', ellipsis: { tooltip: true }, render: (r: LlmToolInfo) => paramSummary(r) },
 ]
 
 onMounted(load)
@@ -50,6 +75,9 @@ onMounted(load)
 <template>
   <div class="page">
     <PageHero title="AI 工具" subtitle="@LlmTool 工具清单 — 对话时 AI 可按需调用这些能力（Function Calling）；需确认的工具先征求你的同意再执行" :icon="ExtensionPuzzleOutline">
+      <NInput v-model:value="search" placeholder="搜索工具名 / 描述" clearable size="small" style="width: 220px">
+        <template #prefix><NIcon><SearchOutline /></NIcon></template>
+      </NInput>
       <NButton secondary @click="load">
         <template #icon><NIcon><RefreshOutline /></NIcon></template>
         刷新
@@ -69,8 +97,8 @@ onMounted(load)
           </NTag>
         </div>
         <NSpin :show="loading">
-          <NEmpty v-if="!loading && tools.length === 0" description="暂无已注册工具（需重启生效）" />
-          <NDataTable v-else :columns="columns" :data="tools" :row-key="(r: LlmToolInfo) => r.name" :bordered="false" />
+          <EmptyState v-if="!loading && tools.length === 0" description="暂无已注册工具（需重启生效）" />
+          <NDataTable v-else :columns="columns" :data="filteredTools" :row-key="(r: LlmToolInfo) => r.name" :bordered="false" :pagination="{ pageSize: 20 }" />
         </NSpin>
       </NSpace>
     </NCard>

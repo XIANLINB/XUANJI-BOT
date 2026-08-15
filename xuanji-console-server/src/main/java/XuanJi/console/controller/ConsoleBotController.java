@@ -259,6 +259,31 @@ public class ConsoleBotController {
         return (Map<String, Object>) (Map) p.groupVariation(appId, today0, yday0, now);
     }
 
+    /** 全机器人聚合群变动数据（Q1）：不选机器人时统计卡显示全量。 */
+    @GetMapping("/bots/group-variation")
+    public Map<String, Object> groupVariationAll() {
+        long now = java.time.Instant.now().getEpochSecond();
+        long today0 = ConsoleQueryService.todayStartEpochSeconds();
+        long yday0 = today0 - 86400L;
+        long tn = 0, yn = 0, ta = 0, ya = 0;
+        for (ConsoleQueryService.BotRef ref : queryService.botRefs()) {
+            PlatformDataProvider p = queryService.providerFor(ref.platform());
+            if (p == null) continue;
+            Map<String, Long> v = p.groupVariation(ref.instanceId(), today0, yday0, now);
+            if (v == null) continue;
+            tn += v.getOrDefault("todayNewGroups", 0L);
+            yn += v.getOrDefault("ydayNewGroups", 0L);
+            ta += v.getOrDefault("todayActiveMembers", 0L);
+            ya += v.getOrDefault("ydayActiveMembers", 0L);
+        }
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("todayNewGroups", tn);
+        m.put("ydayNewGroups", yn);
+        m.put("todayActiveMembers", ta);
+        m.put("ydayActiveMembers", ya);
+        return m;
+    }
+
     /** 单聊用户变动数据（今日/昨日新增用户 + 活跃用户）。统计卡「用户变动」用。 */
     @GetMapping("/bots/{botKey}/friend-variation")
     public Map<String, Object> friendVariation(@PathVariable String botKey) {
@@ -271,6 +296,31 @@ public class ConsoleBotController {
         long today0 = ConsoleQueryService.todayStartEpochSeconds();
         long yday0 = today0 - 86400L;
         return (Map<String, Object>) (Map) p.friendVariation(appId, today0, yday0, now);
+    }
+
+    /** 全机器人聚合单聊用户变动数据（不选机器人时统计卡显示全量）。 */
+    @GetMapping("/bots/friend-variation")
+    public Map<String, Object> friendVariationAll() {
+        long now = java.time.Instant.now().getEpochSecond();
+        long today0 = ConsoleQueryService.todayStartEpochSeconds();
+        long yday0 = today0 - 86400L;
+        long tn = 0, yn = 0, ta = 0, ya = 0;
+        for (ConsoleQueryService.BotRef ref : queryService.botRefs()) {
+            PlatformDataProvider p = queryService.providerFor(ref.platform());
+            if (p == null) continue;
+            Map<String, Long> v = p.friendVariation(ref.instanceId(), today0, yday0, now);
+            if (v == null) continue;
+            tn += v.getOrDefault("todayNewFriends", 0L);
+            yn += v.getOrDefault("ydayNewFriends", 0L);
+            ta += v.getOrDefault("todayActiveUsers", 0L);
+            ya += v.getOrDefault("ydayActiveUsers", 0L);
+        }
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("todayNewFriends", tn);
+        m.put("ydayNewFriends", yn);
+        m.put("todayActiveUsers", ta);
+        m.put("ydayActiveUsers", ya);
+        return m;
     }
 
     /** 启动机器人连接。envType 取自数据库配置（SANDBOX / PRODUCTION）。 */

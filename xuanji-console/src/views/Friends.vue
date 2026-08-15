@@ -2,60 +2,82 @@
 import { ref, onMounted, computed, h, watch } from 'vue'
 import {
   NDataTable, NButton, NDrawer, NDrawerContent, NAlert, NSpace, NIcon, NText,
-  NEmpty, NSelect, NInput, NSwitch, NTag, NCard, NGrid, NGi, NNumberAnimation,
-  NGradientText, NPagination, type DataTableColumns
+  NSelect, NInput, NSwitch, NTag, NCard, NGrid, NGi, NNumberAnimation,
+  NGradientText, NPagination, useMessage, type DataTableColumns
 } from 'naive-ui'
 import { PersonOutline, SearchOutline, RefreshOutline, TrendingUpOutline } from '@vicons/ionicons5'
 import dayjs from 'dayjs'
 import api from '../api'
 import StatCard from '../components/StatCard.vue'
+import EmptyState from '../components/EmptyState.vue'
 import { userName } from '../utils/names'
+import { useBotsStore } from '../stores/bots'
+
+const message = useMessage()
 
 const friends = ref<any[]>([])
+const total = ref(0)
+const summary = ref<{ notDeleted: number; deleted: number }>({ notDeleted: 0, deleted: 0 })
 const err = ref('')
 const loading = ref(false)
 const botFilter = ref<string | null>(null)
 const search = ref('')
 const showDeleted = ref(false)
-const bots = ref<{ appId: string; name: string }[]>([])
+const botsStore = useBotsStore()
 
 const botNameMap = computed(
-  () => new Map((bots.value || []).map((b) => [String(b.appId), b.name || `Bot #${b.appId}`]))
+  () => new Map((botsStore.bots || []).map((b) => [String(b.appId), b.name || `Bot #${b.appId}`]))
 )
 
-async function loadBots() { try { bots.value = (await api.getBots()) || [] } catch { bots.value = [] } }
+// 服务端分页 + 过滤（与群聊列表一致）
 async function load() {
   loading.value = true
-  try { friends.value = await api.getFriends(); err.value = '' }
-  catch (e: any) { err.value = e.message }
-  finally { loading.value = false }
+  try {
+    const res = await api.getFriendsPage({
+      page: page.value,
+      size: pageSize.value,
+      bot: botFilter.value || undefined,
+      q: search.value.trim() || undefined,
+      showDeleted: showDeleted.value
+    })
+    friends.value = res?.rows || []
+    total.value = Number(res?.total ?? 0)
+    summary.value = {
+      notDeleted: Number(res?.notDeleted ?? 0),
+      deleted: Number(res?.deleted ?? 0)
+    }
+    err.value = ''
+  } catch (e: any) {
+    err.value = e.message
+    friends.value = []
+  } finally {
+    loading.value = false
+  }
 }
 
 const variation = ref<Record<string, number>>({})
 async function loadVariation() {
-  if (!botFilter.value) { variation.value = {}; return }
-  try { variation.value = (await api.getBotFriendVariation(botFilter.value)) || {} } catch { variation.value = {} }
+  if (!botFilter.value) {
+    try { variation.value = (await api.getFriendsVariationAll()) || {} } catch { variation.value = {} }
+    return
+  }
+  const bot = botsStore.bots.find((x) => String(x.appId) === String(botFilter.value))
+  const key = bot?.botKey || botFilter.value
+  try { variation.value = (await api.getBotFriendVariation(key)) || {} } catch { variation.value = {} }
 }
-watch(botFilter, () => { load(); loadVariation() })
-onMounted(async () => {
-  await loadBots()
-  await load()
-  if (botFilter.value) loadVariation()
+
+let searchTimer: number | null = null
+watch(botFilter, () => { page.value = 1; load(); loadVariation() })
+watch(showDeleted, () => { page.value = 1; load() })
+watch(search, () => {
+  if (searchTimer !== null) clearTimeout(searchTimer)
+  searchTimer = window.setTimeout(() => { page.value = 1; load() }, 300)
 })
 
-const filtered = computed(() => {
-  let rows = friends.value || []
-  if (!showDeleted.value) rows = rows.filter((f) => Number(f.IS_DELETED) !== 1)
-  if (botFilter.value) rows = rows.filter((f) => String(f.BOT_APPID) === String(botFilter.value))
-  const q = search.value.trim().toLowerCase()
-  if (q) {
-    rows = rows.filter(
-      (f) =>
-        String(f.PLATFORM_USER_ID || '').toLowerCase().includes(q) ||
-        String(f.NICKNAME || '').toLowerCase().includes(q)
-    )
-  }
-  return rows
+onMounted(async () => {
+  await botsStore.loadBots()
+  await load()
+  loadVariation()
 })
 
 // ---------- 统计卡（统一 widget 风格） ----------
@@ -70,7 +92,7 @@ function fmtTime(v: unknown): string {
   if (v == null || v === '') return '—'
   const n = Number(String(v).trim())
   if (!Number.isFinite(n) || n <= 0) return String(v)
-  return dayjs(n <= 9999999999 ? n * 1000 : n).format('YYYY-MM-DD HH:mm')
+  return dayjs(n <= 9999999999 ? n * 1000 : n).utcOffset(8).format('YYYY-MM-DD HH:mm')
 }
 
 const columns = computed<DataTableColumns>(() => [
@@ -95,11 +117,8 @@ const columns = computed<DataTableColumns>(() => [
 // ---------- 分页 ----------
 const page = ref(1)
 const pageSize = ref(20)
-const pagedRows = computed(() => {
-  const start = (page.value - 1) * pageSize.value
-  return filtered.value.slice(start, start + pageSize.value)
-})
-watch(filtered, () => { page.value = 1 })
+function onPageChange(p: number) { page.value = p; load() }
+function onPageSizeChange(s: number) { pageSize.value = s; page.value = 1; load() }
 
 const msgs = ref<any[]>([])
 const showMsgs = ref(false)
@@ -107,9 +126,14 @@ const targetName = ref('')
 async function openMsgs(f: any) {
   targetName.value = f.PLATFORM_USER_ID
   try {
-    const all: any[] = await api.getContactMessages('c2c', f.PLATFORM_USER_ID)
+    // 修复：getContactMessages 是单对象参数 { type, targetId }，非位置参数
+    const res: any = await api.getContactMessages({ type: 'c2c', targetId: f.PLATFORM_USER_ID })
+    const all: any[] = res?.rows || []
     msgs.value = all.filter((m) => String(m.BOT_APPID) === String(f.BOT_APPID))
-  } catch { msgs.value = [] }
+  } catch {
+    msgs.value = []
+    message.error('加载单聊记录失败')
+  }
   showMsgs.value = true
 }
 
@@ -128,7 +152,7 @@ const msgColumns: DataTableColumns = [
         <NGradientText :gradient="{ deg: 90, from: '#f0a020', to: '#eb2f96' }" :size="18" style="font-weight: 700">
           单聊列表
         </NGradientText>
-        <NText depth="3" style="font-size: 13px">共 {{ filtered.length }} 人</NText>
+        <NText depth="3" style="font-size: 13px">共 {{ total }} 人</NText>
       </div>
       <NSpace align="center" :wrap="false">
         <NInput v-model:value="search" :placeholder="'搜索用户 ID / 昵称'" clearable style="width: 200px">
@@ -136,7 +160,7 @@ const msgColumns: DataTableColumns = [
         </NInput>
         <NSelect
           v-model:value="botFilter"
-          :options="bots.map((b) => ({ label: b.name || `Bot #${b.appId}`, value: String(b.appId) }))"
+          :options="botsStore.bots.map((b) => ({ label: b.name || `Bot #${b.appId}`, value: String(b.appId) }))"
           placeholder="按机器人过滤" clearable style="width: 160px"
         />
         <NSpace align="center" :size="6">
@@ -153,8 +177,8 @@ const msgColumns: DataTableColumns = [
     <!-- 统计卡：统一 widget 风格 -->
     <NGrid :cols="24" :x-gap="12" :y-gap="12" responsive="screen" item-responsive style="margin-bottom: 16px">
       <NGi span="24 s:12 m:6">
-        <StatCard icon="PersonOutline" color="#f0a020" :value="filtered.length" label="单聊用户总数"
-          :sub="`未删除 · 含 ${filtered.filter(f => Number(f.IS_DELETED) !== 1).length} 正常`" />
+        <StatCard icon="PersonOutline" color="#f0a020" :value="total" label="单聊用户总数"
+          :sub="`未删除 ${summary.notDeleted} · 已删除 ${summary.deleted}`" />
       </NGi>
       <NGi span="24 s:12 m:18">
         <StatCard icon="TrendingUpOutline" color="#eb2f96" :value="todayNew + todayActive" label="用户变动"
@@ -166,7 +190,7 @@ const msgColumns: DataTableColumns = [
 
     <NDataTable
       :columns="columns"
-      :data="pagedRows"
+      :data="friends"
       :pagination="false"
       :loading="loading"
       :bordered="false"
@@ -175,24 +199,19 @@ const msgColumns: DataTableColumns = [
       :row-props="(row) => ({ style: 'cursor: pointer', onClick: () => openMsgs(row) })"
       style="margin-bottom: 12px"
     />
-    <NSpace justify="end" align="center" style="margin-bottom: 16px">
+    <NSpace v-if="friends.length" justify="end" align="center" style="margin-bottom: 16px">
       <NPagination
-        v-model:page="page"
-        v-model:page-size="pageSize"
-        :item-count="filtered.length"
+        :page="page"
+        :page-size="pageSize"
+        :item-count="total"
         :page-sizes="[20, 50, 100, 200]"
         show-size-picker
         size="small"
+        @update:page="onPageChange"
+        @update:page-size="onPageSizeChange"
       />
     </NSpace>
-
-    <NEmpty
-      v-if="!loading && !filtered.length"
-      :description="(friends.value && friends.value.length) ? '没有匹配结果，换个关键词试试' : '还没有单聊好友，发过消息后会自动写入'"
-      style="padding: 40px 0"
-    >
-      <template #icon><NIcon size="48"><PersonOutline /></NIcon></template>
-    </NEmpty>
+    <EmptyState v-if="!loading && !friends.length" :description="total ? '没有匹配结果，换个关键词试试' : '还没有单聊好友，发过消息后会自动写入'" />
 
     <NDrawer v-model:show="showMsgs" :width="760" placement="right">
       <NDrawerContent :title="`单聊记录 · ${targetName}`" closable>
@@ -202,7 +221,7 @@ const msgColumns: DataTableColumns = [
           :pagination="{ pageSize: 20, showSizePicker: true, pageSizes: [20, 50, 100] }"
           size="small"
         />
-        <NEmpty v-if="!msgs.length" :description="'暂无消息'" style="padding: 40px 0" />
+        <EmptyState v-if="!msgs.length" :description="'暂无消息'" />
       </NDrawerContent>
     </NDrawer>
   </div>

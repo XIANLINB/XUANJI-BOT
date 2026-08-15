@@ -38,3 +38,8 @@ USAGE-dist.txt
 workbuddy_artifacts/
 __pycache__/
 plugins/.work/
+
+# ===== 运行时/临时产物：备份 zip、Playwright 浏览器二进制 =====
+backups/
+browser/
+xuanji-console-server/package-lock.json

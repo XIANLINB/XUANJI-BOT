@@ -3,7 +3,7 @@ import { ref, onMounted, computed, h, watch } from 'vue'
 import {
   NDataTable, NButton, NDrawer, NDrawerContent, NAlert, NSpace, NIcon, NText,
   NEmpty, NSelect, NInput, NSwitch, NTag, NCard, NGrid, NGi, NNumberAnimation,
-  NGradientText, NPagination, NTooltip, type DataTableColumns
+  NGradientText, NPagination, NTooltip, useMessage, type DataTableColumns
 } from 'naive-ui'
 import {
   PeopleOutline, SearchOutline, AddCircleOutline, RefreshOutline, InformationCircleOutline,
@@ -14,68 +14,79 @@ import api from '../api'
 import PageHero from '../components/PageHero.vue'
 import StatCard from '../components/StatCard.vue'
 import { groupName, userName } from '../utils/names'
+import { useBotsStore } from '../stores/bots'
+
+const message = useMessage()
 
 const groups = ref<any[]>([])
+const total = ref(0)
+const summary = ref<{ notDeleted: number; deleted: number; memberSum: number }>({ notDeleted: 0, deleted: 0, memberSum: 0 })
 const err = ref('')
 const loading = ref(false)
 const botFilter = ref<string | null>(null)
 const search = ref('')
 const showDeleted = ref(false)
-const bots = ref<{ appId: string; name: string }[]>([])
+const botsStore = useBotsStore()
 
 const botNameMap = computed(
-  () => new Map((bots.value || []).map((b) => [String(b.appId), b.name || `Bot #${b.appId}`]))
+  () => new Map((botsStore.bots || []).map((b) => [String(b.appId), b.name || `Bot #${b.appId}`]))
 )
 
-async function loadBots() { try { bots.value = (await api.getBots()) || [] } catch { bots.value = [] } }
+// Q11：后端分页 + 服务端过滤（bot / 关键词 / 是否含已删除）
 async function load() {
   loading.value = true
-  try { groups.value = await api.getGroups(); err.value = '' }
-  catch (e: any) { err.value = e.message }
-  finally { loading.value = false }
+  try {
+    const res = await api.getGroupsPage({
+      page: page.value,
+      size: pageSize.value,
+      bot: botFilter.value || undefined,
+      q: search.value.trim() || undefined,
+      showDeleted: showDeleted.value
+    })
+    groups.value = res?.rows || []
+    total.value = Number(res?.total ?? 0)
+    summary.value = {
+      notDeleted: Number(res?.notDeleted ?? 0),
+      deleted: Number(res?.deleted ?? 0),
+      memberSum: Number(res?.memberSum ?? 0)
+    }
+    err.value = ''
+  } catch (e: any) {
+    err.value = e.message
+    groups.value = []
+  } finally {
+    loading.value = false
+  }
 }
 
 const variation = ref<Record<string, number>>({})
 async function loadVariation() {
-  if (!botFilter.value) { variation.value = {}; return }
-  try { variation.value = (await api.getBotGroupVariation(botFilter.value)) || {} } catch { variation.value = {} }
+  // Q1：不选机器人 → 后端聚合全量变动
+  if (!botFilter.value) {
+    try { variation.value = (await api.getGroupsVariationAll()) || {} } catch { variation.value = {} }
+    return
+  }
+  // Q9：appId → botKey 映射后再请求（后端 resolveAppId 也兜底接受 appId）
+  const bot = botsStore.bots.find((x) => String(x.appId) === String(botFilter.value))
+  const key = bot?.botKey || botFilter.value
+  try { variation.value = (await api.getBotGroupVariation(key)) || {} } catch { variation.value = {} }
 }
-watch(botFilter, () => { load(); loadVariation() })
-onMounted(async () => {
-  await loadBots()
-  await load()
-  if (botFilter.value) loadVariation()
+
+let searchTimer: number | null = null
+watch(botFilter, () => { page.value = 1; load(); loadVariation() })
+watch(showDeleted, () => { page.value = 1; load() })
+watch(search, () => {
+  if (searchTimer !== null) clearTimeout(searchTimer)
+  searchTimer = window.setTimeout(() => { page.value = 1; load() }, 300)
 })
 
-const filtered = computed(() => {
-  let rows = groups.value || []
-  if (!showDeleted.value) rows = rows.filter((g) => Number(g.IS_DELETED) !== 1)
-  if (botFilter.value) rows = rows.filter((g) => String(g.BOT_APPID) === String(botFilter.value))
-  const q = search.value.trim().toLowerCase()
-  if (q) {
-    rows = rows.filter(
-      (g) =>
-        String(g.GROUP_ID || '').toLowerCase().includes(q) ||
-        String(g.GROUP_NAME || '').toLowerCase().includes(q)
-    )
-  }
-  return rows
+onMounted(async () => {
+  await botsStore.loadBots()
+  await load()
+  loadVariation()
 })
 
 // ---------- 统计卡（统一 widget 风格） ----------
-const notDeletedCount = computed(() =>
-  filtered.value.filter((g) => Number(g.IS_DELETED) !== 1).length
-)
-const deletedCount = computed(() =>
-  filtered.value.filter((g) => Number(g.IS_DELETED) === 1).length
-)
-const memberSum = computed(() =>
-  filtered.value
-    .filter((g) => Number(g.IS_DELETED) !== 1)
-    .reduce((s, g) => s + (Number(g.MEMBER_COUNT) || 0), 0)
-)
-const memberHasData = computed(() => filtered.value.some((g) => Number(g.MEMBER_COUNT) > 0))
-
 const todayNew = computed(() => Number(variation.value.todayNewGroups) || 0)
 const ydayNew = computed(() => Number(variation.value.ydayNewGroups) || 0)
 const todayActive = computed(() => Number(variation.value.todayActiveMembers) || 0)
@@ -87,7 +98,8 @@ function fmtTime(v: unknown): string {
   if (v == null || v === '') return '—'
   const n = Number(String(v).trim())
   if (!Number.isFinite(n) || n <= 0) return String(v)
-  return dayjs(n <= 9999999999 ? n * 1000 : n).format('YYYY-MM-DD HH:mm')
+  // Q3：统一 UTC+8 口径（与 Monitor/Stats 一致）
+  return dayjs(n <= 9999999999 ? n * 1000 : n).utcOffset(8).format('YYYY-MM-DD HH:mm')
 }
 
 /** 群标签（存 JSON 数组字符串，如 ["a","b"]）→ 逗号文本展示。 */
@@ -136,22 +148,22 @@ const columns = computed<DataTableColumns>(() => [
     }
   },
   {
-    title: '操作', key: 'ACTION', width: 80, fixed: 'right',
-    render: (row) => h(NButton, {
-      size: 'small', type: 'primary', secondary: true,
-      onClick: (e: MouseEvent) => { e.stopPropagation(); openRobotStates(row) }
-    }, () => '详情')
+    // Q10：「详情」进机器人状态，「成员」进群成员，行点击不再进任何
+    title: '操作', key: 'ACTION', width: 130, fixed: 'right',
+    render: (row) => h(NSpace, { size: 4 }, {
+      default: () => [
+        h(NButton, { size: 'small', type: 'primary', secondary: true, onClick: (e: MouseEvent) => { e.stopPropagation(); openRobotStates(row) } }, () => '详情'),
+        h(NButton, { size: 'small', type: 'default', secondary: true, onClick: (e: MouseEvent) => { e.stopPropagation(); openMembers(row) } }, () => '成员')
+      ]
+    })
   }
 ])
 
 // ---------- 分页 ----------
 const page = ref(1)
 const pageSize = ref(20)
-const pagedRows = computed(() => {
-  const start = (page.value - 1) * pageSize.value
-  return filtered.value.slice(start, start + pageSize.value)
-})
-watch(filtered, () => { page.value = 1 })
+function onPageChange(p: number) { page.value = p; load() }
+function onPageSizeChange(s: number) { pageSize.value = s; page.value = 1; load() }
 
 const members = ref<any[]>([])
 const showMembers = ref(false)
@@ -159,9 +171,13 @@ const memberGroup = ref('')
 async function openMembers(g: any) {
   memberGroup.value = g.GROUP_ID
   try {
-    const all: any[] = await api.getGroupMembers(g.GROUP_ID)
-    members.value = all.filter((m) => String(m.BOT_APPID) === String(g.BOT_APPID))
-  } catch { members.value = [] }
+    // Q6：后端按 bot 过滤，前端不再全量拉再过滤
+    const all: any[] = await api.getGroupMembers(g.GROUP_ID, String(g.BOT_APPID))
+    members.value = all || []
+  } catch {
+    members.value = []
+    message.error('加载群成员失败')
+  }
   showMembers.value = true
 }
 
@@ -173,7 +189,10 @@ async function openRobotStates(g: any) {
   robotStateGroup.value = String(g.GROUP_ID || '')
   try {
     robotStates.value = (await api.getGroupRobotStates(String(g.GROUP_ID || ''))) || []
-  } catch { robotStates.value = [] }
+  } catch {
+    robotStates.value = []
+    message.error('加载机器人在群内状态失败')
+  }
   showRobotStates.value = true
 }
 
@@ -187,7 +206,7 @@ function robotRoleTag(role: unknown) {
 const memberColumns: DataTableColumns = [
   { title: '成员 ID', key: 'MEMBER_ID', width: 180, ellipsis: { tooltip: true } },
   { title: '昵称', key: 'NICKNAME', width: 140, render: (row) => h('span', userName(row)) },
-  { title: '角色', key: 'ROLE', width: 90, render: (row) => h(NTag, { size: 'small', type: row.ROLE === 'owner' ? 'warning' : 'default', bordered: false }, () => row.ROLE || 'member') },
+  { title: '角色', key: 'ROLE', width: 90, render: (row) => robotRoleTag(row.ROLE) },
   { title: '入群时间', key: 'JOIN_TIME', width: 150, ellipsis: { tooltip: true }, render: (row) => h('span', fmtTime(row.JOIN_TIME)) }
 ]
 </script>
@@ -199,7 +218,7 @@ const memberColumns: DataTableColumns = [
         <NGradientText :gradient="{ deg: 90, from: '#2090e0', to: '#07c160' }" :size="18" style="font-weight: 700">
           群聊列表
         </NGradientText>
-        <NText depth="3" style="font-size: 13px">共 {{ filtered.length }} 个群</NText>
+        <NText depth="3" style="font-size: 13px">共 {{ total }} 个群</NText>
       </div>
       <NSpace align="center" :wrap="false">
         <NInput v-model:value="search" :placeholder="'搜索群号 / 群名称'" clearable style="width: 200px">
@@ -207,7 +226,7 @@ const memberColumns: DataTableColumns = [
         </NInput>
         <NSelect
           v-model:value="botFilter"
-          :options="bots.map((b) => ({ label: b.name || `Bot #${b.appId}`, value: String(b.appId) }))"
+          :options="botsStore.bots.map((b) => ({ label: b.name || `Bot #${b.appId}`, value: String(b.appId) }))"
           placeholder="按机器人过滤" clearable style="width: 160px"
         />
         <NSpace align="center" :size="6">
@@ -224,8 +243,8 @@ const memberColumns: DataTableColumns = [
     <!-- 统计卡：统一 widget 风格（等高、紧凑） -->
     <NGrid :cols="24" :x-gap="12" :y-gap="12" responsive="screen" item-responsive style="margin-bottom: 16px">
       <NGi span="24 s:12 m:6">
-        <StatCard icon="PeopleOutline" color="#2090e0" :value="filtered.length" label="群聊总数"
-          :sub="`正常 ${notDeletedCount} · 已退出 ${deletedCount}`" />
+        <StatCard icon="PeopleOutline" color="#2090e0" :value="total" label="群聊总数"
+          :sub="`未删除 ${summary.notDeleted} · 已删除 ${summary.deleted}`" />
       </NGi>
       <NGi span="24 s:12 m:6">
         <StatCard icon="TrendingUpOutline" color="#07c160" :value="todayNew" label="今日新加群"
@@ -236,8 +255,8 @@ const memberColumns: DataTableColumns = [
           :sub="`较昨日 ${deltaActive > 0 ? '+' + deltaActive : deltaActive}`" />
       </NGi>
       <NGi span="24 s:12 m:6">
-        <StatCard icon="CubeOutline" color="#fa8c16" :value="memberHasData ? memberSum : '—'" label="群成员总数"
-          :sub="memberHasData ? `未删除群累加 ${notDeletedCount} 个群` : '需 QQ 平台群 OPEN 事件自动同步'" :animate="memberHasData" />
+        <StatCard icon="CubeOutline" color="#fa8c16" :value="summary.memberSum > 0 ? summary.memberSum : '—'" label="群成员总数"
+          :sub="summary.memberSum > 0 ? `未删除 ${summary.notDeleted} 个群 · 部分群未同步` : '需 QQ 平台群 OPEN 事件自动同步'" :animate="summary.memberSum > 0" />
       </NGi>
     </NGrid>
 
@@ -245,29 +264,30 @@ const memberColumns: DataTableColumns = [
 
     <NDataTable
       :columns="columns"
-      :data="pagedRows"
+      :data="groups"
       :pagination="false"
       :loading="loading"
       :bordered="false"
       size="small"
       striped
-      :row-props="(row) => ({ style: 'cursor: pointer', onClick: () => openMembers(row) })"
       style="margin-bottom: 12px"
     />
     <NSpace justify="end" align="center" style="margin-bottom: 16px">
       <NPagination
-        v-model:page="page"
-        v-model:page-size="pageSize"
-        :item-count="filtered.length"
+        :page="page"
+        :page-size="pageSize"
+        :item-count="total"
         :page-sizes="[20, 50, 100, 200]"
         show-size-picker
         size="small"
+        @update:page="onPageChange"
+        @update:page-size="onPageSizeChange"
       />
     </NSpace>
 
     <NEmpty
-      v-if="!loading && !filtered.length"
-      :description="(groups.value && groups.value.length) ? '没有匹配结果，换个关键词试试' : '还没有群数据，收发群消息后会自动写入'"
+      v-if="!loading && !groups.length"
+      :description="total ? '没有匹配结果，换个关键词试试' : '还没有群数据，收发群消息后会自动写入'"
       style="padding: 40px 0"
     >
       <template #icon><NIcon size="48"><AddCircleOutline /></NIcon></template>

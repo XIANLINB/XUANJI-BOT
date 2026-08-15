@@ -6,7 +6,7 @@
     <parent>
         <groupId>dev.xuanji</groupId>
         <artifactId>xuanji-parent</artifactId>
-        <version>1.3.2</version>
+        <version>1.3.4</version>
     </parent>
 
     <artifactId>xuanji-core</artifactId>
@@ -46,6 +46,13 @@
         <dependency>
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-core</artifactId>
+        </dependency>
+
+        <!-- classgraph：插件 classpath 扫描 @PluginEntity（零配置实体发现） -->
+        <dependency>
+            <groupId>io.github.classgraph</groupId>
+            <artifactId>classgraph</artifactId>
+            <version>4.8.179</version>
         </dependency>
 
         <dependency>

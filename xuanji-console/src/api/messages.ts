@@ -4,6 +4,12 @@ import { get, post } from './http'
 export const messagesApi = {
   getMessages: (chat: 'group' | 'c2c', bot = '', page = 0, size = 200) =>
     get(`/console/${chat === 'group' ? 'group' : 'c2c'}-messages`, { bot, page, size }),
+  /** 群消息（服务端筛选 + 分页）：返回 { rows, total, ins, outs, typeDist }。 */
+  getGroupMessages: (params: { bot?: string; page?: number; size?: number; dir?: string; type?: string; startTime?: number; endTime?: number; q?: string }) =>
+    get('/console/group-messages', { ...params }),
+  /** 单聊消息（服务端筛选 + 分页）：返回 { rows, total, ins, outs, typeDist }。 */
+  getC2cMessages: (params: { bot?: string; page?: number; size?: number; dir?: string; type?: string; startTime?: number; endTime?: number; q?: string }) =>
+    get('/console/c2c-messages', { ...params }),
   getEvents: (bot = '', limit = 200) => get('/console/event-log', { bot, limit }),
   /** 管理操作日志（禁言/撤回/审批等出站审计，含失败与被拒记录）。 */
   getOpLogs: (q: { bot?: string; opType?: string; status?: string; groupId?: string; keyword?: string; limit?: number } = {}) =>

@@ -627,6 +627,34 @@ public class QqBotRepository {
         """, botId, chatType, groupId, userId, direction, msgType, content, msgId, msgSeq, eventId, rawJson, createTime);
     }
 
+    /**
+     * 删除超过留存期限的聊天消息（群/C2C 合并表 qqbot_message）。
+     *
+     * <p>按 {@code days} 计算阈值（epoch 秒）：{@code 当前秒 - days*86400}，
+     * 删除所有 {@code create_time < 阈值} 的行。覆盖<b>全部</b> per-bot 日志库，
+     * 群聊与单聊消息一并清理（共用一张表，chat_type 区分）。单项失败不影响其它实例。
+     *
+     * @param days 留存天数（>=1；<=0 视为 30）
+     * @return 删除的总行数
+     */
+    public long deleteOldMessages(int days) {
+        int d = days >= 1 ? days : 30;
+        long threshold = System.currentTimeMillis() / 1000 - (long) d * 86400L;
+        long total = 0;
+        for (String appId : listInstanceIds()) {
+            try {
+                int n = logJdbc(appId).update("DELETE FROM qqbot_message WHERE create_time < ?", threshold);
+                total += n;
+                if (n > 0) {
+                    log.info("[QqRepo] 清理过期消息 appId={}, 保留{}天, 删除{}行", appId, d, n);
+                }
+            } catch (Exception e) {
+                log.warn("[QqRepo] 清理过期消息失败 appId={}: {}", appId, e.getMessage());
+            }
+        }
+        return total;
+    }
+
     /** 标记群消息已撤回（前端按钮显示「已撤回」）。 */
     public void markMessageRetracted(String appId, String groupId, String msgId) {
         Long botId = resolveBotId(appId);
@@ -805,39 +833,73 @@ public class QqBotRepository {
         return queryLog(appId, sql.toString(), args.toArray());
     }
 
+    /** 过滤查询消息流水（服务端筛选 + 分页源）：dir/type/时间范围/关键词，返回 { total, dirDist, typeDist, rows }。 */
+    public Map<String, Object> queryMessagesFiltered(String appId, String chatType,
+                                                     String dir, String type,
+                                                     long startTime, long endTime, String q, int limit) {
+        StringBuilder where = new StringBuilder("chat_type=?");
+        List<Object> args = new ArrayList<>();
+        args.add(chatType);
+        if (dir != null && !dir.isBlank()) { where.append(" AND direction=?"); args.add(dir); }
+        if (type != null && !type.isBlank()) { where.append(" AND msg_type=?"); args.add(type); }
+        if (startTime > 0) { where.append(" AND create_time>=?"); args.add(startTime); }
+        if (endTime > 0) { where.append(" AND create_time<=?"); args.add(endTime); }
+        if (q != null && !q.isBlank()) {
+            where.append(" AND (user_id LIKE ? OR content LIKE ? OR group_id LIKE ?)");
+            String like = "%" + q + "%";
+            args.add(like); args.add(like); args.add(like);
+        }
+        String w = where.toString();
+        Map<String, Object> r = new LinkedHashMap<>();
+        long total = 0;
+        try {
+            Long t = logJdbc(appId).queryForObject("SELECT COUNT(*) FROM qqbot_message WHERE " + w, Long.class, args.toArray());
+            total = t == null ? 0 : t;
+        } catch (Exception e) {
+            total = 0;
+        }
+        r.put("total", total);
+        r.put("dirDist", logJdbc(appId).queryForList("SELECT direction AS D, COUNT(*) AS CNT FROM qqbot_message WHERE " + w + " GROUP BY direction", args.toArray()));
+        r.put("typeDist", logJdbc(appId).queryForList("SELECT msg_type AS T, COUNT(*) AS CNT FROM qqbot_message WHERE " + w + " GROUP BY msg_type", args.toArray()));
+        List<Object> rowArgs = new ArrayList<>(args);
+        rowArgs.add(Math.min(Math.max(limit, 1), 500));
+        r.put("rows", logJdbc(appId).queryForList("SELECT * FROM qqbot_message WHERE " + w + " ORDER BY id DESC LIMIT ?", rowArgs.toArray()));
+        return r;
+    }
+
     // ═══════════════════ 数据中心聚合 ═══════════════════
 
     /** 热力图：星期×小时 消息数（DAY_OF_WEEK: 1=周日 … 7=周六；HOUR: 0-23）。 */
-    public List<Map<String, Object>> heatmap(String appId, long sinceEpochSeconds) {
+    public List<Map<String, Object>> heatmap(String appId, long sinceEpochSeconds, long untilEpochSeconds) {
         return queryLog(appId, """
             SELECT DAY_OF_WEEK(DATEADD('SECOND', create_time, TIMESTAMP '1970-01-01')) AS DOW,
                    HOUR(DATEADD('SECOND', create_time, TIMESTAMP '1970-01-01')) AS HR,
                    COUNT(*) AS CNT
             FROM qqbot_message
-            WHERE create_time >= ?
+            WHERE create_time >= ? AND create_time <= ?
             GROUP BY DOW, HR
-        """, sinceEpochSeconds);
+        """, sinceEpochSeconds, untilEpochSeconds);
     }
 
     /** 消息类型分布。 */
-    public List<Map<String, Object>> msgTypeDist(String appId, long sinceEpochSeconds) {
+    public List<Map<String, Object>> msgTypeDist(String appId, long sinceEpochSeconds, long untilEpochSeconds) {
         return queryLog(appId, """
             SELECT msg_type, COUNT(*) AS CNT
-            FROM qqbot_message WHERE create_time >= ?
+            FROM qqbot_message WHERE create_time >= ? AND create_time <= ?
             GROUP BY msg_type ORDER BY CNT DESC
-        """, sinceEpochSeconds);
+        """, sinceEpochSeconds, untilEpochSeconds);
     }
 
     /** 活跃群 TOP（群名 LEFT JOIN qqbot_group，仅群聊消息；群名缺失为空串，前端用群 ID 前 8 位兜底）。 */
-    public List<Map<String, Object>> activeGroups(String appId, long sinceEpochSeconds, int limit) {
+    public List<Map<String, Object>> activeGroups(String appId, long sinceEpochSeconds, long untilEpochSeconds, int limit) {
         int lim = Math.min(Math.max(limit, 1), 50);
         // 仅在日志库聚合（qqbot_group 在实例库，跨物理 H2 无法 JOIN）
         List<Map<String, Object>> rows = queryLog(appId, """
             SELECT m.group_id AS GID, COUNT(*) AS CNT
             FROM qqbot_message m
-            WHERE m.chat_type='group' AND m.create_time >= ?
+            WHERE m.chat_type='group' AND m.create_time >= ? AND m.create_time <= ?
             GROUP BY m.group_id ORDER BY CNT DESC LIMIT ?
-        """, sinceEpochSeconds, lim);
+        """, sinceEpochSeconds, untilEpochSeconds, lim);
         if (!rows.isEmpty()) {
             Map<String, String> names = groupNameMap(appId,
                     rows.stream().map(r -> String.valueOf(r.get("GID"))).toList());
@@ -849,15 +911,15 @@ public class QqBotRepository {
     }
 
     /** 活跃用户 TOP（昵称 LEFT JOIN qqbot_user；昵称缺失为空串，前端用用户 ID 前 8 位兜底）。 */
-    public List<Map<String, Object>> activeUsers(String appId, long sinceEpochSeconds, int limit) {
+    public List<Map<String, Object>> activeUsers(String appId, long sinceEpochSeconds, long untilEpochSeconds, int limit) {
         int lim = Math.min(Math.max(limit, 1), 50);
         // 仅在日志库聚合（qqbot_user 在实例库，跨物理 H2 无法 JOIN）
         List<Map<String, Object>> rows = queryLog(appId, """
             SELECT m.user_id AS UID, COUNT(*) AS CNT
             FROM qqbot_message m
-            WHERE m.create_time >= ?
+            WHERE m.create_time >= ? AND m.create_time <= ?
             GROUP BY m.user_id ORDER BY CNT DESC LIMIT ?
-        """, sinceEpochSeconds, lim);
+        """, sinceEpochSeconds, untilEpochSeconds, lim);
         if (!rows.isEmpty()) {
             Map<String, String> nicks = userNickMap(appId,
                     rows.stream().map(r -> String.valueOf(r.get("UID"))).toList());
@@ -875,14 +937,14 @@ public class QqBotRepository {
      * bot_name 实际由上层 DataCenterController 用 botRef.botName() 覆盖（框架库 xuanji_bot_setting），
      * 此处仅做兜底，最终展示由框架库权威。
      */
-    public List<Map<String, Object>> activeBots(String appId, long sinceEpochSeconds, int limit) {
+    public List<Map<String, Object>> activeBots(String appId, long sinceEpochSeconds, long untilEpochSeconds, int limit) {
         try {
             List<Map<String, Object>> rows = logJdbc(appId).queryForList("""
                 SELECT bot_id AS APP_ID, COUNT(*) AS CNT
                 FROM qqbot_message
-                WHERE create_time >= ?
+                WHERE create_time >= ? AND create_time <= ?
                 GROUP BY bot_id ORDER BY CNT DESC LIMIT ?
-            """, sinceEpochSeconds, Math.min(Math.max(limit, 1), 50));
+            """, sinceEpochSeconds, untilEpochSeconds, Math.min(Math.max(limit, 1), 50));
             // 从共享库 qqbot_bot 读 bot_appid → 名字映射（虽然共享库没 bot_name 列，先占位）
             for (Map<String, Object> r : rows) {
                 r.put("BNAME", "");
@@ -895,23 +957,23 @@ public class QqBotRepository {
     }
 
     /** 消息方向分布（IN=入站/OUT=出站，按 direction 计数）。 */
-    public List<Map<String, Object>> directionDist(String appId, long sinceEpochSeconds) {
+    public List<Map<String, Object>> directionDist(String appId, long sinceEpochSeconds, long untilEpochSeconds) {
         return queryLog(appId, """
             SELECT DIRECTION, COUNT(*) AS CNT
             FROM qqbot_message
-            WHERE CREATE_TIME >= ?
+            WHERE CREATE_TIME >= ? AND CREATE_TIME <= ?
             GROUP BY DIRECTION
-        """, sinceEpochSeconds);
+        """, sinceEpochSeconds, untilEpochSeconds);
     }
 
     /** 事件类型分布（按 qqbot_event.event_type 计数）。 */
-    public List<Map<String, Object>> eventTypeDist(String appId, long sinceEpochSeconds) {
+    public List<Map<String, Object>> eventTypeDist(String appId, long sinceEpochSeconds, long untilEpochSeconds) {
         return queryLog(appId, """
             SELECT event_type AS ETYPE, COUNT(*) AS CNT
             FROM qqbot_event
-            WHERE create_time >= ?
+            WHERE create_time >= ? AND create_time <= ?
             GROUP BY event_type ORDER BY CNT DESC
-        """, sinceEpochSeconds);
+        """, sinceEpochSeconds, untilEpochSeconds);
     }
 
     /**

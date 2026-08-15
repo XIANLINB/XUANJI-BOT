@@ -66,6 +66,7 @@ public class ConsolePluginController {
         p.put("name", pluginDisplayName(pw, d)); // 优先 @XuanJiPlugin.name（如「演示插件」），兜底 pluginId
         p.put("version", d.getVersion());
         p.put("provider", d.getProvider());
+        p.put("author", pluginAuthor(pw, d));
         p.put("description", d.getPluginDescription());
         p.put("state", pw.getPluginState().toString());
         p.put("running", running);
@@ -118,6 +119,43 @@ public class ConsolePluginController {
     private static String pluginNameOf(Class<?> cls) {
         var plg = cls.getAnnotation(XuanJi.api.annotation.XuanJiPlugin.class);
         return (plg != null && plg.name() != null && !plg.name().isBlank()) ? plg.name() : null;
+    }
+
+    /** 从插件类 @XuanJiPlugin(author=...) 读取作者；主类或内部类均可，兜底 MANIFEST provider。 */
+    private String pluginAuthor(PluginWrapper pw, org.pf4j.PluginDescriptor d) {
+        try {
+            if (d.getPluginClass() != null && !d.getPluginClass().isBlank()) {
+                Class<?> cls = pw.getPluginClassLoader().loadClass(d.getPluginClass());
+                String a = pluginAuthorOf(cls);
+                if (a != null) return a;
+                for (Class<?> inner : cls.getDeclaredClasses()) {
+                    a = pluginAuthorOf(inner);
+                    if (a != null) return a;
+                }
+            }
+        } catch (Exception ignored) {
+            // 插件类不可加载：回退 provider
+        }
+        return d.getProvider() != null ? d.getProvider() : "";
+    }
+
+    private static String pluginAuthorOf(Class<?> cls) {
+        var plg = cls.getAnnotation(XuanJi.api.annotation.XuanJiPlugin.class);
+        return (plg != null && plg.author() != null && !plg.author().isBlank()) ? plg.author() : null;
+    }
+
+    /** 命令执行统计（插件市场页命令统计卡专用，避免复用风控 overview）。 */
+    @GetMapping("/plugins/command-stats")
+    public Map<String, Object> commandStats() {
+        Map<String, Object> cs = commandRegistry.getCommandStats();
+        long exec = cs.get("commandExecCount") instanceof Number n ? n.longValue() : 0L;
+        long fail = cs.get("commandFailCount") instanceof Number n ? n.longValue() : 0L;
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("execCount", exec);
+        m.put("failCount", fail);
+        m.put("successRate", exec + fail == 0 ? 100.0 : Math.round(exec * 10000.0 / (exec + fail)) / 100.0);
+        m.put("rateLimitHits", commandRegistry.rateLimitHits());
+        return m;
     }
 
     @PostMapping("/plugins/{pluginId}/stop")

@@ -3,7 +3,7 @@ package XuanJi.api.plugin;
 import java.util.Map;
 
 /**
- * 机器人在群内的状态（类型化封装，{@link PluginServices#getBotGroupState}）。
+ * 机器人在群内的状态（类型化封装，{@code Bot.getBotGroupState()}）。
  *
  * <p>{@code botState} 平台语义：1=正常，2=机器人被移出群，3=机器人被群解散，4=机器人被禁言。
  * {@link #isOnline()} 即 {@code botState == 1}。

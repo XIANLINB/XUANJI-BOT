@@ -3,7 +3,7 @@ import { ref, computed, onMounted, h, watch } from 'vue'
 import { useMessage } from 'naive-ui'
 import {
   NCard, NButton, NSpace, NSelect, NInput, NTag, NDataTable, NModal,
-  NForm, NFormItem, NIcon, NPopconfirm, NEmpty, NSpin, NTabs, NTabPane, NSwitch, NTooltip, NText
+  NForm, NFormItem, NIcon, NPopconfirm, NSpin, NTabs, NTabPane, NSwitch, NTooltip, NText
 } from 'naive-ui'
 import {
   SparklesOutline, AddOutline, TrashOutline, CreateOutline, ColorWandOutline,
@@ -12,10 +12,13 @@ import {
 import api from '../api'
 import type { LlmPersona, LlmMemoryRow, UserProfileRow } from '../api/llm'
 import PageHero from '../components/PageHero.vue'
+import EmptyState from '../components/EmptyState.vue'
+import dayjs from 'dayjs'
+import { useBotsStore } from '../stores/bots'
 
 const message = useMessage()
+const botsStore = useBotsStore()
 
-const bots = ref<any[]>([])
 const botKey = ref<string>('')
 const personas = ref<LlmPersona[]>([])
 const templates = ref<LlmPersona[]>([])
@@ -30,19 +33,22 @@ const groups = ref<any[]>([])
 const showModal = ref(false)
 const showTemplate = ref(false)
 const editing = ref<LlmPersona | null>(null)
-const form = ref<LlmPersona>({
-  id: 0, scope: 'BOT', botKey: '', groupId: null, userId: null,
-  name: '', age: '', gender: '', personality: '', background: '', scenario: '',
-  speechStyle: '', firstMes: '', mesExample: '', systemExtra: '', legacyPersona: '',
-  roleplayMode: false
-})
+// 初始值仅作占位，openAdd/openEdit/applyTemplate 总用 emptyForm() 覆盖
+const form = ref<LlmPersona>(emptyForm())
+
+/** 时间（后端 UTC/ISO）→ UTC+8 展示。 */
+function fmtSubTime(v: unknown): string {
+  if (v == null || v === '') return '—'
+  const d = dayjs(String(v))
+  return d.isValid() ? d.utcOffset(8).format('YYYY-MM-DD HH:mm:ss') : String(v)
+}
 
 // ──────────── 记忆新增 ────────────
 const memKey = ref('')
 const memValue = ref('')
 
 const botOptions = computed(() =>
-  bots.value.map(b => ({ label: b.name || b.botKey || b.appId || '', value: b.botKey || b.appId || '' }))
+  botsStore.bots.map(b => ({ label: b.name || b.botKey || b.appId || '', value: b.botKey || b.appId || '' }))
 )
 const groupOptions = computed(() =>
   groups.value.map((g: any) => {
@@ -65,23 +71,20 @@ const friendOptions = computed(() =>
 )
 async function loadFriends() {
   try {
-    friends.value = (await api.contactsApi.getFriends()) || []
+    friends.value = (await api.getFriends()) || []
   } catch {
     friends.value = []
   }
 }
-const templateOptions = computed(() =>
-  templates.value.map(t => ({ label: (t.name || '未命名') + (t.roleplayMode ? ' 🎭' : ''), value: t.name || '' }))
-)
 
-const scopeTag = (scope: string) => {
-  const map: Record<string, { type: any; label: string }> = {
-    BOT: { type: 'primary', label: '机器人' },
-    GROUP: { type: 'success', label: '群' },
-    USER: { type: 'warning', label: '用户' }
-  }
-  const c = map[scope] || { type: 'default', label: scope }
-  return h(NTag, { size: 'small', type: c.type as any }, { default: () => c.label })
+const SCOPE_META: Record<string, { type: 'primary' | 'success' | 'warning' | 'default'; label: string }> = {
+  BOT: { type: 'primary', label: '机器人' },
+  GROUP: { type: 'success', label: '群' },
+  USER: { type: 'warning', label: '用户' }
+}
+function scopeTag(scope: string) {
+  const c = SCOPE_META[scope] || { type: 'default', label: scope }
+  return h(NTag, { size: 'small', type: c.type }, { default: () => c.label })
 }
 
 const columns = [
@@ -91,7 +94,7 @@ const columns = [
       r.scope === 'GROUP' ? (r.groupId || '—') : r.scope === 'USER' ? (r.userId || '—') : '（全局）' },
   { title: '角色扮演', key: 'roleplayMode', width: 90, render: (r: LlmPersona) =>
       r.roleplayMode ? h(NTag, { size: 'small', type: 'warning' }, { default: () => '🎭 开启' }) : '—' },
-  { title: '更新时间', key: 'updatedAt', width: 150 },
+  { title: '更新时间', key: 'updatedAt', width: 150, render: (r: LlmPersona) => fmtSubTime(r.updatedAt) },
   { title: '操作', key: 'actions', width: 130, render: (r: LlmPersona) =>
       h(NSpace, { size: 6 }, {
         default: () => [
@@ -110,8 +113,8 @@ const memColumns = [
   { title: '级别', key: 'scope', width: 80, render: (r: LlmMemoryRow) =>
       r.groupId ? h(NTag, { size: 'small', type: 'success' }, { default: () => '群' })
         : r.userId ? h(NTag, { size: 'small', type: 'warning' }, { default: () => '用户' })
-        : h(NTag, { size: 'small', type: 'primary' }, { default: () => 'bot' }) },
-  { title: '更新时间', key: 'updatedAt', width: 150 },
+        : h(NTag, { size: 'small', type: 'primary' }, { default: () => '机器人' }) },
+  { title: '更新时间', key: 'updatedAt', width: 150, render: (r: LlmMemoryRow) => fmtSubTime(r.updatedAt) },
   { title: '操作', key: 'actions', width: 80, render: (r: LlmMemoryRow) =>
       h(NPopconfirm, { onPositiveClick: () => removeMemory(r) }, {
         trigger: () => h(NButton, { size: 'tiny', type: 'error', secondary: true }, { default: () => '删除' }),
@@ -175,7 +178,7 @@ const profileColumns = [
       r.summary || h(NText, { depth: 3 }, { default: () => '（尚未提炼，需开用户画像并等待间隔）' }) },
   { title: '说话风格', key: 'style', width: 180, ellipsis: { tooltip: true }, render: (r: UserProfileRow) =>
       r.style || '—' },
-  { title: '最后活跃', key: 'lastSeen', width: 150 },
+  { title: '最后活跃', key: 'lastSeen', width: 150, render: (r: UserProfileRow) => fmtSubTime(r.lastSeen) },
   { title: '操作', key: 'actions', width: 80, render: (r: UserProfileRow) =>
       h(NPopconfirm, { onPositiveClick: () => removeProfile(r) }, {
         trigger: () => h(NButton, { size: 'tiny', type: 'error', secondary: true }, { default: () => '删除' }),
@@ -199,8 +202,8 @@ watch(() => form.value?.scope, (v) => {
 
 async function loadBots() {
   try {
-    bots.value = (await api.getBots()) || []
-    if (bots.value.length > 0) botKey.value = bots.value[0].botKey || bots.value[0].appId || ''
+    await botsStore.loadBots()
+    if (botsStore.bots.length > 0) botKey.value = botsStore.bots[0].botKey || botsStore.bots[0].appId || ''
   } catch (e: any) {
     message.error('加载机器人失败: ' + (e.message || e))
   }
@@ -245,8 +248,8 @@ function openEdit(p: LlmPersona) {
   showModal.value = true
 }
 
-function applyTemplate(name: string) {
-  const t = templates.value.find(x => (x.name || '') === name)
+function applyTemplate(id: number) {
+  const t = templates.value.find(x => x.id === id)
   if (!t) return
   form.value = { ...emptyForm(), ...t, id: 0, botKey: botKey.value, scope: 'BOT', groupId: null, userId: null }
   showTemplate.value = false
@@ -269,6 +272,10 @@ async function save() {
   }
   if (form.value.scope === 'USER' && !form.value.userId) {
     message.warning('用户级人格必须指定单聊用户')
+    return
+  }
+  if (form.value.roleplayMode && !form.value.personality && !form.value.anchors) {
+    message.warning('角色扮演模式需填写性格或人设锚点')
     return
   }
   try {
@@ -342,7 +349,7 @@ onMounted(async () => {
       <NTabs type="line" animated>
         <NTabPane name="persona" tab="人格列表">
           <template v-if="!botKey">
-            <NEmpty description="请先选择机器人" />
+            <EmptyState description="请先选择机器人" />
           </template>
           <template v-else>
             <div class="toolbar">
@@ -356,14 +363,14 @@ onMounted(async () => {
               </NButton>
             </div>
             <NSpin :show="loading">
-              <NDataTable :columns="columns" :data="personas" :row-key="(r: LlmPersona) => r.id" :bordered="false" />
+              <NDataTable :columns="columns" :data="personas" :row-key="(r: LlmPersona) => r.id" :bordered="false" :pagination="{ pageSize: 20 }" />
             </NSpin>
           </template>
         </NTabPane>
 
         <NTabPane name="memory" tab="记忆管理">
           <template v-if="!botKey">
-            <NEmpty description="请先选择机器人" />
+            <EmptyState description="请先选择机器人" />
           </template>
           <template v-else>
             <NForm label-placement="left" label-width="70" label-align="right" class="mem-form">
@@ -383,14 +390,14 @@ onMounted(async () => {
               </NTag>
             </div>
             <NSpin :show="memLoading">
-              <NDataTable :columns="memColumns" :data="memories" :row-key="(r: LlmMemoryRow) => r.id" :bordered="false" />
+              <NDataTable :columns="memColumns" :data="memories" :row-key="(r: LlmMemoryRow) => r.id" :bordered="false" :pagination="{ pageSize: 20 }" />
             </NSpin>
           </template>
         </NTabPane>
 
         <NTabPane name="profile" tab="用户认知">
           <template v-if="!botKey">
-            <NEmpty description="请先选择机器人" />
+            <EmptyState description="请先选择机器人" />
           </template>
           <template v-else>
             <div class="mem-tip">
@@ -399,7 +406,7 @@ onMounted(async () => {
               </NTag>
             </div>
             <NSpin :show="profLoading">
-              <NDataTable :columns="profileColumns" :data="profiles" :row-key="(r: UserProfileRow) => r.botKey + ':' + r.groupId + ':' + r.userId" :bordered="false" />
+              <NDataTable :columns="profileColumns" :data="profiles" :row-key="(r: UserProfileRow) => r.botKey + ':' + r.groupId + ':' + r.userId" :bordered="false" :pagination="{ pageSize: 20 }" />
             </NSpin>
           </template>
         </NTabPane>
@@ -409,8 +416,8 @@ onMounted(async () => {
     <!-- 从模版新建 -->
     <NModal v-model:show="showTemplate" preset="card" title="从模版新建" style="width: 480px">
       <NSpace vertical>
-        <NEmpty v-if="templates.length === 0" description="暂无内置模版" />
-        <NButton v-for="t in templates" :key="t.name" size="large" secondary block @click="applyTemplate(t.name || '')">
+        <EmptyState v-if="templates.length === 0" description="暂无内置模版" />
+        <NButton v-for="t in templates" :key="t.id" size="large" secondary block @click="applyTemplate(t.id)">
           <template #icon><NIcon><ColorWandOutline /></NIcon></template>
           {{ t.name }}<span v-if="t.age">（{{ t.age }}岁）</span>
           <NTag v-if="t.roleplayMode" size="small" type="warning" style="margin-left: 8px">角色扮演</NTag>

@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router'
 import {
   NCard, NButton, NSpace, NIcon, NText, NTag, NDataTable, NInput,
   NInputNumber, NSwitch, NSelect, NForm, NFormItem, NEmpty, NModal, NSpin,
-  NAlert, useMessage
+  NAlert, NPagination, useMessage
 } from 'naive-ui'
 import {
   ExtensionPuzzleOutline, RefreshOutline, SettingsOutline, TerminalOutline,
@@ -28,6 +28,103 @@ const loading = ref(false)
 const saving = ref(false)
 const showClearKv = ref(false)
 const clearingKv = ref(false)
+
+// ══════ 插件结构化数据（方案 A：@PluginEntity 声明实体 + 框架自动建表）══════
+const entities = ref<{ table: string; entityClass: string }[]>([])
+const selectedEntityTable = ref('')
+const entityColumns = ref<{ name: string; type: string; primaryKey: boolean; nullable: boolean }[]>([])
+const entityRows = ref<any[]>([])
+const entityTotal = ref(0)
+const entityLoading = ref(false)
+const entityPage = ref(1)
+const entityPageSize = ref(20)
+const entityOrderBy = ref('')
+const entityDesc = ref(false)
+
+const entityTableOptions = computed(() =>
+  entities.value.map((e) => ({ label: e.table, value: e.table }))
+)
+const entityColumnOptions = computed(() =>
+  entityColumns.value.map((c) => ({ label: c.name, value: c.name }))
+)
+const entityPageCount = computed(() =>
+  entityTotal.value > 0 ? Math.ceil(entityTotal.value / entityPageSize.value) : 1
+)
+const entityCols = computed(() =>
+  entityColumns.value.map((c) => ({
+    title: c.primaryKey ? `${c.name} 🔑` : c.name,
+    key: c.name,
+    width: 150,
+    ellipsis: { tooltip: true },
+    render: (r: any) => {
+      const v = r[c.name]
+      if (v === null || v === undefined) return h(NText, { depth: 3 }, { default: () => '∅' })
+      return String(v)
+    }
+  }))
+)
+
+async function loadEntities() {
+  // 切换插件时重置已选表，避免残留旧插件的表名导致越权报错的脏数据
+  selectedEntityTable.value = ''
+  entityRows.value = []
+  entityColumns.value = []
+  entityTotal.value = 0
+  try {
+    const list: any[] = await api.getPluginEntities(pluginId.value)
+    entities.value = list || []
+    // 自动选中第一张表，首次进入即可见数据
+    if (entities.value.length && !selectedEntityTable.value) {
+      selectedEntityTable.value = entities.value[0].table
+      await loadEntityData()
+    }
+  } catch (e: any) {
+    entities.value = []
+    message.error('加载实体列表失败：' + (e?.message ?? e))
+  }
+}
+
+async function onSelectEntity(table: string) {
+  selectedEntityTable.value = table
+  entityPage.value = 1
+  entityOrderBy.value = ''
+  entityDesc.value = false
+  await loadEntityData()
+}
+
+async function onEntitySortChange() {
+  entityPage.value = 1
+  await loadEntityData()
+}
+
+async function loadEntityData() {
+  if (!selectedEntityTable.value) return
+  entityLoading.value = true
+  try {
+    const [cols, page] = await Promise.all([
+      api.getPluginEntityDescribe(pluginId.value, selectedEntityTable.value),
+      api.getPluginEntityRows(
+        pluginId.value,
+        selectedEntityTable.value,
+        {
+          page: entityPage.value,
+          size: entityPageSize.value,
+          orderBy: entityOrderBy.value || undefined,
+          desc: entityDesc.value
+        }
+      )
+    ])
+    entityColumns.value = cols || []
+    entityRows.value = page?.content || []
+    entityTotal.value = page?.total || 0
+  } catch (e: any) {
+    entityRows.value = []
+    entityTotal.value = 0
+    message.error('读取实体数据失败：' + (e?.message ?? e))
+  } finally {
+    entityLoading.value = false
+  }
+}
 
 const roleLabel: Record<string, string> = {
   MEMBER: '成员', ADMIN: '管理员', GROUP_OWNER: '群主', BOT_MASTER: '机器人主人',
@@ -53,6 +150,7 @@ async function load() {
     }
     configValues.value = vals
     kv.value = kvData?.values ?? {}
+    await loadEntities()
   } catch (e: any) {
     message.error('加载插件失败：' + (e?.message ?? e))
   } finally {
@@ -298,6 +396,66 @@ watch(pluginId, () => load())
           </template>
           <NDataTable v-if="kvRows.length" :columns="kvCols" :data="kvRows" :bordered="false" size="small" />
           <NEmpty v-else description="暂无存储数据（插件用 PluginStorage 写入后出现）" style="padding: 24px 0" />
+        </NCard>
+
+        <!-- 结构化数据存储（方案 A：@PluginEntity 声明实体 + 框架自动建表） -->
+        <NCard title="数据存储（结构化实体）" class="b-card">
+          <template #header-extra><NIcon size="18" color="#0F6E56"><ServerOutline /></NIcon></template>
+          <template v-if="entities.length">
+            <NSpace :size="12" align="center" wrap style="margin-bottom: 12px">
+              <NSelect
+                v-model:value="selectedEntityTable"
+                :options="entityTableOptions"
+                placeholder="选择实体表"
+                style="width: 320px"
+                @update:value="onSelectEntity"
+              />
+              <NSelect
+                v-model:value="entityOrderBy"
+                :options="entityColumnOptions"
+                placeholder="排序字段"
+                clearable
+                style="width: 170px"
+                :disabled="!selectedEntityTable"
+                @update:value="onEntitySortChange"
+              />
+              <NButton
+                size="small"
+                tertiary
+                :disabled="!selectedEntityTable"
+                @click="entityDesc = !entityDesc; onEntitySortChange()"
+              >
+                {{ entityDesc ? '降序 ↓' : '升序 ↑' }}
+              </NButton>
+              <NText depth="3" style="font-size: 12px">共 {{ entityTotal }} 行</NText>
+            </NSpace>
+
+            <NSpin :show="entityLoading">
+              <NDataTable
+                v-if="entityRows.length"
+                :columns="entityCols"
+                :data="entityRows"
+                :bordered="false"
+                size="small"
+                :scroll-x="Math.max(600, entityColumns.length * 150)"
+              />
+              <NEmpty v-else description="该表暂无数据（插件产生数据后出现）" style="padding: 24px 0" />
+            </NSpin>
+
+            <div v-if="entityPageCount > 1" style="display: flex; justify-content: flex-end; margin-top: 10px">
+              <NPagination
+                v-model:page="entityPage"
+                :page-count="entityPageCount"
+                :page-size="entityPageSize"
+                @update:page="loadEntityData"
+              />
+            </div>
+          </template>
+          <NEmpty
+            v-else
+            description="该插件未声明结构化实体（用 @PluginEntity 注解声明实体后自动出现）"
+            style="padding: 24px 0"
+          />
         </NCard>
       </template>
     </NSpin>

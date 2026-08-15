@@ -41,7 +41,7 @@ async function loadRisk() {
 }
 
 function fmtTime(t: number): string {
-  return t > 0 ? dayjs(t * 1000).format('YYYY-MM-DD HH:mm:ss') : '—'
+  return t > 0 ? dayjs(t * 1000).utcOffset(8).format('YYYY-MM-DD HH:mm:ss') : '—'
 }
 
 const timelineCols = [

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick } from 'vue'
-import { useMessage } from 'naive-ui'
+import { useMessage, useDialog } from 'naive-ui'
 import {
-  NCard, NSelect, NButton, NInput, NText, NEmpty, NIcon, NScrollbar, NSpace, NTooltip
+  NCard, NSelect, NButton, NInput, NText, NIcon, NScrollbar, NSpace, NTooltip
 } from 'naive-ui'
 import {
   ChatbubblesOutline, SendOutline, TrashOutline, StopCircleOutline,
@@ -11,17 +11,23 @@ import {
 import api from '../api'
 import { chatStream } from '../api/llm'
 import PageHero from '../components/PageHero.vue'
+import EmptyState from '../components/EmptyState.vue'
+import { renderMarkdown } from '../utils/markdown'
+import { useBotsStore } from '../stores/bots'
 
 const message = useMessage()
+const dialog = useDialog()
+const botsStore = useBotsStore()
 
 interface ChatMsg {
   role: 'user' | 'bot'
   content: string
   streaming?: boolean
   feed?: 1 | -1
+  stopped?: boolean
 }
 
-const bots = ref<any[]>([])
+const MAX_MSGS = 100
 const botKey = ref<string>('')
 const messages = ref<ChatMsg[]>([])
 const input = ref('')
@@ -30,7 +36,7 @@ const abortCtrl = ref<AbortController | null>(null)
 const scrollRef = ref<any>(null)
 
 const botOptions = computed(() =>
-  bots.value.map(b => ({
+  botsStore.bots.map(b => ({
     label: `${b.name || b.botKey || b.appId || ''}${b.botKey ? ` (${b.botKey})` : ''}`,
     value: b.botKey || b.appId || ''
   }))
@@ -40,8 +46,8 @@ const canSend = computed(() => input.value.trim().length > 0 && !sending.value)
 
 async function loadBots() {
   try {
-    bots.value = (await api.getBots()) || []
-    if (bots.value.length > 0) botKey.value = bots.value[0].botKey || bots.value[0].appId || ''
+    await botsStore.loadBots()
+    if (botsStore.bots.length > 0) botKey.value = botsStore.bots[0].botKey || botsStore.bots[0].appId || ''
   } catch (e: any) {
     message.error('加载机器人列表失败: ' + (e.message || e))
   }
@@ -59,43 +65,47 @@ async function send() {
   messages.value.push({ role: 'user', content: text })
   const botMsg: ChatMsg = { role: 'bot', content: '', streaming: true }
   messages.value.push(botMsg)
+  // 消息条数上限，避免长对话无限累积
+  if (messages.value.length > MAX_MSGS) messages.value = messages.value.slice(-MAX_MSGS)
   sending.value = true
   abortCtrl.value = new AbortController()
   scrollBottom()
-  try {
-    await chatStream({ botKey: botKey.value || undefined, message: text }, {
-      signal: abortCtrl.value.signal,
-      onDelta: (piece) => {
-        botMsg.content += piece
-        scrollBottom()
-      },
-      onDone: () => {
-        botMsg.streaming = false
-        sending.value = false
-      },
-      onError: (err) => {
-        botMsg.content = botMsg.content || '（调用失败）'
-        botMsg.streaming = false
-        sending.value = false
-        message.error('AI 调用失败: ' + err)
-      }
-    })
-  } catch {
-    botMsg.streaming = false
-    sending.value = false
-  }
+  // chatStream 内部已捕获全部错误（AbortError 静默、其余走 onError），此处无需再包 try/catch
+  await chatStream({ botKey: botKey.value || undefined, message: text }, {
+    signal: abortCtrl.value.signal,
+    onDelta: (piece) => {
+      botMsg.content += piece
+      scrollBottom()
+    },
+    onDone: () => {
+      botMsg.streaming = false
+      sending.value = false
+    },
+    onError: (err) => {
+      botMsg.content = botMsg.content || '（调用失败）'
+      botMsg.streaming = false
+      sending.value = false
+      message.error('AI 调用失败: ' + err)
+    }
+  })
   scrollBottom()
 }
 
 function stop() {
   abortCtrl.value?.abort()
   const last = messages.value[messages.value.length - 1]
-  if (last?.streaming) last.streaming = false
+  if (last?.streaming) { last.streaming = false; last.stopped = true }
   sending.value = false
 }
 
 function clear() {
-  messages.value = []
+  dialog.warning({
+    title: '清空对话',
+    content: '确认清空当前对话记录？',
+    positiveText: '清空',
+    negativeText: '取消',
+    onPositiveClick: () => { messages.value = [] }
+  })
 }
 
 // P2-F 用户反馈：👍=1 / 👎=-1，同一条回复只能反馈一次
@@ -133,14 +143,18 @@ onMounted(loadBots)
 
     <NCard :bordered="true" class="chat-card">
       <template v-if="messages.length === 0">
-        <NEmpty description="发一条消息开始与 AI 对话（群聊 AI 需要在 AI 设置开启聊天总开关）" class="empty" />
+        <EmptyState description="发一条消息开始与 AI 对话（群聊 AI 需要在 AI 设置开启聊天总开关）" />
       </template>
       <NScrollbar ref="scrollRef" class="msg-scroll">
         <div class="msg-list">
           <div v-for="(m, i) in messages" :key="i" class="msg-row" :class="m.role">
             <div class="bubble" :class="{ streaming: m.streaming }">
               <span v-if="m.streaming" class="cursor" />
-              {{ m.content }}
+              <!-- bot 回复：流式期纯文本（避免半截 markdown 渲染闪烁），完成后渲染 markdown -->
+              <span v-if="m.role === 'bot' && m.streaming">{{ m.content }}</span>
+              <span v-else-if="m.role === 'bot'" class="bot-md" v-html="renderMarkdown(m.content)"></span>
+              <template v-else>{{ m.content }}</template>
+              <span v-if="m.stopped" class="stopped-tag">已停止</span>
               <div v-if="m.role === 'bot' && !m.streaming" class="feed-actions">
                 <NTooltip trigger="hover"><template #trigger>
                   <span class="feed-btn" :class="{ active: m.feed === 1 }" @click="feedback(m, 1)">👍</span>
@@ -253,6 +267,14 @@ onMounted(loadBots)
   vertical-align: text-bottom;
   animation: blink 1s step-end infinite;
 }
+.bot-md { word-break: break-word; }
+.bot-md :deep(p) { margin: 0 0 6px; }
+.bot-md :deep(pre) { background: rgba(0, 0, 0, 0.06); padding: 8px; border-radius: 6px; overflow: auto; margin: 6px 0; }
+.bot-md :deep(code) { background: rgba(0, 0, 0, 0.06); padding: 1px 4px; border-radius: 4px; font-size: 13px; }
+.bot-md :deep(pre code) { background: transparent; padding: 0; }
+.bot-md :deep(ul), .bot-md :deep(ol) { padding-left: 18px; margin: 4px 0; }
+.bot-md :deep(blockquote) { border-left: 3px solid rgba(31, 45, 61, 0.2); padding-left: 10px; margin: 6px 0; color: #555; }
+.stopped-tag { display: inline-block; margin-left: 8px; font-size: 11px; color: #9aa0a6; }
 @keyframes blink {
   50% { opacity: 0; }
 }

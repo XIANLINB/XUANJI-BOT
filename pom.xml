@@ -12,7 +12,7 @@
 
     <groupId>dev.xuanji</groupId>
     <artifactId>xuanji-parent</artifactId>
-    <version>1.3.2</version>
+    <version>1.3.4</version>
     <packaging>pom</packaging>
 
     <name>XuanJi Parent</name>
@@ -34,8 +34,6 @@
         <module>xuanji-console-server</module>
         <module>xuanji-scheduler</module>
         <module>xuanji-llm</module>
-        <module>xuanji-plugin-groupadmin</module>
-        <module>xuanji-plugin-test</module>
         <module>xuanji-starter</module>
     </modules>
 
@@ -50,37 +48,37 @@
             <dependency>
                 <groupId>dev.xuanji</groupId>
                 <artifactId>xuanji-sdk</artifactId>
-                <version>1.3.2</version>
+                <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>dev.xuanji</groupId>
                 <artifactId>xuanji-api</artifactId>
-                <version>1.3.2</version>
+                <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>dev.xuanji</groupId>
                 <artifactId>xuanji-adapter-qqbot</artifactId>
-                <version>1.3.2</version>
+                <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>dev.xuanji</groupId>
                 <artifactId>xuanji-core</artifactId>
-                <version>1.3.2</version>
+                <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>dev.xuanji</groupId>
                 <artifactId>xuanji-console-server</artifactId>
-                <version>1.3.2</version>
+                <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>dev.xuanji</groupId>
                 <artifactId>xuanji-scheduler</artifactId>
-                <version>1.3.2</version>
+                <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>dev.xuanji</groupId>
                 <artifactId>xuanji-llm</artifactId>
-                <version>1.3.2</version>
+                <version>${project.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

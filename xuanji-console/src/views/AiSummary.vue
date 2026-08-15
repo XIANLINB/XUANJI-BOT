@@ -2,20 +2,25 @@
 import { ref, computed, onMounted, h } from 'vue'
 import { useMessage } from 'naive-ui'
 import {
-  NCard, NButton, NSpace, NSelect, NDataTable, NInputNumber, NIcon, NEmpty, NSpin, NTag, NPopconfirm, NAlert, NText, NSwitch, NFormItem
+  NCard, NButton, NSpace, NSelect, NDataTable, NInputNumber, NIcon, NSpin, NTag, NPopconfirm, NAlert, NText, NSwitch, NFormItem
 } from 'naive-ui'
-import { NewspaperOutline, AddOutline, FlashOutline, TrashOutline, TimeOutline } from '@vicons/ionicons5'
+import { NewspaperOutline, AddOutline, FlashOutline, TrashOutline, TimeOutline, CloseOutline } from '@vicons/ionicons5'
 import api from '../api'
 import type { SummaryConfigRow, SummaryLogRow } from '../api/llm'
 import PageHero from '../components/PageHero.vue'
+import EmptyState from '../components/EmptyState.vue'
+import dayjs from 'dayjs'
+import { useBotsStore } from '../stores/bots'
+import { renderMarkdown } from '../utils/markdown'
 
 const message = useMessage()
-const bots = ref<any[]>([])
+const botsStore = useBotsStore()
 const groups = ref<any[]>([])
 const botKey = ref<string>('')
 const configs = ref<SummaryConfigRow[]>([])
 const history = ref<SummaryLogRow[]>([])
 const loading = ref(false)
+const historyLimit = ref(50)
 // 每行独立 loading：用「botKey:groupId」作为正在生成的行标识（避免单变量导致所有行一起转圈）
 const generatingKey = ref('')
 const genResults = ref<Record<string, string>>({})
@@ -23,7 +28,14 @@ const lastGenKey = ref('')
 function rk(r: SummaryConfigRow) { return r.botKey + ':' + r.groupId }
 const genResultText = computed(() => (lastGenKey.value ? (genResults.value[lastGenKey.value] || '') : ''))
 
-const botOpts = computed(() => bots.value.map(b => ({ label: b.name || b.botKey || b.appId || '', value: b.botKey || b.appId || '' })))
+/** 时间（后端 UTC/ISO）→ UTC+8 展示。 */
+function fmtSubTime(v: unknown): string {
+  if (v == null || v === '') return '—'
+  const d = dayjs(String(v))
+  return d.isValid() ? d.utcOffset(8).format('YYYY-MM-DD HH:mm:ss') : String(v)
+}
+
+const botOpts = computed(() => botsStore.bots.map(b => ({ label: b.name || b.botKey || b.appId || '', value: b.botKey || b.appId || '' })))
 const groupOptions = computed(() =>
   groups.value.map((g: any) => {
     const id = g.GROUP_ID || g.groupId || g.groupOpenid || ''
@@ -64,7 +76,7 @@ async function load() {
   try {
     const [c, h] = await Promise.all([
       api.llmApi.summaryConfigs(botKey.value),
-      api.llmApi.summaryHistory(50)
+      api.llmApi.summaryHistory(historyLimit.value)
     ])
     configs.value = c || []
     history.value = h || []
@@ -75,12 +87,22 @@ async function load() {
   }
 }
 
+function loadMoreHistory() {
+  historyLimit.value += 50
+  load()
+}
+
+function clearGenResult() {
+  genResults.value = {}
+  lastGenKey.value = ''
+}
+
 async function loadBots() {
   try {
-    bots.value = (await api.getBots()) || []
-    if (bots.value.length > 0) botKey.value = bots.value[0].botKey || bots.value[0].appId || ''
+    await botsStore.loadBots()
+    if (botsStore.bots.length > 0) botKey.value = botsStore.bots[0].botKey || botsStore.bots[0].appId || ''
   } catch {
-    bots.value = []
+    // 忽略
   }
 }
 
@@ -174,8 +196,8 @@ const columns = [
 ]
 
 const historyColumns = [
-  { title: '时间', key: 'createdAt', width: 160 },
-  { title: '群', key: 'groupId', width: 200 },
+  { title: '时间', key: 'createdAt', width: 160, render: (r: SummaryLogRow) => fmtSubTime(r.createdAt) },
+  { title: '群', key: 'groupId', width: 200, ellipsis: { tooltip: true } },
   { title: '内容', key: 'content', ellipsis: { tooltip: true } }
 ]
 
@@ -200,20 +222,27 @@ onMounted(async () => {
 
     <NCard :bordered="true" title="日报配置">
       <NSpin :show="loading">
-        <NEmpty v-if="!loading && configs.length === 0" description="暂无日报配置，点「添加日报」为群开启每日总结" />
-        <NDataTable v-else :columns="columns" :data="configs" :row-key="(r: SummaryConfigRow) => r.botKey + ':' + r.groupId" :bordered="false" />
+        <EmptyState v-if="!loading && configs.length === 0" description="暂无日报配置，点「添加日报」为群开启每日总结" />
+        <NDataTable v-else :columns="columns" :data="configs" :row-key="(r: SummaryConfigRow) => r.botKey + ':' + r.groupId" :bordered="false" :pagination="{ pageSize: 20 }" />
       </NSpin>
     </NCard>
 
     <NCard :bordered="true" title="生成历史">
       <NSpin :show="loading">
-        <NEmpty v-if="!loading && history.length === 0" description="暂无日报历史" />
-        <NDataTable v-else :columns="historyColumns" :data="history" :row-key="(r: SummaryLogRow) => r.id" :bordered="false" />
+        <EmptyState v-if="!loading && history.length === 0" description="暂无日报历史" />
+        <NDataTable v-else :columns="historyColumns" :data="history" :row-key="(r: SummaryLogRow) => r.id" :bordered="false" :pagination="{ pageSize: 20 }" />
+        <NButton v-if="history.length > 0 && history.length >= historyLimit" size="small" secondary style="margin-top: 8px" @click="loadMoreHistory">
+          加载更多
+        </NButton>
       </NSpin>
     </NCard>
 
     <NAlert v-if="genResultText" type="success" :bordered="false" :show-icon="false">
-      <div style="white-space: pre-wrap">{{ genResultText }}</div>
+      <div class="gen-result" v-html="renderMarkdown(genResultText)"></div>
+      <NButton size="tiny" quaternary @click="clearGenResult">
+        <template #icon><NIcon><CloseOutline /></NIcon></template>
+        清除
+      </NButton>
     </NAlert>
 
     <NModal v-model:show="showAdd" preset="card" :title="editRow ? '编辑日报' : '添加日报'" style="width: 440px">
@@ -253,4 +282,9 @@ onMounted(async () => {
   flex-direction: column;
   gap: 16px;
 }
+.gen-result { font-size: 13px; line-height: 1.7; word-break: break-word; margin-bottom: 8px; }
+.gen-result :deep(p) { margin: 0 0 6px; }
+.gen-result :deep(pre) { background: rgba(0, 0, 0, 0.05); padding: 8px; border-radius: 6px; overflow: auto; }
+.gen-result :deep(code) { background: rgba(0, 0, 0, 0.05); padding: 1px 4px; border-radius: 4px; font-size: 12px; }
+.gen-result :deep(ul), .gen-result :deep(ol) { padding-left: 18px; margin: 4px 0; }
 </style>

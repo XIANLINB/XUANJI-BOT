@@ -3,7 +3,7 @@ package XuanJi.api.plugin;
 import java.util.Map;
 
 /**
- * 群成员（类型化封装，{@link PluginServices#listGroupMembers}）。
+ * 群成员（类型化封装，{@code Bot.listGroupMembers()}）。
  *
  * <p>来自本地库 {@code qqbot_group_member}（查库免限频）；{@code role} 为 owner/admin/member。
  */

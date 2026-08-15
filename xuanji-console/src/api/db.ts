@@ -4,5 +4,6 @@ import { get } from './http'
 export const dbApi = {
   dbTables: () => get('/db/tables'),
   dbRows: (table: string, source = '') => get('/db/rows', { table, source }),
-  dbQuery: (sql: string, source = '') => get('/db/query', { sql, source })
+  dbFilter: (params: { table: string; source?: string; column?: string; op?: string; value?: string; orderBy?: string; orderDir?: string }) =>
+    get('/db/filter', params)
 }

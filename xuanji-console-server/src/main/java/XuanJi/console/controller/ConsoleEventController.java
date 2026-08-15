@@ -97,15 +97,25 @@ public class ConsoleEventController {
     @GetMapping("/group-messages")
     public Map<String, Object> groupMessages(@RequestParam(defaultValue = "") String bot,
                                              @RequestParam(defaultValue = "0") int page,
-                                             @RequestParam(defaultValue = "50") int size) {
-        return pagedMessages(PlatformDataProvider.CHAT_GROUP, bot, page, size);
+                                             @RequestParam(defaultValue = "50") int size,
+                                             @RequestParam(required = false) String dir,
+                                             @RequestParam(required = false) String type,
+                                             @RequestParam(defaultValue = "0") long startTime,
+                                             @RequestParam(defaultValue = "0") long endTime,
+                                             @RequestParam(required = false) String q) {
+        return pagedMessagesFiltered(PlatformDataProvider.CHAT_GROUP, bot, page, size, dir, type, startTime, endTime, q);
     }
 
     @GetMapping("/c2c-messages")
     public Map<String, Object> c2cMessages(@RequestParam(defaultValue = "") String bot,
                                            @RequestParam(defaultValue = "0") int page,
-                                           @RequestParam(defaultValue = "50") int size) {
-        return pagedMessages(PlatformDataProvider.CHAT_C2C, bot, page, size);
+                                           @RequestParam(defaultValue = "50") int size,
+                                           @RequestParam(required = false) String dir,
+                                           @RequestParam(required = false) String type,
+                                           @RequestParam(defaultValue = "0") long startTime,
+                                           @RequestParam(defaultValue = "0") long endTime,
+                                           @RequestParam(required = false) String q) {
+        return pagedMessagesFiltered(PlatformDataProvider.CHAT_C2C, bot, page, size, dir, type, startTime, endTime, q);
     }
 
     /**
@@ -207,5 +217,62 @@ public class ConsoleEventController {
         m.put("page", pageNo);
         m.put("size", pageSize);
         return m;
+    }
+
+    /** 服务端过滤 + 分页聚合（群/单聊消息页用）：dir/type/时间范围/关键词 下推 DB，返回 rows/total/ins/outs/typeDist。 */
+    private Map<String, Object> pagedMessagesFiltered(String chatType, String botFilter, int page, int size,
+                                                       String dir, String type, long startTime, long endTime, String q) {
+        int pageSize = size <= 0 ? 50 : Math.min(size, 500);
+        int pageNo = Math.max(page, 0);
+        int fetch = pageSize * (pageNo + 1);
+        List<Map<String, Object>> all = new ArrayList<>();
+        long total = 0, ins = 0, outs = 0;
+        Map<String, Long> typeCnt = new LinkedHashMap<>();
+        for (ConsoleQueryService.BotRef ref : queryService.botRefs()) {
+            if (!botFilter.isBlank() && !botFilter.equals(ref.instanceId())) continue;
+            PlatformDataProvider p = queryService.providerFor(ref.platform());
+            if (p == null) continue;
+            Map<String, Object> r = p.queryMessagesFiltered(ref.instanceId(), chatType, dir, type, startTime, endTime, q, fetch);
+            if (r == null || r.isEmpty()) continue;
+            total += ConsoleQueryService.asLong(r.get("total"));
+            for (Map<String, Object> row : castList(r.get("dirDist"))) {
+                String d = ConsoleQueryService.str(row.get("D"));
+                long c = ConsoleQueryService.asLong(row.get("CNT"));
+                if ("IN".equalsIgnoreCase(d)) ins += c;
+                else if ("OUT".equalsIgnoreCase(d)) outs += c;
+            }
+            for (Map<String, Object> row : castList(r.get("typeDist"))) {
+                String t = ConsoleQueryService.str(row.get("T"));
+                typeCnt.merge(t == null ? "unknown" : t, ConsoleQueryService.asLong(row.get("CNT")), Long::sum);
+            }
+            for (Map<String, Object> row : castList(r.get("rows"))) {
+                Map<String, Object> rr = new LinkedHashMap<>(row);
+                rr.put("BOT_APPID", ref.instanceId());
+                all.add(rr);
+            }
+        }
+        all.sort(Comparator.comparingLong((Map<String, Object> x) -> ConsoleQueryService.asLong(x.get("CREATE_TIME"))).reversed());
+        List<Map<String, Object>> rows = all.stream()
+                .skip((long) pageNo * pageSize)
+                .limit(pageSize)
+                .collect(Collectors.toCollection(ArrayList::new));
+        List<Map<String, Object>> typeDist = new ArrayList<>();
+        typeCnt.entrySet().stream()
+                .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
+                .forEach(e -> typeDist.add(Map.of("type", e.getKey(), "cnt", e.getValue())));
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("rows", rows);
+        m.put("total", total);
+        m.put("ins", ins);
+        m.put("outs", outs);
+        m.put("typeDist", typeDist);
+        m.put("page", pageNo);
+        m.put("pageSize", pageSize);
+        return m;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> castList(Object v) {
+        return v instanceof List ? (List<Map<String, Object>>) (List<?>) v : List.of();
     }
 }

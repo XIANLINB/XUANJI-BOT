@@ -13,7 +13,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 控制台登录鉴权接口（路径经 @XuanJiApi 前缀装配为 {@code /xuanji/api/v1/auth/**}）。
@@ -33,6 +36,19 @@ public class AuthController {
 
     private static final String COOKIE_NAME = "xuanji_session";
 
+    /** 登录限速：1 分钟窗口内最多 5 次尝试；连续失败 5 次锁定 1 小时。 */
+    private static final int MAX_ATTEMPTS_PER_MINUTE = 5;
+    private static final long WINDOW_MS = 60_000L;
+    private static final long LOCK_MS = 3_600_000L;
+
+    private static final class Attempt {
+        final Deque<Long> recent = new ArrayDeque<>(); // 近 1 分钟尝试时间戳
+        int consecutiveFails = 0;
+        long lockedUntil = 0L;
+    }
+
+    private final Map<String, Attempt> attempts = new ConcurrentHashMap<>();
+
     private final PinVerifier pinVerifier;
     private final SessionStore sessionStore;
     private final AuditService auditService;
@@ -49,11 +65,20 @@ public class AuthController {
         if (!pinVerifier.pinConfigured()) {
             return fail(response, "尚未设置访问口令，请先完成初始化引导");
         }
+        String key = ip(request);
+        // 限速：1 分钟最多 5 次尝试；连续错 5 次锁定 1 小时
+        String limitErr = tryAcquire(key);
+        if (limitErr != null) {
+            auditService.record("LOGIN_FAIL", limitErr, request);
+            return fail(response, limitErr);
+        }
         String pin = body.get("pin");
         if (pin == null || !pinVerifier.verify(pin)) {
+            recordFail(key);
             auditService.record("LOGIN_FAIL", "口令校验失败", request);
             return fail(response, "访问口令错误");
         }
+        recordSuccess(key);
         String token = sessionStore.create();
         response.addHeader("Set-Cookie", buildCookie(token, sessionStore.ttlSeconds(), request.isSecure()));
         auditService.record("LOGIN_OK", "控制台登录成功", request);
@@ -103,5 +128,42 @@ public class AuthController {
         String xff = req.getHeader("X-Forwarded-For");
         if (xff != null && !xff.isBlank()) return xff.split(",")[0].trim();
         return req.getRemoteAddr();
+    }
+
+    /** 尝试前检查：已锁定返回锁定提示；1 分钟窗口内超次返回限速提示；否则记录一次尝试并放行。 */
+    private String tryAcquire(String key) {
+        Attempt a = attempts.computeIfAbsent(key, k -> new Attempt());
+        long now = System.currentTimeMillis();
+        synchronized (a) {
+            if (a.lockedUntil > now) {
+                return "尝试次数过多，已锁定 1 小时，请稍后再试";
+            }
+            while (!a.recent.isEmpty() && a.recent.peekFirst() < now - WINDOW_MS) {
+                a.recent.pollFirst();
+            }
+            if (a.recent.size() >= MAX_ATTEMPTS_PER_MINUTE) {
+                return "尝试过于频繁，请稍后再试";
+            }
+            a.recent.addLast(now);
+        }
+        return null;
+    }
+
+    /** 记录一次失败：连续失败满 5 次触发锁定 1 小时。 */
+    private void recordFail(String key) {
+        Attempt a = attempts.computeIfAbsent(key, k -> new Attempt());
+        synchronized (a) {
+            a.consecutiveFails++;
+            if (a.consecutiveFails >= MAX_ATTEMPTS_PER_MINUTE) {
+                a.lockedUntil = System.currentTimeMillis() + LOCK_MS;
+                a.consecutiveFails = 0;
+                a.recent.clear();
+            }
+        }
+    }
+
+    /** 登录成功：清除该来源的失败/锁定记录。 */
+    private void recordSuccess(String key) {
+        attempts.remove(key);
     }
 }

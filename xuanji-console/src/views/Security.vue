@@ -2,7 +2,7 @@
 import { ref, onMounted, computed, h } from 'vue'
 import {
   NCard, NButton, NSpace, NIcon, NText, NTag, NForm, NFormItem, NDataTable,
-  useMessage, NProgress, NAlert, NInput, NEmpty, NDivider, NTabs, NTabPane,
+  useMessage, NProgress, NAlert, NInput, NDivider, NTabs, NTabPane,
   NSelect, NGrid, NGi, NNumberAnimation, NGradientText, NPagination, NPopconfirm,
   NTooltip, type DataTableColumns
 } from 'naive-ui'
@@ -13,6 +13,7 @@ import {
 } from '@vicons/ionicons5'
 import PageHero from '../components/PageHero.vue'
 import StatCard from '../components/StatCard.vue'
+import EmptyState from '../components/EmptyState.vue'
 import { securityApi } from '../api/security'
 import api from '../api'
 import dayjs from 'dayjs'
@@ -74,7 +75,7 @@ async function changePin() {
 const pinHistory = ref<any[]>([])
 async function loadPinHistory() {
   try {
-    const r = await securityApi.getAudit(50, { action: 'CHANGE_PIN' })
+    const r = await securityApi.getAudit(10, { action: 'CHANGE_PIN' })
     pinHistory.value = (r.rows || []).slice(0, 5)
   } catch { pinHistory.value = [] }
 }
@@ -163,7 +164,7 @@ const BROWSER_LABEL: Record<string, string> = {
 function fmtTime(v: any): string {
   const n = Number(v)
   if (!isFinite(n) || n <= 0) return '—'
-  return dayjs(n <= 9999999999 ? n * 1000 : n).format('YYYY-MM-DD HH:mm:ss')
+  return dayjs(n <= 9999999999 ? n * 1000 : n).utcOffset(8).format('YYYY-MM-DD HH:mm:ss')
 }
 
 async function loadActions() {
@@ -180,7 +181,11 @@ function params(): Record<string, any> {
   if (filter.value.keyword) p.keyword = filter.value.keyword.trim()
   if (filter.value.deviceType) p.deviceType = filter.value.deviceType
   if (filter.value.range) {
-    p.startTime = dayjs().subtract(filter.value.range, 'day').startOf('day').unix()
+    const now8 = dayjs().utcOffset(8)
+    // 今天(1)=今日 00:00；近 N 天=N 天前 00:00（统一 UTC+8 日界）
+    p.startTime = (filter.value.range === 1
+      ? now8.startOf('day')
+      : now8.subtract(filter.value.range, 'day').startOf('day')).unix()
   }
   return p
 }
@@ -198,20 +203,25 @@ async function loadAudit() {
 async function exportAudit(format: 'csv' | 'json') {
   try {
     await securityApi.exportAudit(format, params())
+    message.success(`已导出 ${format.toUpperCase()}`)
   } catch (e: any) {
     err.value = e?.message || String(e)
   }
 }
 
+const clearing = ref(false)
 async function clearAudit() {
+  clearing.value = true
   try {
     await securityApi.clearAudit()
+    message.success('已清空操作日志')
     await loadAudit()
   } catch (e: any) { err.value = e?.message || String(e) }
+  finally { clearing.value = false }
 }
 
 const statCards = computed(() => {
-  const today0 = dayjs().startOf('day').unix()
+  const today0 = dayjs().utcOffset(8).startOf('day').unix()
   const today = rows.value.filter((r) => Number(r.CREATE_TIME) >= today0).length
   const fail = rows.value.filter((r) => String(r.ACTION).includes('FAIL') || r.ACTION === 'AUDIT_CLEAR').length
   const ips = new Set(rows.value.map((r) => String(r.IP || '')).filter(Boolean)).size
@@ -381,7 +391,7 @@ onMounted(async () => {
             </NButton>
             <NPopconfirm @positive-click="clearAudit">
               <template #trigger>
-                <NButton size="small" type="error" tertiary>
+                <NButton size="small" type="error" tertiary :loading="clearing">
                   <template #icon><NIcon size="14"><TrashOutline /></NIcon></template>
                   清空
                 </NButton>
@@ -417,7 +427,9 @@ onMounted(async () => {
 
         <NAlert v-if="err" type="error" :title="'加载失败'" style="margin-bottom: 16px">{{ err }}</NAlert>
 
+        <EmptyState v-if="!loading && !rows.length" description="暂无操作日志" />
         <NDataTable
+          v-else
           :columns="auditColumns"
           :data="pagedRows"
           :pagination="false"

@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import {
-  NInput, NInputGroup, NButton, NAlert, NSpace, NText, NIcon, NEmpty, NSpin, NTag
+  NInput, NButton, NAlert, NSpace, NText, NIcon, NSpin, NTag, NSelect
 } from 'naive-ui'
-import { ServerOutline, SearchOutline } from '@vicons/ionicons5'
+import { ServerOutline } from '@vicons/ionicons5'
 import api from '../api'
 import DataTable from '../components/DataTable.vue'
+import EmptyState from '../components/EmptyState.vue'
 import { useFillHeight } from '../composables/useFillHeight'
 
 const { fillHeight } = useFillHeight(40)
@@ -18,9 +19,24 @@ const cols = ref<string[]>([])
 const err = ref('')
 const count = ref(0)
 
-const sql = ref('')
-const queryErr = ref('')
-const queryRows = ref<any[]>([])
+// 结构化筛选（替代自由 SQL）：列 / 操作符 / 值 / 排序，全部后端白名单校验
+const filterColumn = ref<string | null>(null)
+const filterOp = ref('=')
+const filterValue = ref('')
+const orderBy = ref<string | null>(null)
+const orderDir = ref<'ASC' | 'DESC'>('ASC')
+const filterActive = ref(false)
+const filterErr = ref('')
+
+const opOptions = [
+  { label: '等于 =', value: '=' },
+  { label: '不等于 !=', value: '!=' },
+  { label: '包含 LIKE', value: 'LIKE' },
+  { label: '大于 >', value: '>' },
+  { label: '小于 <', value: '<' },
+  { label: '大于等于 >=', value: '>=' },
+  { label: '小于等于 <=', value: '<=' }
+]
 
 // source 值 → 友好分组名（仅用于显示，查询仍用原始 source 值）
 function sourceLabel(s: string): string {
@@ -54,8 +70,7 @@ async function onSelectTable(name: string, source: string) {
   selected.value = { name, source }
   loading.value = true
   err.value = ''
-  queryRows.value = []
-  queryErr.value = ''
+  clearFilter()
   try {
     const r = await api.dbRows(name, source)
     if (r.error) {
@@ -74,17 +89,47 @@ async function onSelectTable(name: string, source: string) {
   }
 }
 
-async function runQuery() {
-  if (!sql.value.trim()) return
-  queryErr.value = ''
-  queryRows.value = []
+function clearFilter() {
+  filterColumn.value = null
+  filterOp.value = '='
+  filterValue.value = ''
+  orderBy.value = null
+  orderDir.value = 'ASC'
+  filterActive.value = false
+  filterErr.value = ''
+}
+
+async function runFilter() {
+  if (!selected.value) return
+  filterErr.value = ''
+  loading.value = true
   try {
-    const r = await api.dbQuery(sql.value, selected.value?.source ?? '')
-    if (r.error) queryErr.value = r.error
-    else queryRows.value = r.rows || []
+    const r = await api.dbFilter({
+      table: selected.value.name,
+      source: selected.value.source,
+      column: filterColumn.value || undefined,
+      op: filterOp.value,
+      value: filterValue.value || undefined,
+      orderBy: orderBy.value || undefined,
+      orderDir: orderDir.value
+    })
+    if (r.error) {
+      filterErr.value = r.error
+    } else {
+      rows.value = r.rows || []
+      count.value = r.count || 0
+      filterActive.value = true
+    }
   } catch (e: any) {
-    queryErr.value = e.message
+    filterErr.value = e.message
+  } finally {
+    loading.value = false
   }
+}
+
+function resetFilter() {
+  clearFilter()
+  if (selected.value) onSelectTable(selected.value.name, selected.value.source)
 }
 
 const currentTitle = computed(() =>
@@ -100,18 +145,8 @@ onMounted(loadTables)
       <div class="page-title">
         <NIcon size="20" color="#5b5bd6"><ServerOutline /></NIcon>
         <span>数据库浏览</span>
-        <NText depth="3" style="font-size: 13px">{{ groups.flatMap(g => g.tables).length }} 张表</NText>
+        <NText depth="3" style="font-size: 13px">{{ groups.flatMap(g => g.tables).length }} 张表 · 只读</NText>
       </div>
-      <NInputGroup style="width: 560px">
-        <NInput
-          v-model:value="sql"
-          placeholder="只读 SELECT 查询（作用于当前选中表所在库）"
-          @keyup.enter="runQuery"
-        >
-          <template #prefix><NIcon><SearchOutline /></NIcon></template>
-        </NInput>
-        <NButton type="primary" :loading="loading" @click="runQuery">执行</NButton>
-      </NInputGroup>
     </div>
 
     <NAlert v-if="err" type="error" :title="'查询失败'" style="margin-bottom: 16px">{{ err }}</NAlert>
@@ -146,21 +181,29 @@ onMounted(loadTables)
         <template v-if="selected">
           <div class="tb-data-head">
             <span class="tb-data-title">{{ selected.name }}</span>
-            <NText depth="3" style="font-size: 13px">{{ count }} 行</NText>
+            <NText depth="3" style="font-size: 13px">{{ count }} 行{{ filterActive ? '（已筛选）' : '' }}</NText>
           </div>
+          <div class="tb-filter-bar">
+            <NSelect v-model:value="filterColumn" :options="cols.map(c => ({ label: c, value: c }))" placeholder="筛选列" clearable style="width: 170px" />
+            <NSelect v-model:value="filterOp" :options="opOptions" style="width: 130px" />
+            <NInput v-model:value="filterValue" placeholder="筛选值（LIKE 为模糊匹配）" clearable style="width: 200px" @keyup.enter="runFilter" />
+            <NSelect v-model:value="orderBy" :options="cols.map(c => ({ label: c, value: c }))" placeholder="排序列" clearable style="width: 170px" />
+            <NSelect v-model:value="orderDir" :options="[{ label: '升序', value: 'ASC' }, { label: '降序', value: 'DESC' }]" style="width: 90px" />
+            <NButton type="primary" size="small" :loading="loading" @click="runFilter">查询</NButton>
+            <NButton v-if="filterActive" size="small" @click="resetFilter">重置</NButton>
+          </div>
+          <NAlert v-if="filterErr" type="error" :title="'筛选错误'" style="margin-bottom: 10px">{{ filterErr }}</NAlert>
           <NSpin :show="loading">
             <DataTable v-if="rows.length" :rows="rows" :columns="cols" :page-size="50" :max-height="fillHeight" empty-text="空表" />
-            <NEmpty v-else-if="!err" description="该表暂无数据" style="padding: 60px 0" />
+            <EmptyState v-else-if="!err" description="该表暂无数据" />
           </NSpin>
         </template>
-        <NEmpty v-else description="点击上方任意表名，查看该表全部字段和数据" style="padding: 80px 0">
+        <EmptyState v-else description="点击上方任意表名，查看该表全部字段和数据">
           <template #icon><NIcon size="48"><ServerOutline /></NIcon></template>
-        </NEmpty>
+        </EmptyState>
       </div>
     </div>
 
-    <NAlert v-if="queryErr" type="error" :title="'SQL 错误'" style="margin-top: 12px">{{ queryErr }}</NAlert>
-    <DataTable v-if="queryRows.length" style="margin-top: 12px" :rows="queryRows" :page-size="50" :max-height="fillHeight" empty-text="无结果" />
   </div>
 </template>
 
@@ -262,6 +305,13 @@ onMounted(loadTables)
   align-items: center;
   gap: 10px;
   margin-bottom: 10px;
+}
+.tb-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
 }
 .tb-data-title {
   font-size: 15px;

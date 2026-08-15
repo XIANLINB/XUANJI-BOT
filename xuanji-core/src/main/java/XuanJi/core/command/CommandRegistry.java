@@ -31,6 +31,10 @@ public class CommandRegistry {
     private final List<HandlerEntry> messageListeners = new CopyOnWriteArrayList<>();
     private final Map<String, Long> rateLimitMap = new ConcurrentHashMap<>();
     private final java.util.Set<String> disabledPlugins = ConcurrentHashMap.newKeySet();
+    /** 插件 → 是否声明 PROACTIVE_MESSAGE 权限（决定注入的 Bot 是否允许主动发送）。 */
+    private final Map<String, Boolean> proactiveByPlugin = new ConcurrentHashMap<>();
+    /** pluginId → 是否声明 GROUP_ADMIN 权限（决定注入的 Bot 是否允许群管/撤回/审批）。 */
+    private final Map<String, Boolean> groupAdminByPlugin = new ConcurrentHashMap<>();
     private final java.util.concurrent.atomic.AtomicLong rateLimitHits = new java.util.concurrent.atomic.AtomicLong();
     /** 命令执行次数（风控中心：@GroupMessage/@PrivateMessage 处理器成功执行数）。 */
     private final java.util.concurrent.atomic.AtomicLong commandExecCount = new java.util.concurrent.atomic.AtomicLong();
@@ -62,9 +66,13 @@ public class CommandRegistry {
     @Autowired(required = false)
     private XuanJi.api.action.ConversationSession conversationSession;
 
-    /** 插件能力门面（方法参数 PluginServices 自动注入，提供 LLM/群管/主动发送）。 */
+    /** 插件 LLM/chat 门面（方法参数 PluginServices 自动注入，仅提供 LLM 对话；群管/主动发送/查询已收敛到 Bot 门面）。 */
     @Autowired(required = false)
     private XuanJi.api.plugin.PluginServices pluginServices;
+
+    /** 插件结构化存储编排（方法参数 PluginData 自动注入）。 */
+    @Autowired(required = false)
+    private XuanJi.core.plugin.storage.PluginDataProvider pluginDataProvider;
 
     public CommandRegistry(XuanJi.core.plugin.PluginBotBindingService bindingService) {
         this.bindingService = bindingService;
@@ -164,6 +172,13 @@ public class CommandRegistry {
         if (plg != null) {
             rateLimit = plg.rateLimit();
             if (plg.platforms().length > 0) pluginPlatforms = java.util.Set.of(plg.platforms());
+            proactiveByPlugin.put(pluginId,
+                    java.util.Arrays.asList(plg.permissions()).contains(XuanJiPlugin.Perm.PROACTIVE_MESSAGE));
+            groupAdminByPlugin.put(pluginId,
+                    java.util.Arrays.asList(plg.permissions()).contains(XuanJiPlugin.Perm.GROUP_ADMIN));
+        } else {
+            proactiveByPlugin.put(pluginId, false);
+            groupAdminByPlugin.put(pluginId, false);
         }
 
         for (Method m : pluginInstance.getClass().getDeclaredMethods()) {
@@ -341,7 +356,14 @@ public class CommandRegistry {
                 if (!checkRole(e)) continue;  // @RequireRole
                 commandHitInEvent.set(true);  // 命令 handler 命中：本事件后续不再触发 LLM 闲聊等兜底
                 String argsAfter = argsAfterCommand(trimmed, e.filter);
-                Object[] ma = resolveArgs(e.method, argsAfter, groupEventDtoTL.get(), e.pluginId);
+                Object[] ma;
+                try {
+                    ma = resolveArgs(e.method, argsAfter, groupEventDtoTL.get(), e.pluginId);
+                } catch (MissingArgException mae) {
+                    // 缺参 / 类型无法解析：作为指令回复文案返回，并打断后续 handler
+                    commandFailCount.incrementAndGet();
+                    return mae.getMessage();
+                }
                 Object result = e.method.invoke(e.instance, ma);
                 commandExecCount.incrementAndGet();
                 if (result != null) return result.toString();
@@ -489,7 +511,12 @@ public class CommandRegistry {
                 values[i] = event; continue;
             }
             if (Bot.class.isAssignableFrom(type)) {
-                values[i] = botTL.get(); continue;
+                Bot bot = botTL.get();
+                if (bot != null) {
+                    bot.setProactiveAllowed(proactiveByPlugin.getOrDefault(pluginId, false));
+                    bot.setGroupAdminAllowed(groupAdminByPlugin.getOrDefault(pluginId, false));
+                }
+                values[i] = bot; continue;
             }
             // 插件持久化存储：按当前插件 id 注入隔离视图
             if (XuanJi.api.plugin.PluginStorage.class.isAssignableFrom(type)) {
@@ -506,6 +533,12 @@ public class CommandRegistry {
             // 多轮会话：注入全局会话管理器（按当前事件上下文定位用户）
             if (XuanJi.api.action.ConversationSession.class.isAssignableFrom(type)) {
                 values[i] = conversationSession;
+                continue;
+            }
+            // 插件结构化存储：按当前插件 id 注入隔离的 PluginData（repo/storage）
+            if (XuanJi.api.plugin.PluginData.class.isAssignableFrom(type)) {
+                values[i] = pluginDataProvider != null && pluginId != null
+                        ? pluginDataProvider.get(pluginId) : null;
                 continue;
             }
             // 插件能力门面：LLM / 群管 / 主动发送（由框架实现注入）
@@ -525,18 +558,16 @@ public class CommandRegistry {
                     argCursor = argParts.length;
                     String rest = sb.toString();
                     if (rest.isBlank()) {
-                        if (arg.required()) return new Object[]{"缺少参数: " + arg.value()};
-                        values[i] = null;
+                        values[i] = resolveMissing(arg);
                     } else {
-                        values[i] = coerce(rest, type);
+                        values[i] = coerceOrFail(rest, type, arg);
                     }
                 } else {
                     String raw = argCursor < argParts.length ? argParts[argCursor++] : null;
                     if (raw == null || raw.isEmpty()) {
-                        if (arg.required()) return new Object[]{"缺少参数: " + arg.value()};
-                        values[i] = null;
+                        values[i] = resolveMissing(arg);
                     } else {
-                        values[i] = coerce(raw, type);
+                        values[i] = coerceOrFail(raw, type, arg);
                     }
                 }
             }
@@ -544,11 +575,69 @@ public class CommandRegistry {
         return values;
     }
 
+    /**
+     * 缺参处理：必填 → 抛 {@link MissingArgException}（被分发逻辑捕获后作为回复文案）；
+     * 非必填 → 返回 null（由调用方按类型处理）。
+     */
+    private Object resolveMissing(Arg arg) {
+        if (arg.required()) {
+            throw new MissingArgException(arg.missing().isEmpty()
+                    ? "缺少参数: " + arg.value() : arg.missing());
+        }
+        return null;
+    }
+
+    /**
+     * 类型转换，失败时按 {@code arg} 的必填性决定抛异常还是置 null。
+     * 支持 String / int,Integer / long,Long / double,Double / float,Float /
+     * boolean,Boolean / LocalDate / LocalDateTime；未知类型按原字符串返回。
+     */
+    private Object coerceOrFail(String s, Class<?> type, Arg arg) {
+        Object v = coerce(s, type);
+        // coerce 对数值/布尔/日期解析失败返回 null；此类类型若必填则视为参数错误
+        if (v == null && type != String.class && !type.equals(Object.class)
+                && (isNumericOrBoolOrDate(type))) {
+            if (arg.required()) {
+                throw new MissingArgException("参数 " + arg.value() + " 无法解析为 "
+                        + simpleName(type) + "：" + s);
+            }
+            return null;
+        }
+        return v;
+    }
+
+    private static boolean isNumericOrBoolOrDate(Class<?> type) {
+        return type == int.class || type == Integer.class
+                || type == long.class || type == Long.class
+                || type == double.class || type == Double.class
+                || type == float.class || type == Float.class
+                || type == boolean.class || type == Boolean.class
+                || type == java.time.LocalDate.class
+                || type == java.time.LocalDateTime.class;
+    }
+
+    private static String simpleName(Class<?> type) {
+        return type.getSimpleName();
+    }
+
     private Object coerce(String s, Class<?> type) {
         if (type == String.class) return s;
-        if (type == int.class || type == Integer.class) { try { return Integer.parseInt(s); } catch (NumberFormatException e) { return null; } }
-        if (type == long.class || type == Long.class) { try { return Long.parseLong(s); } catch (NumberFormatException e) { return null; } }
+        if (type == int.class || type == Integer.class) { try { return Integer.parseInt(s.trim()); } catch (NumberFormatException e) { return null; } }
+        if (type == long.class || type == Long.class) { try { return Long.parseLong(s.trim()); } catch (NumberFormatException e) { return null; } }
+        if (type == double.class || type == Double.class) { try { return Double.parseDouble(s.trim()); } catch (NumberFormatException e) { return null; } }
+        if (type == float.class || type == Float.class) { try { return Float.parseFloat(s.trim()); } catch (NumberFormatException e) { return null; } }
+        if (type == boolean.class || type == Boolean.class) { return isTrue(s.trim()); }
+        if (type == java.time.LocalDate.class) { try { return java.time.LocalDate.parse(s.trim()); } catch (Exception e) { return null; } }
+        if (type == java.time.LocalDateTime.class) { try { return java.time.LocalDateTime.parse(s.trim()); } catch (Exception e) { return null; } }
+        // 未知类型：按字符串返回，交由插件自行解析
         return s;
+    }
+
+    private static boolean isTrue(String s) {
+        return switch (s.toLowerCase()) {
+            case "true", "1", "yes", "y", "是", "真" -> true;
+            default -> false;
+        };
     }
 
     private boolean checkRateLimit(HandlerEntry e) {

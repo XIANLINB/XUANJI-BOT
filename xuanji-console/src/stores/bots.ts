@@ -6,6 +6,7 @@ export interface BotRow {
   appId: string
   botKey?: string
   name?: string
+  platform?: string
   avatar?: string
   status?: string
   connectionType?: string
@@ -38,6 +39,7 @@ export const useBotsStore = defineStore('bots', {
           appId: String(b.appId ?? b.botKey ?? ''),
           botKey: b.botKey ? String(b.botKey) : undefined,
           name: b.name ? String(b.name) : undefined,
+          platform: b.platform ? String(b.platform) : undefined,
           avatar: b.avatar ? String(b.avatar) : undefined,
           status: b.status ? String(b.status) : undefined,
           connectionType: b.connectionType ? String(b.connectionType) : undefined,

@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { NCard, NSpace, NButton, NInputNumber, NSelect, NSwitch, NIcon, NEmpty, NTooltip, NRadioGroup, NRadioButton, useMessage } from 'naive-ui'
+import { NCard, NSpace, NButton, NInputNumber, NSelect, NSwitch, NIcon, NTooltip, NRadioGroup, NRadioButton, useMessage } from 'naive-ui'
 import { DocumentTextOutline, ReloadOutline, ArrowDownOutline, TimerOutline, PulseOutline, DownloadOutline } from '@vicons/ionicons5'
 import api from '../api'
 import { openStream } from '../api/http'
 import { useFillHeight } from '../composables/useFillHeight'
 import dayjs from 'dayjs'
 import { exportCsv, exportJson } from '../utils/export'
+import EmptyState from '../components/EmptyState.vue'
 
 // 日志页工具栏较高（一行放不下会换行），预留更多空间
 const { fillHeight } = useFillHeight(90)
@@ -19,7 +20,7 @@ const err = ref('')
 const loading = ref(false)
 const autoScroll = ref(true)
 const fontSize = ref(13)
-const minLevel = ref('DEBUG')
+const minLevel = ref('ALL')
 
 // ══════ 自动更新模式：关闭 / 轮询 / 实时（SSE）三态单选 ══════
 // 轮询与实时是互斥的两种「自动更新」手段，合并为一个三态避免同时运行/状态打架
@@ -159,7 +160,7 @@ const LOG_RANGE_OPTIONS = [
 ]
 const filteredEntries = computed<Entry[]>(() => {
   if (!dateFilter.value) return entries.value
-  const since = dayjs().subtract(dateFilter.value, 'day').startOf('day')
+  const since = dayjs().utcOffset(8).subtract(dateFilter.value, 'day').startOf('day')
   return entries.value.filter((e) => {
     if (!e.time) return true // 原始行无时间戳不参与日期过滤
     const t = dayjs(e.time)
@@ -167,27 +168,33 @@ const filteredEntries = computed<Entry[]>(() => {
   })
 })
 
+const exporting = ref(false)
 function exportLogs(format: 'csv' | 'json') {
-  const data = filteredEntries.value
-  const stamp = dayjs().format('YYYYMMDD-HHmmss')
-  if (format === 'json') {
-    exportJson(data, `runtime-log-${stamp}.json`)
-  } else {
-    exportCsv(
-      data,
-      [
-        { key: 'time', label: '时间' },
-        { key: 'level', label: '级别' },
-        { key: 'thread', label: '线程' },
-        { key: 'logger', label: '记录器' },
-        { key: 'message', label: '消息' },
-        { key: 'trace', label: 'TraceId' },
-        { key: 'stack', label: '堆栈' }
-      ],
-      `runtime-log-${stamp}.csv`
-    )
+  exporting.value = true
+  try {
+    const data = filteredEntries.value
+    const stamp = dayjs().utcOffset(8).format('YYYYMMDD-HHmmss')
+    if (format === 'json') {
+      exportJson(data, `runtime-log-${stamp}.json`)
+    } else {
+      exportCsv(
+        data,
+        [
+          { key: 'time', label: '时间' },
+          { key: 'level', label: '级别' },
+          { key: 'thread', label: '线程' },
+          { key: 'logger', label: '记录器' },
+          { key: 'message', label: '消息' },
+          { key: 'trace', label: 'TraceId' },
+          { key: 'stack', label: '堆栈' }
+        ],
+        `runtime-log-${stamp}.csv`
+      )
+    }
+    message.success(`已导出 ${data.length} 条（${format.toUpperCase()}）`)
+  } finally {
+    exporting.value = false
   }
-  message.success(`已导出 ${data.length} 条（${format.toUpperCase()}）`)
 }
 
 function shortLogger(n: string): string {
@@ -195,13 +202,12 @@ function shortLogger(n: string): string {
   const parts = n.split('.')
   return parts[parts.length - 1]
 }
-// 完整日期时间：yyyy-MM-dd HH:mm:ss（保留毫秒用于排序可读性的同时，主显示到秒）
+// 完整日期时间：yyyy-MM-dd HH:mm:ss（UTC+8 口径，与全局时间展示统一）
 function fmtTime(ts: string): string {
   if (!ts) return ''
   const d = new Date(ts)
   if (!isNaN(d.getTime())) {
-    const p = (n: number) => String(n).padStart(2, '0')
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+    return dayjs(d.getTime()).utcOffset(8).format('YYYY-MM-DD HH:mm:ss')
   }
   const m = ts.match(/(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})/)
   return m ? `${m[1]} ${m[2]}` : ts
@@ -376,11 +382,11 @@ const pollOptions = [
         <NSelect v-model:value="minLevel" :options="levelOptions" style="width: 130px" />
         <NSelect v-model:value="fontSize" :options="fontOptions" style="width: 96px" />
         <NSelect v-model:value="dateFilter" :options="LOG_RANGE_OPTIONS" style="width: 110px" />
-        <NButton size="small" secondary :disabled="!filteredEntries.length" @click="exportLogs('csv')">
+        <NButton size="small" secondary :disabled="!filteredEntries.length" :loading="exporting" @click="exportLogs('csv')">
           <template #icon><NIcon><DownloadOutline /></NIcon></template>
           CSV
         </NButton>
-        <NButton size="small" secondary :disabled="!filteredEntries.length" @click="exportLogs('json')">
+        <NButton size="small" secondary :disabled="!filteredEntries.length" :loading="exporting" @click="exportLogs('json')">
           <template #icon><NIcon><DownloadOutline /></NIcon></template>
           JSON
         </NButton>
@@ -438,9 +444,7 @@ const pollOptions = [
           </div>
         </template>
         <div v-else-if="err" class="log-err">{{ err }}</div>
-        <div v-else class="log-empty">
-          <NEmpty description="暂无日志" />
-        </div>
+        <EmptyState v-else description="暂无日志" />
       </div>
     </NCard>
 
@@ -568,10 +572,6 @@ const pollOptions = [
 .log-err {
   color: #e88080;
   padding: 16px;
-}
-.log-empty {
-  padding: 48px 0;
-  text-align: center;
 }
 .scroll-hint {
   margin-top: 8px;

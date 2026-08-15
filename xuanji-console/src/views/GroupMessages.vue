@@ -3,7 +3,7 @@ import { ref, onMounted, computed, h, watch } from 'vue'
 import {
   NDataTable, NButton, NAlert, NSpace, NIcon, NText, NSelect, NInput, NTag,
   NCard, NGrid, NGi, NNumberAnimation, NGradientText, NDatePicker, NImage,
-  NTooltip, NPagination, useMessage, type DataTableColumns
+  NTooltip, NPagination, NDrawer, NDrawerContent, NDivider, useMessage, type DataTableColumns
 } from 'naive-ui'
 import {
   ChatbubbleOutline, SearchOutline, ArrowDownOutline, ArrowUpOutline,
@@ -12,9 +12,15 @@ import {
 import dayjs from 'dayjs'
 import api from '../api'
 import StatCard from '../components/StatCard.vue'
+import EmptyState from '../components/EmptyState.vue'
+import { renderMarkdown } from '../utils/markdown'
+import { useBotsStore } from '../stores/bots'
 
 const rawRows = ref<any[]>([])
 const total = ref(0)
+const ins = ref(0)
+const outs = ref(0)
+const typeDist = ref<{ type: string; cnt: number }[]>([])
 const err = ref('')
 const loading = ref(false)
 const botFilter = ref<string | null>(null)
@@ -22,13 +28,22 @@ const dirFilter = ref<string | null>(null)
 const typeFilter = ref<string | null>(null)
 const search = ref('')
 const dateRange = ref<[number, number] | null>(null)
-const bots = ref<{ appId: string; name: string }[]>([])
+const botsStore = useBotsStore()
 
 const botNameMap = computed(
-  () => new Map((bots.value || []).map((b) => [String(b.appId), b.name || `Bot #${b.appId}`]))
+  () => new Map((botsStore.bots || []).map((b) => [String(b.appId), b.name || `Bot #${b.appId}`]))
 )
 
 const message = useMessage()
+
+function msgTypeOf(row: any): string { return String(row.MSG_TYPE || 'text') }
+
+/** 媒体渲染地址：QQ 富媒体原始 URL 走同源代理（复用 /console/media）。 */
+function mediaSrc(content: string): string {
+  if (!content) return ''
+  if (content.startsWith('data:') || content.startsWith('/')) return content
+  return '/xuanji/api/v1/console/media?ref=' + encodeURIComponent(content)
+}
 
 /** 发送超过 2 分钟的消息不可撤回（QQ 平台限制）。 */
 const TWO_MIN_MS = 2 * 60 * 1000
@@ -51,51 +66,48 @@ async function recallMsg(row: any) {
       isOwn: row.DIRECTION === 'OUT'
     })
     if (r?.error) message.error(r.error)
-    else { message.success('已撤回'); await load() }
+    else {
+      message.success('已撤回')
+      // Q9：本地标记已撤回，保持当前页/不整体刷新，不回第一页
+      row.RETRACTED = 1
+    }
   } catch (e: any) { message.error('撤回失败：' + (e?.message ?? e)) }
 }
 
-async function loadBots() { try { bots.value = (await api.getBots()) || [] } catch { bots.value = [] } }
+// Q1/Q2/Q10：服务端筛选 + 分页（dir/type/时间范围/关键词/bot 全部下推后端）
 async function load() {
   loading.value = true
   err.value = ''
   try {
-    const r = await api.getMessages('group', botFilter.value || '', 0, 500)
+    const r = await api.getGroupMessages({
+      bot: botFilter.value || undefined,
+      page: page.value,
+      size: pageSize.value,
+      dir: dirFilter.value || undefined,
+      type: typeFilter.value || undefined,
+      startTime: dateRange.value ? Math.floor(dateRange.value[0] / 1000) : undefined,
+      endTime: dateRange.value ? Math.floor(dateRange.value[1] / 1000) : undefined,
+      q: search.value.trim() || undefined
+    })
     rawRows.value = r?.rows || []
     total.value = Number(r?.total ?? 0)
+    ins.value = Number(r?.ins ?? 0)
+    outs.value = Number(r?.outs ?? 0)
+    typeDist.value = (r?.typeDist || []) as { type: string; cnt: number }[]
   } catch (e: any) { err.value = e?.message || String(e); rawRows.value = [] }
   finally { loading.value = false }
 }
-onMounted(async () => { await loadBots(); await load() })
 
-const filtered = computed(() => {
-  let rows = rawRows.value || []
-  if (dirFilter.value) rows = rows.filter((r) => String(r.DIRECTION) === String(dirFilter.value))
-  if (typeFilter.value) rows = rows.filter((r) => String(r.MSG_TYPE || 'text') === String(typeFilter.value))
-  if (dateRange.value) {
-    const [s, e] = dateRange.value
-    rows = rows.filter((r) => {
-      const t = Number(r.CREATE_TIME)
-      const ms = t <= 9999999999 ? t * 1000 : t
-      return ms >= s && ms <= e
-    })
-  }
-  const q = search.value.trim().toLowerCase()
-  if (q) {
-    rows = rows.filter(
-      (r) =>
-        String(r.USER_ID || '').toLowerCase().includes(q) ||
-        String(r.CONTENT || '').toLowerCase().includes(q) ||
-        String(r.GROUP_ID || '').toLowerCase().includes(q)
-    )
-  }
-  return rows
+let searchTimer: number | null = null
+watch([botFilter, dirFilter, typeFilter, dateRange], () => { page.value = 1; load() })
+watch(search, () => {
+  if (searchTimer !== null) clearTimeout(searchTimer)
+  searchTimer = window.setTimeout(() => { page.value = 1; load() }, 300)
 })
 
-// ---------- 统计卡（统一 widget 风格） ----------
-const ins = computed(() => filtered.value.filter((r) => String(r.DIRECTION) === 'IN').length)
-const outs = computed(() => filtered.value.filter((r) => String(r.DIRECTION) === 'OUT').length)
+onMounted(async () => { await botsStore.loadBots(); await load() })
 
+// ---------- 类型标签 ----------
 const TYPE_LABEL: Record<string, string> = {
   text: '文本', markdown: 'Markdown', image: '图片', voice: '语音',
   video: '视频', file: '文件', ark: 'Ark', rich_media: '富媒体', card: '卡片'
@@ -105,18 +117,26 @@ const TYPE_COLOR: Record<string, string> = {
   video: '#fa5151', file: '#722ed1', ark: '#13c2c2', rich_media: '#eb2f96', card: '#f0a020'
 }
 const TYPE_ORDER = ['text', 'image', 'voice', 'video', 'file', 'markdown', 'ark', 'card', 'rich_media']
-const typeChips = computed(() =>
-  TYPE_ORDER.map((t) => ({
-    key: t, label: TYPE_LABEL[t] || t, color: TYPE_COLOR[t] || '#86909c',
-    count: filtered.value.filter((r) => String(r.MSG_TYPE || 'text') === t).length
-  })).filter((c) => c.count > 0)
-)
+const typeChips = computed(() => {
+  const chips = TYPE_ORDER.map((t) => {
+    const found = typeDist.value.find((d) => d.type === t)
+    return { key: t, label: TYPE_LABEL[t] || t, color: TYPE_COLOR[t] || '#86909c', count: found ? Number(found.cnt) : 0 }
+  }).filter((c) => c.count > 0)
+  // 未知类型兜底追加
+  for (const d of typeDist.value) {
+    if (!TYPE_ORDER.includes(d.type)) {
+      chips.push({ key: d.type, label: TYPE_LABEL[d.type] || d.type, color: TYPE_COLOR[d.type] || '#86909c', count: Number(d.cnt) })
+    }
+  }
+  return chips
+})
 
 function fmtTime(v: unknown): string {
   if (v == null || v === '') return '—'
   const n = Number(String(v).trim())
   if (!Number.isFinite(n) || n <= 0) return String(v)
-  return dayjs(n <= 9999999999 ? n * 1000 : n).format('YYYY-MM-DD HH:mm:ss')
+  // Q3：统一 UTC+8
+  return dayjs(n <= 9999999999 ? n * 1000 : n).utcOffset(8).format('YYYY-MM-DD HH:mm:ss')
 }
 
 const TYPE_OPTIONS = Object.entries(TYPE_LABEL).map(([value, label]) => ({ label, value }))
@@ -126,15 +146,19 @@ const DIR_OPTIONS = [
 ]
 
 function renderContent(row: any) {
-  const t = String(row.MSG_TYPE || 'text')
+  const t = msgTypeOf(row)
   const c = row.CONTENT == null ? '' : String(row.CONTENT)
-  if (t === 'image' && /^https?:\/\//.test(c.trim())) {
-    return h(NImage, {
-      src: c.trim(),
-      width: 48, height: 48,
-      objectFit: 'cover',
-      style: { borderRadius: '6px', display: 'block' }
-    })
+  if (t === 'image') {
+    const cc = c.trim()
+    if (cc.startsWith('http') || cc.startsWith('data:')) {
+      return h(NImage, {
+        src: mediaSrc(cc),
+        width: 48, height: 48,
+        objectFit: 'cover',
+        style: { borderRadius: '6px', display: 'block' }
+      })
+    }
+    return h('span', {}, c || '—')
   }
   if (['voice', 'video', 'file', 'ark', 'card', 'rich_media', 'markdown'].includes(t)) {
     return h('div', { style: 'display:flex;align-items:center;gap:6px;min-width:0' }, [
@@ -171,7 +195,7 @@ const columns: DataTableColumns = [
   {
     title: '类型', key: 'MSG_TYPE', width: 80,
     render: (row) => {
-      const t = String(row.MSG_TYPE || 'text')
+      const t = msgTypeOf(row)
       return h('span', {
         style: `display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;color:${TYPE_COLOR[t] || '#86909c'};background:${TYPE_COLOR[t] || '#86909c'}15;border:1px solid ${TYPE_COLOR[t] || '#86909c'}40`
       }, TYPE_LABEL[t] || t)
@@ -191,7 +215,7 @@ const columns: DataTableColumns = [
       const btn = h(NButton, {
         size: 'small', type: 'warning', secondary: true,
         disabled: !row.MSG_ID || expired,
-        onClick: () => recallMsg(row)
+        onClick: (e: MouseEvent) => { e.stopPropagation(); recallMsg(row) }
       }, () => expired ? '超2分钟' : '撤回')
       return h(NTooltip, { disabled: !expired }, {
         trigger: () => btn,
@@ -204,11 +228,13 @@ const columns: DataTableColumns = [
 // ---------- 分页 ----------
 const page = ref(1)
 const pageSize = ref(20)
-const pagedRows = computed(() => {
-  const start = (page.value - 1) * pageSize.value
-  return filtered.value.slice(start, start + pageSize.value)
-})
-watch(filtered, () => { page.value = 1 })
+function onPageChange(p: number) { page.value = p; load() }
+function onPageSizeChange(s: number) { pageSize.value = s; page.value = 1; load() }
+
+// ---------- 消息详情抽屉 ----------
+const detail = ref<any>(null)
+const showDetail = ref(false)
+function openDetail(row: any) { detail.value = row; showDetail.value = true }
 </script>
 
 <template>
@@ -218,7 +244,7 @@ watch(filtered, () => { page.value = 1 })
         <NGradientText :gradient="{ deg: 90, from: '#5b5bd6', to: '#2090e0' }" :size="18" style="font-weight: 700">
           群聊消息
         </NGradientText>
-        <NText depth="3" style="font-size: 13px">共 {{ filtered.length }} 条（全部 {{ total }}）</NText>
+        <NText depth="3" style="font-size: 13px">共 {{ total }} 条</NText>
       </div>
       <NSpace align="center" :wrap="true" style="row-gap: 8px">
         <NInput v-model:value="search" :placeholder="'搜索用户 ID / 内容 / 群号'" clearable style="width: 180px">
@@ -227,7 +253,7 @@ watch(filtered, () => { page.value = 1 })
         <NSelect v-model:value="dirFilter" :options="DIR_OPTIONS" placeholder="方向" clearable style="width: 90px" />
         <NSelect v-model:value="typeFilter" :options="TYPE_OPTIONS" placeholder="消息类型" clearable style="width: 110px" />
         <NDatePicker v-model:value="dateRange" type="daterange" clearable style="width: 200px" placeholder="按日期范围筛选" />
-        <NSelect v-model:value="botFilter" :options="bots.map((b) => ({ label: b.name || `Bot #${b.appId}`, value: String(b.appId) }))" placeholder="按机器人过滤" clearable style="width: 140px" />
+        <NSelect v-model:value="botFilter" :options="botsStore.bots.map((b) => ({ label: b.name || `Bot #${b.appId}`, value: String(b.appId) }))" placeholder="按机器人过滤" clearable style="width: 140px" />
         <NButton type="primary" :loading="loading" @click="load" size="small">
           <template #icon><NIcon size="14"><RefreshOutline /></NIcon></template>
           刷新
@@ -238,12 +264,11 @@ watch(filtered, () => { page.value = 1 })
     <!-- 统计卡：统一 widget 风格 -->
     <NGrid :cols="24" :x-gap="12" :y-gap="12" responsive="screen" item-responsive style="margin-bottom: 16px">
       <NGi span="24 s:8">
-        <StatCard icon="ChatbubbleOutline" color="#5b5bd6" :value="filtered.length" label="消息总数"
-          :sub="`含 ${typeChips.length} 种类型 · DB 共 ${total} 条`" />
+        <StatCard icon="ChatbubbleOutline" color="#5b5bd6" :value="total" label="消息总数"
+          :sub="`含 ${typeChips.length} 种类型`" />
       </NGi>
       <NGi span="24 s:8">
-        <StatCard icon="SwapVerticalOutline" color="#07c160" :value="filtered.length" label="消息方向"
-          :sub="`收 ${ins} · 发 ${outs}`" />
+        <StatCard icon="SwapVerticalOutline" color="#07c160" :value="`收 ${ins} · 发 ${outs}`" label="消息方向" />
       </NGi>
       <NGi span="24 s:8">
         <StatCard icon="AppsOutline" color="#722ed1" :value="typeChips.length" label="消息类型分布"
@@ -255,24 +280,54 @@ watch(filtered, () => { page.value = 1 })
 
     <NDataTable
       :columns="columns"
-      :data="pagedRows"
+      :data="rawRows"
       :pagination="false"
       :loading="loading"
       :bordered="false"
       size="small"
       striped
+      :row-props="(row) => ({ style: 'cursor: pointer', onClick: () => openDetail(row) })"
       style="margin-bottom: 12px"
     />
-    <NSpace justify="end" align="center" style="margin-bottom: 16px">
+    <NSpace v-if="rawRows.length" justify="end" align="center" style="margin-bottom: 16px">
       <NPagination
-        v-model:page="page"
-        v-model:page-size="pageSize"
-        :item-count="filtered.length"
+        :page="page"
+        :page-size="pageSize"
+        :item-count="total"
         :page-sizes="[20, 50, 100, 200]"
         show-size-picker
         size="small"
+        @update:page="onPageChange"
+        @update:page-size="onPageSizeChange"
       />
     </NSpace>
+    <EmptyState v-if="!loading && !rawRows.length" :description="total ? '没有匹配结果，换个关键词试试' : '暂无群聊消息'" />
+
+    <!-- 消息详情抽屉（markdown 渲染 / 大图 / 元数据） -->
+    <NDrawer v-model:show="showDetail" :width="560" placement="right">
+      <NDrawerContent title="消息详情" closable>
+        <template v-if="detail">
+          <div class="detail-grid">
+            <div class="dg-item"><span class="dg-k">时间</span><span class="dg-v">{{ fmtTime(detail.CREATE_TIME) }}</span></div>
+            <div class="dg-item"><span class="dg-k">方向</span><span class="dg-v">{{ detail.DIRECTION === 'OUT' ? '发出' : '收到' }}</span></div>
+            <div class="dg-item"><span class="dg-k">类型</span><span class="dg-v">{{ TYPE_LABEL[msgTypeOf(detail)] || msgTypeOf(detail) }}</span></div>
+            <div class="dg-item"><span class="dg-k">机器人</span><span class="dg-v">{{ botNameMap.get(String(detail.BOT_APPID)) || `Bot #${detail.BOT_APPID}` }}</span></div>
+            <div class="dg-item"><span class="dg-k">群号</span><span class="dg-v mono">{{ detail.GROUP_ID || '—' }}</span></div>
+            <div class="dg-item"><span class="dg-k">用户 ID</span><span class="dg-v mono">{{ detail.USER_ID || '—' }}</span></div>
+            <div class="dg-item"><span class="dg-k">消息 ID</span><span class="dg-v mono">{{ detail.MSG_ID || '—' }}</span></div>
+          </div>
+          <NDivider />
+          <div v-if="msgTypeOf(detail) === 'markdown'" class="md-body" v-html="renderMarkdown(String(detail.CONTENT || ''))"></div>
+          <template v-else-if="msgTypeOf(detail) === 'image'">
+            <NImage :src="mediaSrc(String(detail.CONTENT || ''))" style="max-width: 100%" />
+          </template>
+          <template v-else-if="['voice', 'video', 'file'].includes(msgTypeOf(detail))">
+            <NText depth="3" style="word-break: break-all">[{{ TYPE_LABEL[msgTypeOf(detail)] || msgTypeOf(detail) }}] {{ detail.CONTENT || '—' }}</NText>
+          </template>
+          <NText v-else style="word-break: break-all; white-space: pre-wrap">{{ detail.CONTENT || '—' }}</NText>
+        </template>
+      </NDrawerContent>
+    </NDrawer>
   </div>
 </template>
 
@@ -286,4 +341,18 @@ watch(filtered, () => { page.value = 1 })
   gap: 10px;
 }
 .page-title { display: flex; align-items: center; gap: 10px; }
+
+.detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 20px; }
+.dg-item { display: flex; flex-direction: column; gap: 2px; }
+.dg-k { font-size: 12px; color: #86909c; }
+.dg-v { font-size: 13px; color: #1d2129; word-break: break-all; }
+.mono { font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.md-body { word-break: break-word; line-height: 1.6; font-size: 13px; }
+.md-body :deep(p) { margin: 0 0 8px; }
+.md-body :deep(pre) { background: #f6f8fa; padding: 10px; border-radius: 6px; overflow: auto; }
+.md-body :deep(code) { background: #f6f8fa; padding: 1px 4px; border-radius: 4px; font-size: 12px; }
+.md-body :deep(blockquote) { margin: 0 0 8px; padding: 4px 12px; border-left: 3px solid #ddd; color: #666; }
+.md-body :deep(img) { max-width: 100%; }
+.md-body :deep(a) { color: #2090e0; }
 </style>

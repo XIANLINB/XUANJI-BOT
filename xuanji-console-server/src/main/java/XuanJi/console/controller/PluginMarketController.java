@@ -3,6 +3,7 @@ package XuanJi.console.controller;
 import XuanJi.console.market.MarketSettings;
 import XuanJi.console.market.PluginMarketService;
 import XuanJi.console.service.AuditService;
+import XuanJi.core.plugin.XuanJiPluginManager;
 import XuanJi.core.web.XuanJiApi;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
@@ -34,18 +35,63 @@ public class PluginMarketController {
     private final PluginMarketService marketService;
     private final MarketSettings settings;
     private final AuditService auditService;
+    private final XuanJiPluginManager pluginManager;
 
     public PluginMarketController(PluginMarketService marketService, MarketSettings settings,
-                                  AuditService auditService) {
+                                  AuditService auditService, XuanJiPluginManager pluginManager) {
         this.marketService = marketService;
         this.settings = settings;
         this.auditService = auditService;
+        this.pluginManager = pluginManager;
     }
 
     /** 市场已上架插件列表（后端代理拉取；downloadUrl 为框架端点，不暴露仓库地址）。 */
     @GetMapping("/plugins")
     public List<Map<String, Object>> listMarket() {
         return marketService.listMarket();
+    }
+
+    /** 已上架（含已下架）插件列表（管理员视图，用于下架管理）。 */
+    @GetMapping("/released")
+    public List<Map<String, Object>> released() {
+        return marketService.listReleased();
+    }
+
+    /** 下架已上架插件（需管理员令牌，附理由）。 */
+    @PostMapping("/released/{id}/delist")
+    public Map<String, Object> delist(@PathVariable String id,
+                                      @RequestBody(required = false) Map<String, Object> body,
+                                      jakarta.servlet.http.HttpServletRequest req) {
+        String token = body == null ? null : str(body.get("adminToken"));
+        String reason = body == null ? null : str(body.get("reason"));
+        try {
+            Map<String, Object> r = marketService.delist(id, reason, token);
+            auditService.record("MARKET_DELIST", "插件下架: " + id + (reason == null ? "" : " 理由=" + reason), req);
+            return r;
+        } catch (SecurityException e) {
+            return Map.of("status", "error", "message", e.getMessage());
+        } catch (Exception e) {
+            log.error("[PluginMarket] 下架插件失败", e);
+            return Map.of("status", "error", "message", e.getMessage());
+        }
+    }
+
+    /** 重新上架已下架插件（需管理员令牌）。 */
+    @PostMapping("/released/{id}/relist")
+    public Map<String, Object> relist(@PathVariable String id,
+                                      @RequestBody(required = false) Map<String, Object> body,
+                                      jakarta.servlet.http.HttpServletRequest req) {
+        String token = body == null ? null : str(body.get("adminToken"));
+        try {
+            Map<String, Object> r = marketService.relist(id, token);
+            auditService.record("MARKET_RELIST", "插件重新上架: " + id, req);
+            return r;
+        } catch (SecurityException e) {
+            return Map.of("status", "error", "message", e.getMessage());
+        } catch (Exception e) {
+            log.error("[PluginMarket] 重新上架插件失败", e);
+            return Map.of("status", "error", "message", e.getMessage());
+        }
     }
 
     /** 已上架 jar 代理下载（浏览器直接下载；内部从仓库 raw 拉取）。 */
@@ -67,9 +113,20 @@ public class PluginMarketController {
     public Map<String, Object> settings() {
         return Map.of(
                 "enabled", settings.isEnabled(),
-                "repoUrl", maskUrl(settings.getRepoUrl()),
-                "hasUploadToken", settings.hasUploadToken(),
-                "hasAdminToken", settings.hasAdminToken());
+                "reviewRepoUrl", maskUrl(settings.getReviewRepoUrl()),
+                "releaseRepoUrl", maskUrl(settings.getReleaseRepoUrl()),
+                "hasUploadToken", settings.hasUploadToken());
+    }
+
+    /** 开发者上传前读取 jar 内 @XuanJiPlugin 声明（用于前端自动填充表单 + 后端一致性校验）。 */
+    @PostMapping("/extract")
+    public Map<String, Object> extract(@RequestParam("jar") MultipartFile jar) {
+        try {
+            if (jar == null || jar.isEmpty()) return Map.of("declared", false, "error", "jar 为空");
+            return marketService.extractDeclaration(jar.getBytes());
+        } catch (Exception e) {
+            return Map.of("declared", false, "error", e.getMessage());
+        }
     }
 
     private static String maskUrl(String url) {
@@ -86,18 +143,18 @@ public class PluginMarketController {
         }
     }
 
-    /** 开发者上传插件（需已配置上传令牌；multipart：name/description/version/category/submitter + jar）。 */
+    /** 开发者上传插件（multipart：name/description/version/category/author + jar；字段须与 @XuanJiPlugin 一致）。 */
     @PostMapping("/submit")
     public Map<String, Object> submit(@RequestParam(value = "name", required = false) String name,
                                       @RequestParam(value = "description", required = false) String description,
                                       @RequestParam(value = "version", required = false) String version,
                                       @RequestParam(value = "category", required = false) String category,
-                                      @RequestParam(value = "submitter", required = false) String submitter,
+                                      @RequestParam(value = "author", required = false) String author,
                                       @RequestParam("jar") MultipartFile jar,
                                       jakarta.servlet.http.HttpServletRequest req) throws IOException {
         try {
             Map<String, Object> r = marketService.submit(name, description, version, category,
-                    submitter, jar.getOriginalFilename(), jar.getBytes());
+                    author, jar.getOriginalFilename(), jar.getBytes());
             auditService.record("MARKET_SUBMIT",
                     "上传插件: " + r.get("pluginId") + "@" + r.get("version") + "（审核中）", req);
             return r;
@@ -126,20 +183,20 @@ public class PluginMarketController {
         }
     }
 
-    /** 验证管理员令牌（进入审核台鉴权；通过才显示内容与操作）。 */
+    /** 验证管理员令牌：拿令牌去正式仓库做一次「上传/删除测试文件」真实往返；失败即令牌无效。 */
     @PostMapping("/pending/verify")
     public Map<String, Object> verifyAdmin(@RequestBody Map<String, Object> body) {
         String token = body == null ? null : str(body.get("adminToken"));
-        boolean ok = settings.verifyAdminToken(token);
+        boolean ok = marketService.testReleaseToken(token);
         return Map.of("status", ok ? "ok" : "error",
-                "message", ok ? "管理员验证通过" : "管理员令牌错误，无审核权限");
+                "message", ok ? "令牌可访问正式仓库，验证通过" : "令牌无效或无法访问正式仓库（上传测试文件失败）");
     }
 
     /** 待审 jar 代理下载（审核用，需管理员令牌 query；不暴露仓库地址）。 */
     @GetMapping("/pending/{id}/download")
     public ResponseEntity<byte[]> downloadPending(@PathVariable String id,
                                                   @RequestParam String adminToken) {
-        if (!settings.verifyAdminToken(adminToken)) {
+        if (adminToken == null || adminToken.isBlank()) {
             return ResponseEntity.status(403).build();
         }
         byte[] jar = marketService.downloadPendingJar(id, adminToken);
@@ -159,8 +216,9 @@ public class PluginMarketController {
                                        jakarta.servlet.http.HttpServletRequest req) {
         boolean official = body != null && Boolean.parseBoolean(String.valueOf(body.getOrDefault("official", false)));
         String token = body == null ? null : str(body.get("adminToken"));
+        String category = body == null ? null : str(body.get("category"));
         try {
-            Map<String, Object> r = marketService.approve(id, official, token);
+            Map<String, Object> r = marketService.approve(id, official, category, token);
             auditService.record("MARKET_APPROVE",
                     "插件上架: " + r.get("pluginId") + "@" + r.get("version") + (official ? "（官方）" : ""), req);
             return r;
@@ -205,7 +263,11 @@ public class PluginMarketController {
         String version = str(body.get("version"));
         try {
             Map<String, Object> r = marketService.install(pluginId, version);
-            auditService.record("MARKET_INSTALL", "安装插件: " + pluginId + "@" + version, req);
+            // 安装写盘成功后立即触发热加载，使插件出现在「本地插件」列表，无需手动扫描/重启
+            java.util.List<String> loaded = pluginManager.scanNewPlugins();
+            r.put("loaded", loaded);
+            auditService.record("MARKET_INSTALL", "安装插件: " + pluginId + "@" + version
+                    + (loaded.isEmpty() ? "（已写入但未加载）" : " 已加载: " + String.join(", ", loaded)), req);
             return r;
         } catch (Exception e) {
             log.error("[PluginMarket] 安装插件失败", e);

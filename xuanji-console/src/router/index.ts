@@ -21,6 +21,7 @@ const Login = () => import('../views/Login.vue')
 const Plugins = () => import('../views/PluginPage.vue')
 const PluginMarket = () => import('../views/PluginMarket.vue')
 const PluginGuide = () => import('../views/PluginGuide.vue')
+const PluginReview = () => import('../views/PluginReview.vue')
 const Security = () => import('../views/Security.vue')
 const Backup = () => import('../views/Backup.vue')
 const Scheduler = () => import('../views/Scheduler.vue')
@@ -40,6 +41,7 @@ const AiAudit = () => import('../views/AiAudit.vue')
 const AiSummary = () => import('../views/AiSummary.vue')
 const AiMemory = () => import('../views/AiMemory.vue')
 const AiProviders = () => import('../views/AiProviders.vue')
+const Preferences = () => import('../views/Preferences.vue')
 
 export const routes = [
   { path: '/', redirect: '/dashboard' },
@@ -55,7 +57,6 @@ export const routes = [
       { path: 'stats', name: 'stats', component: Stats, meta: { title: '聚合统计' } },
       { path: 'cache', name: 'cache', component: Cache, meta: { title: '缓存清理' } },
       { path: 'files', name: 'files', component: Files, meta: { title: '文件存储' } },
-      { path: 'events', name: 'events', component: Events, meta: { title: '系统事件' } },
       { path: 'database', name: 'database', component: Database, meta: { title: '数据库' } }
     ]
   },
@@ -66,7 +67,9 @@ export const routes = [
     meta: { title: '管理中心' },
     children: [
       { path: 'qqbot', name: 'qqbot', component: Bots, meta: { title: 'QQBOT' } },
-      { path: 'permission', name: 'permission', component: Permission, meta: { title: '权限管理' } }
+      { path: 'permission', name: 'permission', component: Permission, meta: { title: '权限管理' } },
+      { path: 'events', name: 'events', component: Events, meta: { title: '系统事件' } },
+      { path: 'op-log', name: 'group-op-log', component: OpLog, meta: { title: '操作日志' } }
     ]
   },
   {
@@ -76,8 +79,7 @@ export const routes = [
     meta: { title: '群聊管理' },
     children: [
       { path: 'list', name: 'groups', component: Groups, meta: { title: '群聊列表' } },
-      { path: 'messages', name: 'group-messages', component: GroupMessages, meta: { title: '群聊消息' } },
-      { path: 'op-log', name: 'group-op-log', component: OpLog, meta: { title: '操作日志' } }
+      { path: 'messages', name: 'group-messages', component: GroupMessages, meta: { title: '群聊消息' } }
     ]
   },
   {
@@ -98,6 +100,8 @@ export const routes = [
     children: [
       // 插件市场（卡片式管理 + 扫描入口）
       { path: 'market', name: 'plugin-market', component: PluginMarket, meta: { title: '插件市场' } },
+      // 插件审核（独立页面：审核开发者提交的插件，通过/拒绝后上架）
+      { path: 'review', name: 'plugin-review', component: PluginReview, meta: { title: '插件审核' } },
       // 插件开发指南
       { path: 'guide', name: 'plugin-guide', component: PluginGuide, meta: { title: '开发指南' } }
     ]
@@ -141,6 +145,7 @@ export const routes = [
   { path: '/monitor', name: 'monitor', component: Monitor, meta: { title: '消息监控' } },
   { path: '/scheduler', name: 'scheduler', component: Scheduler, meta: { title: '定时任务' } },
   { path: '/settings', name: 'settings', component: Settings, meta: { title: '框架配置' } },
+  { path: '/preferences', name: 'preferences', component: Preferences, meta: { title: '个性化设置' } },
   // 旧路径重定向（菜单重构前收藏的地址仍可用）
   { path: '/groups', redirect: '/chat-groups/list' },
   { path: '/friends', redirect: '/chat-c2c/friends' },
@@ -155,8 +160,8 @@ export const routes = [
   { path: '/backup', redirect: '/ops/backup' },
   { path: '/logs-center', redirect: '/logs' },
   { path: '/logs-center/logs', redirect: '/logs' },
-  { path: '/logs-center/events', redirect: '/data/events' },
-  { path: '/events', redirect: '/data/events' },
+  { path: '/logs-center/events', redirect: '/center/events' },
+  { path: '/events', redirect: '/center/events' },
   { path: '/ops/audit', redirect: '/ops/security' },
   { path: '/logs-center/audit', redirect: '/ops/security' },
   { path: '/ops/risk', redirect: '/ops/security' },

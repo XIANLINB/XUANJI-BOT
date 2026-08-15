@@ -3,22 +3,24 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useMessage } from 'naive-ui'
 import {
   NCard, NButton, NSpace, NInput, NInputNumber, NSwitch,
-  NSelect, NText, NTag, NEmpty, NDivider, NIcon, NTooltip,
-  NPopconfirm, NTabs, NTabPane, NAlert, NGrid, NGi
+  NSelect, NText, NTag, NDivider, NIcon, NTooltip,
+  NPopconfirm, NTabs, NTabPane, NAlert, NGrid, NGi, NSpin
 } from 'naive-ui'
 import {
   PlanetOutline, PeopleOutline, SettingsOutline,
   ShieldCheckmarkOutline, RefreshOutline, InformationCircleOutline,
   ChatbubbleEllipsesOutline, ServerOutline, CloudUploadOutline, EyeOutline,
-  WarningOutline, ExtensionPuzzleOutline, MegaphoneOutline
+  WarningOutline, ExtensionPuzzleOutline, MegaphoneOutline, ArchiveOutline
 } from '@vicons/ionicons5'
 import api from '../api'
 import PageHero from '../components/PageHero.vue'
+import EmptyState from '../components/EmptyState.vue'
 import { groupName } from '../utils/names'
+import { useBotsStore } from '../stores/bots'
+import { useContactsStore } from '../stores/contacts'
 
 const message = useMessage()
 
-interface BotInfo { botKey: string; appId: string; platform: string }
 interface GroupRow { GROUP_ID?: string; groupId?: string; groupOpenid?: string; GROUP_NAME?: string; groupName?: string }
 
 // ════════════════════════════════════════════════════════════════
@@ -46,7 +48,8 @@ const MODULES: Record<string, { label: string; icon: any; desc: string }> = {
   网络: { label: '网络', icon: ServerOutline, desc: 'QQ 开放平台 API 接入' },
   群管: { label: '群管', icon: MegaphoneOutline, desc: '入群欢迎语' },
   熔断: { label: '熔断', icon: WarningOutline, desc: '连续失败自动停呼' },
-  插件: { label: '插件', icon: ExtensionPuzzleOutline, desc: '插件执行超时隔离' }
+  插件: { label: '插件', icon: ExtensionPuzzleOutline, desc: '插件执行超时隔离' },
+  存储: { label: '存储', icon: ArchiveOutline, desc: '聊天消息留存' }
 }
 
 /** 全局配置（xuanji_config 表，点号命名） */
@@ -55,14 +58,15 @@ const GLOBAL_SCHEMA: ConfigDef[] = [
   { key: 'framework.rate_limit.enabled', label: '启用命令限速', module: '命令', type: 'switch', defaultValue: false, source: '全局表', hint: '同一用户在这个时间窗口内只能触发一次命令（开启后生效）' },
   { key: 'framework.rate_limit.window_ms', label: '限速窗口时长（ms）', module: '命令', type: 'number', defaultValue: 2000, source: '全局表', hint: '限速窗口毫秒；默认 2000ms' },
   { key: 'console.refresh_interval_ms', label: '监控页自动刷新间隔（ms）', module: '监控', type: 'number', defaultValue: 5000, source: '全局表', hint: '健康/仪表盘页面自动刷新间隔，默认 5000' },
-  { key: 'media.download.enabled', label: '启用媒体按需下载', module: '媒体', type: 'switch', defaultValue: false, source: '全局表', hint: '框架层在收到图片/语音时按需下载到本地（按内容去重，TTL+配额清理）' },
+  { key: 'media.download.enabled', label: '启用媒体按需下载', module: '媒体', type: 'switch', defaultValue: true, source: '全局表', hint: '框架层在收到图片/语音时按需下载到本地（按内容去重，TTL+配额清理）' },
   { key: 'media.download.max_file_bytes', label: '媒体单文件上限（字节）', module: '媒体', type: 'number', defaultValue: 209715200, source: '全局表', hint: '单文件超过此大小跳过；默认 200MB' },
   { key: 'media.storage.ttl_days', label: '媒体保留天数', module: '媒体', type: 'number', defaultValue: 7, source: '全局表', hint: '下载的媒体文件保留天数；过期自动删除' },
   { key: 'media.storage.max_bytes', label: '媒体总配额（字节）', module: '媒体', type: 'number', defaultValue: 4294967296, source: '全局表', hint: '所有媒体总占用；超限自动删最旧；默认 4GB' },
   { key: 'framework.qqbot.api_base_mode', label: 'QQ 开放平台 API 基地址', module: '网络', type: 'select', defaultValue: 'new', source: '全局表', hint: 'new=新统一地址 api.bot.qq.com（不区分沙箱/正式，推荐）；legacy=老平台 api.sgroup.qq.com，按机器人环境自动选正式/沙箱。改后 30 秒内生效（WebSocket 连接需重启机器人）', options: [
     { label: '新统一地址（api.bot.qq.com）', value: 'new' },
     { label: '老平台（正式/沙箱自动区分）', value: 'legacy' }
-  ] }
+  ] },
+  { key: 'msg.retention.days', label: '聊天消息留存天数', module: '存储', type: 'number', defaultValue: 30, source: '全局表', hint: '群聊/单聊消息只保留最近 N 天，超过的由每日 04:10 定时任务自动删除（防止数据库无限增长）。默认 30 天，<1 视为 30。与「聊天消息定时备份」配合：先备份再清理。' }
 ]
 
 /** 机器人/群配置（xuanji_bot_setting / xuanji_group_setting，下划线命名，可覆盖全局） */
@@ -75,11 +79,11 @@ const BOT_SCHEMA: ConfigDef[] = [
   { key: 'cb_threshold', label: '熔断阈值', module: '熔断', type: 'number', defaultValue: 5, source: 'bot/群表', hint: '连续失败多少次后熔断停呼' },
   { key: 'cb_cooldown_ms', label: '熔断冷却（ms）', module: '熔断', type: 'number', defaultValue: 30000, source: 'bot/群表', hint: '熔断后多久恢复' },
   { key: 'plugin_timeout_ms', label: '插件超时（ms）', module: '插件', type: 'number', defaultValue: 5000, source: 'bot/群表', hint: '插件执行超过此值则隔离跳过' },
-  { key: 'media_download_enabled', label: '启用媒体按需下载', module: '媒体', type: 'switch', defaultValue: false, globalKey: 'media.download.enabled', source: 'bot/群表', hint: '该机器人/群是否启用媒体下载（覆盖全局）' }
+  { key: 'media_download_enabled', label: '启用媒体按需下载', module: '媒体', type: 'switch', defaultValue: true, globalKey: 'media.download.enabled', source: 'bot/群表', hint: '该机器人/群是否启用媒体下载（覆盖全局）' }
 ]
 
 /** 模块顺序 */
-const MODULE_ORDER = ['命令', '群管', '熔断', '插件', '媒体', '监控', '网络']
+const MODULE_ORDER = ['命令', '群管', '熔断', '插件', '媒体', '监控', '网络', '存储']
 
 // ════════════════════════════════════════════════════════════════
 //  状态
@@ -92,7 +96,10 @@ const activeTab = ref('global')  // global / bot / group / ignore
 const selectedBot = ref<string>('')
 const selectedGroup = ref<string>('')  // 空 = bot 级
 
-const bots = ref<BotInfo[]>([])
+// 机器人 / 群列表统一收拢到 Pinia
+const botsStore = useBotsStore()
+const contacts = useContactsStore()
+const bots = computed(() => botsStore.bots)
 const botConfigs = ref<Record<string, Record<string, string>>>({})
 const groupConfigs = ref<Record<string, Record<string, Record<string, string>>>>({})
 const globalRows = ref<Record<string, string>>({})
@@ -102,6 +109,14 @@ const allGroups = ref<GroupRow[]>([])
 
 // 改动暂存
 const dirty = ref<Record<string, string>>({})
+
+// 配置项关键字过滤（按名称/键过滤，三 tab 共享）
+const filterText = ref('')
+function matchesFilter(item: ConfigDef): boolean {
+  if (!filterText.value.trim()) return true
+  const kw = filterText.value.trim().toLowerCase()
+  return item.label.toLowerCase().includes(kw) || item.key.toLowerCase().includes(kw)
+}
 
 // 当前 Tab 展示的配置
 const currentSchema = computed<ConfigDef[]>(() => {
@@ -147,21 +162,18 @@ const groupOptions = computed(() => [
 async function load() {
   loading.value = true
   try {
-    const [cfg, botList, groups] = await Promise.all([
+    const [cfg] = await Promise.all([
       api.getConfig(),
-      api.getBots().catch(() => []),
-      api.getGroups().catch(() => [])
+      botsStore.loadBots(),
+      contacts.loadContacts()
     ])
     globalRows.value = cfg.global ?? {}
     botConfigs.value = cfg.bots ?? {}
     groupConfigs.value = cfg.groups ?? {}
-    allGroups.value = (groups as GroupRow[]) || []
-    bots.value = (botList as BotInfo[]).map((b: any) => ({
-      botKey: b.botKey,
-      appId: b.appId,
-      platform: b.platform
-    }))
+    allGroups.value = (contacts.groups as GroupRow[]) || []
     dirty.value = {}
+    // 保存/重置后忽略消息开关状态需同步刷新（Q13）
+    loadIgnoreFromCfg()
   } catch (e: any) {
     message.error('加载失败：' + (e?.message ?? e))
   } finally {
@@ -206,6 +218,13 @@ function inheritedValue(item: ConfigDef): string {
 function fieldValue(item: ConfigDef): string {
   if (item.key in dirty.value) return dirty.value[item.key]
   return currentRaw(item)
+}
+
+/** 开关展示值：已设置/dirty 用实际值，未设置回退 defaultValue（默认开/关显示）。 */
+function switchValue(item: ConfigDef): boolean {
+  const raw = fieldValue(item)
+  if (raw !== '') return raw === 'true'
+  return item.defaultValue === true
 }
 
 function setField(item: ConfigDef, v: string | boolean | number) {
@@ -277,7 +296,8 @@ const groupIgnore = ref<Record<string, Record<string, boolean>>>({})
 
 function loadIgnoreFromCfg() {
   const g = globalRows.value['ignore_bot_messages']
-  globalIgnore.value = g === 'true' || g === true
+  // 未配置时默认忽略（与后端 ConfigService.isIgnoreBotMessages 默认 true 对齐）
+  globalIgnore.value = g === undefined ? true : (g === 'true' || g === true)
   bots.value.forEach(b => {
     const v = botConfigs.value?.[b.appId]?.['ignore_bot_messages']
     if (v !== undefined) botIgnore.value[b.appId] = v === 'true'
@@ -323,7 +343,6 @@ watch(activeTab, () => { dirty.value = {} })
 
 onMounted(async () => {
   await load()
-  loadIgnoreFromCfg()
 })
 </script>
 
@@ -337,7 +356,9 @@ onMounted(async () => {
       <NButton :loading="loading" @click="load">重新加载</NButton>
     </PageHero>
 
-    <NEmpty v-if="loading" description="加载中…" style="padding: 60px 0" />
+    <div v-if="loading" style="padding: 80px 0; text-align: center">
+      <NSpin size="large" />
+    </div>
 
     <template v-if="!loading">
       <NCard :bordered="false" class="settings-tabs-card">
@@ -357,8 +378,12 @@ onMounted(async () => {
                 <b>机器人/群级未单独设置时，会继承这里的值。</b>
               </NAlert>
 
+              <NInput v-model:value="filterText" clearable placeholder="搜索配置项（名称 / 键）" style="max-width: 320px; margin-bottom: 12px">
+                <template #prefix><NIcon><InformationCircleOutline /></NIcon></template>
+              </NInput>
+
               <div v-for="mod in MODULE_ORDER" :key="mod">
-                <template v-if="GLOBAL_SCHEMA.some(s => s.module === mod)">
+                <template v-if="GLOBAL_SCHEMA.some(s => s.module === mod && matchesFilter(s))">
                   <NCard size="small" :bordered="false" class="module-card">
                     <template #header>
                       <NSpace align="center" :size="6">
@@ -368,7 +393,7 @@ onMounted(async () => {
                       </NSpace>
                     </template>
                     <div class="config-list">
-                      <div v-for="item in GLOBAL_SCHEMA.filter(s => s.module === mod)" :key="item.key"
+                      <div v-for="item in GLOBAL_SCHEMA.filter(s => s.module === mod && matchesFilter(s))" :key="item.key"
                         class="config-row" :class="{ 'is-dirty': isDirty(item.key) }">
                         <div class="config-label">
                           <NText class="config-label-text">{{ item.label }}</NText>
@@ -382,7 +407,7 @@ onMounted(async () => {
                         </div>
                         <div class="config-field">
                           <NSwitch v-if="item.type === 'switch'"
-                            :value="fieldValue(item) === 'true'"
+                            :value="switchValue(item)"
                             @update:value="(v: boolean) => setField(item, v)" />
                           <NInputNumber v-else-if="item.type === 'number'"
                             :value="Number(fieldValue(item)) || 0"
@@ -452,11 +477,14 @@ onMounted(async () => {
                 </NSpace>
               </NCard>
 
-              <NEmpty v-if="!selectedBot" description="请先选机器人" style="padding: 24px 0" />
+              <EmptyState v-if="!selectedBot" description="请先选机器人" />
 
               <div v-else>
+                <NInput v-model:value="filterText" clearable placeholder="搜索配置项（名称 / 键）" style="max-width: 320px; margin-bottom: 12px">
+                  <template #prefix><NIcon><InformationCircleOutline /></NIcon></template>
+                </NInput>
                 <div v-for="mod in MODULE_ORDER" :key="mod">
-                  <template v-if="BOT_SCHEMA.some(s => s.module === mod)">
+                  <template v-if="BOT_SCHEMA.some(s => s.module === mod && matchesFilter(s))">
                     <NCard size="small" :bordered="false" class="module-card">
                       <template #header>
                         <NSpace align="center" :size="6">
@@ -466,7 +494,7 @@ onMounted(async () => {
                         </NSpace>
                       </template>
                       <div class="config-list">
-                        <div v-for="item in BOT_SCHEMA.filter(s => s.module === mod)" :key="item.key"
+                        <div v-for="item in BOT_SCHEMA.filter(s => s.module === mod && matchesFilter(s))" :key="item.key"
                           class="config-row" :class="{ 'is-dirty': isDirty(item.key) }">
                           <div class="config-label">
                             <NText class="config-label-text">{{ item.label }}</NText>
@@ -549,11 +577,14 @@ onMounted(async () => {
                 </NSpace>
               </NCard>
 
-              <NEmpty v-if="!selectedBot" description="请先选机器人" style="padding: 24px 0" />
+              <EmptyState v-if="!selectedBot" description="请先选机器人" />
 
               <div v-else-if="selectedGroup">
+                <NInput v-model:value="filterText" clearable placeholder="搜索配置项（名称 / 键）" style="max-width: 320px; margin-bottom: 12px">
+                  <template #prefix><NIcon><InformationCircleOutline /></NIcon></template>
+                </NInput>
                 <div v-for="mod in MODULE_ORDER" :key="mod">
-                  <template v-if="BOT_SCHEMA.some(s => s.module === mod)">
+                  <template v-if="BOT_SCHEMA.some(s => s.module === mod && matchesFilter(s))">
                     <NCard size="small" :bordered="false" class="module-card">
                       <template #header>
                         <NSpace align="center" :size="6">
@@ -562,7 +593,7 @@ onMounted(async () => {
                         </NSpace>
                       </template>
                       <div class="config-list">
-                        <div v-for="item in BOT_SCHEMA.filter(s => s.module === mod)" :key="item.key"
+                        <div v-for="item in BOT_SCHEMA.filter(s => s.module === mod && matchesFilter(s))" :key="item.key"
                           class="config-row" :class="{ 'is-dirty': isDirty(item.key) }">
                           <div class="config-label">
                             <NText class="config-label-text">{{ item.label }}</NText>
@@ -641,7 +672,7 @@ onMounted(async () => {
               </div>
 
               <NDivider style="margin: 14px 0" />
-              <NEmpty v-if="!bots.length" description="暂无机器人" style="padding: 16px 0" />
+              <EmptyState v-if="!bots.length" description="暂无机器人" />
 
               <div v-for="bot in bots" :key="bot.appId" class="ignore-bot-block">
                 <div class="ignore-bot-header">
@@ -658,11 +689,9 @@ onMounted(async () => {
                 </div>
 
                 <div class="ignore-groups">
-                  <NEmpty
+                  <EmptyState
                     v-if="!groupsForBot(bot.appId).length"
-                    size="small"
                     description="该机器人暂无群数据（正常接收消息后会建群）"
-                    style="padding: 8px 0"
                   />
                   <div
                     v-for="g in groupsForBot(bot.appId)"

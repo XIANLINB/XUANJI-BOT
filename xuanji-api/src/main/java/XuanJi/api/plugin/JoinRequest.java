@@ -7,7 +7,7 @@ import java.util.Map;
  *
  * <p>同时兼容两个数据源：
  * <ul>
- *   <li><b>入群申请列表</b>（{@link PluginServices#listGroupJoinRequests}）：平台返回 snake_case
+ *   <li><b>入群申请列表</b>（{@code Bot.listGroupJoinRequests()}）：平台返回 snake_case
  *       （member_openid / join_request_id / apply_at / apply_source / verify_info / _verify_parsed）</li>
  *   <li><b>申请加群事件</b>（SDK {@code GroupMessageEvent#getJoinRequestInfo()}）：框架注入 camelCase
  *       （memberOpenid / joinRequestId / applyAt / applySource / verifyInfo / verifyParsed）</li>

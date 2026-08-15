@@ -163,6 +163,11 @@ public class DatabaseController {
     @GetMapping("/rows")
     public Map<String, Object> rows(@RequestParam String table,
                                     @RequestParam(defaultValue = "") String source) {
+        // Q1：表名白名单（仅允许字母/数字/下划线，杜绝拼接注入）
+        if (table == null || !table.matches("[A-Za-z0-9_]+")) {
+            return Map.of("table", table == null ? "" : table, "columns", List.of(), "rows", List.of(),
+                    "count", 0, "error", "非法表名（仅允许字母/数字/下划线）");
+        }
         JdbcTemplate tpl = resolve(source);
         if (tpl == null) {
             return Map.of("table", table, "columns", List.of(), "rows", List.of(),
@@ -175,26 +180,62 @@ public class DatabaseController {
         return Map.of("table", table, "source", source, "columns", columns, "rows", all, "count", all.size());
     }
 
-    @GetMapping("/query")
-    public Object query(@RequestParam String sql,
-                        @RequestParam(defaultValue = "") String source,
-                        jakarta.servlet.http.HttpServletRequest request) {
-        String upper = sql.trim().toUpperCase();
-        if (upper.startsWith("INSERT") || upper.startsWith("UPDATE") ||
-            upper.startsWith("DELETE") || upper.startsWith("DROP") ||
-            upper.startsWith("ALTER") || upper.startsWith("CREATE") ||
-            upper.startsWith("TRUNCATE") || upper.startsWith("MERGE")) {
-            return Map.of("error", "仅支持只读查询（SELECT）");
+    /** 结构化只读查询：表名/列名/操作符/排序全部白名单校验，值走参数化占位符，杜绝拼接注入。 */
+    @GetMapping("/filter")
+    public Map<String, Object> filter(@RequestParam String table,
+                                      @RequestParam(defaultValue = "") String source,
+                                      @RequestParam(required = false) String column,
+                                      @RequestParam(defaultValue = "=") String op,
+                                      @RequestParam(required = false) String value,
+                                      @RequestParam(required = false) String orderBy,
+                                      @RequestParam(defaultValue = "ASC") String orderDir,
+                                      jakarta.servlet.http.HttpServletRequest request) {
+        if (table == null || !table.matches("[A-Za-z0-9_]+")) {
+            return Map.of("error", "非法表名（仅允许字母/数字/下划线）");
+        }
+        if (column != null && !column.isBlank() && !column.matches("[A-Za-z0-9_]+")) {
+            return Map.of("error", "非法列名");
+        }
+        if (orderBy != null && !orderBy.isBlank() && !orderBy.matches("[A-Za-z0-9_]+")) {
+            return Map.of("error", "非法排序列名");
+        }
+        if (!Set.of("=", "!=", "LIKE", ">", "<", ">=", "<=").contains(op)) {
+            return Map.of("error", "不支持的操作符: " + op);
         }
         JdbcTemplate tpl = resolve(source);
         if (tpl == null) return Map.of("error", "无效的 source: " + source);
+
+        // 列名/排序经白名单校验后拼接；值一律用 ? 占位符绑定，杜绝注入
+        Object bindValue = null;
+        StringBuilder sql = new StringBuilder("SELECT * FROM ").append(table);
+        if (column != null && !column.isBlank() && value != null && !value.isBlank()) {
+            sql.append(" WHERE ").append(column).append(' ');
+            if ("LIKE".equals(op)) {
+                sql.append("LIKE ?");
+                bindValue = "%" + value + "%";
+            } else {
+                sql.append(op).append(" ?");
+                bindValue = value;
+            }
+        }
+        if (orderBy != null && !orderBy.isBlank()) {
+            sql.append(" ORDER BY ").append(orderBy).append(' ')
+               .append("DESC".equalsIgnoreCase(orderDir) ? "DESC" : "ASC");
+        }
+        sql.append(" LIMIT 1000");
+
         // 查询留痕（安全中心审计）
-        String detail = sql.trim();
+        String detail = sql.toString();
         if (detail.length() > 120) detail = detail.substring(0, 120) + "…";
         auditService.record("SQL_QUERY", "source=" + (source.isBlank() ? "business" : source) + " | " + detail,
                 request.getRemoteAddr());
-        List<Map<String, Object>> rows = tryQuery(tpl, sql);
-        return Map.of("count", rows.size(), "rows", rows);
+
+        List<Map<String, Object>> rows = bindValue == null
+                ? tryQuery(tpl, sql.toString())
+                : tryQuery(tpl, sql.toString(), bindValue);
+        boolean truncated = rows.size() > 1000;
+        if (truncated) rows = new ArrayList<>(rows.subList(0, 1000));
+        return Map.of("count", rows.size(), "rows", rows, "truncated", truncated);
     }
 
     /** 按 source 解析目标 JdbcTemplate。支持 {@code qqbot:shared} / {@code onebot:shared}（平台共享库）。 */
@@ -228,10 +269,10 @@ public class DatabaseController {
         }
     }
 
-    /** 业务库优先；失败（如表在日志库）则查日志库 */
-    private List<Map<String, Object>> tryQuery(JdbcTemplate tpl, String sql) {
+    /** 执行查询（支持参数化占位符）；失败静默返回空，避免接口抛 500。 */
+    private List<Map<String, Object>> tryQuery(JdbcTemplate tpl, String sql, Object... args) {
         try {
-            return tpl.queryForList(sql);
+            return args.length == 0 ? tpl.queryForList(sql) : tpl.queryForList(sql, args);
         } catch (Exception e) {
             log.debug("[DB] 查询失败: {} - {}", sql, e.getMessage());
             return List.of();

@@ -7,9 +7,12 @@ import org.pf4j.*;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.context.support.GenericApplicationContext;
 import org.springframework.stereotype.Component;
 
 import XuanJi.core.command.CommandRegistry;
+import XuanJi.core.plugin.storage.PluginDataProvider;
+import XuanJi.core.plugin.storage.PluginEntityScanner;
 
 import java.nio.file.Path;
 import java.util.*;
@@ -38,10 +41,16 @@ public class XuanJiPluginManager extends DefaultPluginManager {
     private final ApplicationContext parentContext;
     private final PluginStateStore stateStore;
     private final CommandRegistry commandRegistry;
+    /** 插件定时任务调度器（@Scheduled 方法随插件启停自动调度/取消）。 */
+    private final PluginTaskScheduler taskScheduler;
 
     /** 插件配置服务（schema 注册/注销） */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private PluginConfigService pluginConfigService;
+
+    /** 插件结构化存储编排（扫描+建表+注入）；required=false 以兼容未启用场景 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private PluginDataProvider pluginDataProvider;
 
     /** pluginId → 该插件注册的所有指令实例（用于启用时重注册 / 停用反注册） */
     private final Map<String, List<Object>> pluginCommands = new HashMap<>();
@@ -52,12 +61,17 @@ public class XuanJiPluginManager extends DefaultPluginManager {
     /** copy 式加载器实例（热加载时回查用户原始 jar 路径，且承载唯一副本名生成） */
     private CopyingJarPluginLoader copyingLoader;
 
+    /** 插件可见的「白名单门面」父容器（懒加载、全局单例），仅暴露 sanctioned 框架 Bean */
+    private volatile ApplicationContext pluginApiContext;
+
     public XuanJiPluginManager(ApplicationContext parentContext,
                                PluginStateStore stateStore,
-                               CommandRegistry commandRegistry) {
+                               CommandRegistry commandRegistry,
+                               PluginTaskScheduler taskScheduler) {
         this.parentContext = parentContext;
         this.stateStore = stateStore;
         this.commandRegistry = commandRegistry;
+        this.taskScheduler = taskScheduler;
     }
 
     @Override
@@ -283,15 +297,28 @@ public class XuanJiPluginManager extends DefaultPluginManager {
         try {
             AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext();
             ctx.setClassLoader(pluginClassLoader);
-            ctx.setParent(parentContext);
+            // 沙箱隔离：子容器父级仅暴露白名单门面 Bean，绝不暴露 JdbcTemplate/DataSource/
+            // ConfigService / BotDataSourceRegistry / RobotRegistry / LlmService 等危险 Bean
+            ctx.setParent(getPluginApiContext());
 
-            DefaultListableBeanFactory beanFactory = new DefaultListableBeanFactory();
-            beanFactory.setParentBeanFactory(parentContext.getAutowireCapableBeanFactory());
             String basePackage = pluginClass.getPackageName();
             ctx.scan(basePackage);
             ctx.refresh();
 
             pluginContexts.put(wrapper.getPluginId(), ctx);
+
+            // 结构化存储：扫描实体 + 建表/迁移（单表硬约束，失败则拒绝加载，命令也不注册）
+            if (pluginDataProvider != null) {
+                try {
+                    pluginDataProvider.scanAndRegister(wrapper.getPluginId(), pluginClassLoader);
+                } catch (PluginEntityScanner.PluginStructureException e) {
+                    log.error("[Plugin] 插件 {} 结构化存储校验失败，拒绝加载: {}",
+                            wrapper.getPluginId(), e.getMessage());
+                    try { ctx.close(); } catch (Exception ignored) {}
+                    pluginContexts.remove(wrapper.getPluginId());
+                    return;
+                }
+            }
 
             try {
                 CommandRegistry registry = parentContext.getBean(CommandRegistry.class);
@@ -305,6 +332,46 @@ public class XuanJiPluginManager extends DefaultPluginManager {
     }
 
     /**
+     * 取得「插件白名单父容器」（懒加载、全局单例）。仅包含框架 sanctioned 门面 Bean，
+     * 用于替代完整的 {@code parentContext}，使插件子容器<b>无法</b>经 DI 取出 JdbcTemplate /
+     * DataSource / ConfigService / BotDataSourceRegistry / RobotRegistry 等危险 Bean。
+     */
+    private ApplicationContext getPluginApiContext() {
+        ApplicationContext c = pluginApiContext;
+        if (c == null) {
+            synchronized (this) {
+                c = pluginApiContext;
+                if (c == null) {
+                    c = buildPluginApiContext();
+                    pluginApiContext = c;
+                }
+            }
+        }
+        return c;
+    }
+
+    /** 构建白名单父容器：把指定的框架门面 Bean 以单例形式注册进去（其余一律不暴露）。 */
+    private ApplicationContext buildPluginApiContext() {
+        GenericApplicationContext wl = new GenericApplicationContext();
+        // 仅导出插件「应」使用的门面；绝不放 JdbcTemplate/DataSource/ConfigService/
+        // BotDataSourceRegistry/RobotRegistry/LlmService
+        for (String name : PLUGIN_API_BEAN_WHITELIST) {
+            if (parentContext != null && parentContext.containsBean(name)) {
+                wl.getBeanFactory().registerSingleton(name, parentContext.getBean(name));
+            }
+        }
+        wl.refresh();
+        return wl;
+    }
+
+    /** 允许插件经子容器 DI 拿到的框架门面 Bean 名（白名单）。插件命令/定时参数实际由框架手工注入，
+     *  本白名单主要作为前向兼容与防御纵深——即便未来插件 @Autowired 门面，也只能拿到这些。 */
+    private static final String[] PLUGIN_API_BEAN_WHITELIST = {
+            "pluginDataProviderImpl", "pluginConfigService", "pluginStorageService",
+            "pluginServicesImpl", "conversationSessionManager"
+    };
+
+    /**
      * 从插件主类中找所有 @XuanJiPlugin 注解的类（含内部类），注册到 CommandRegistry，
      * 并收集实例以便后续反注册。
      */
@@ -315,6 +382,14 @@ public class XuanJiPluginManager extends DefaultPluginManager {
         ClassLoader cl = wrapper.getPluginClassLoader();
         try {
             Class<?> mainClass = cl.loadClass(pluginClassName);
+            // 主插件实例若实现了 PluginConfigProvider，注册其配置 schema。
+            // @XuanJiPlugin 通常标注在内部 Commands 类，而 PluginConfigProvider 多实现在主类上；
+            // 若只在 @XuanJiPlugin 分支注册，会漏掉主类声明的配置项（如签到插件的金币/积分配置）。
+            Object pluginInstance = wrapper.getPlugin();
+            if (pluginInstance instanceof XuanJi.api.plugin.PluginConfigProvider pcp
+                    && pluginConfigService != null) {
+                pluginConfigService.register(wrapper.getPluginId(), pcp);
+            }
             if (mainClass.isAnnotationPresent(XuanJiPlugin.class)) {
                 registerIfPossible(mainClass, registry, cl, wrapper.getPluginId());
             }
@@ -329,6 +404,8 @@ public class XuanJiPluginManager extends DefaultPluginManager {
     }
 
     private void registerIfPossible(Class<?> cls, CommandRegistry registry, ClassLoader cl, String pluginId) {
+        // #4 修复：插件权限/依赖声明以往「声明后不校验、不生效」，这里做加载期可见性 + 软校验
+        validatePluginDeclaration(cls, pluginId);
         try {
             Object instance = cls.getDeclaredConstructor().newInstance();
             registry.register(instance, pluginId);
@@ -455,6 +532,32 @@ public class XuanJiPluginManager extends DefaultPluginManager {
         }
     }
 
+    /**
+     * #4 修复：插件 {@code @XuanJiPlugin} 声明的权限/依赖以往「声明后不校验、不生效」。
+     *
+     * <p>此处做<b>加载期可见性 + 软校验</b>：把声明打到日志，并对 {@code dependsOn} 的每一项尝试在
+     * 父容器查找对应 Bean（能力通常以 Spring Bean 提供），找不到则 WARN（不阻断加载，避免误伤既有插件）。
+     *
+     * <p>说明：{@code NETWORK}/{@code FILESYSTEM} 需在沙箱层拦截才真生效，超出本快速修复范围，仅做声明可见；
+     * {@code PROACTIVE_MESSAGE} 的运行时闸门将在 Bot 门面收敛（slice A）中落地。
+     */
+    private void validatePluginDeclaration(Class<?> cls, String pluginId) {
+        XuanJiPlugin ann = cls.getAnnotation(XuanJiPlugin.class);
+        if (ann == null) return;
+        if (ann.permissions().length > 0) {
+            log.info("[Plugin] {} 权限声明: {}", pluginId, java.util.Arrays.toString(ann.permissions()));
+        }
+        for (String dep : ann.dependsOn()) {
+            boolean present = parentContext != null && parentContext.containsBean(dep);
+            if (present) {
+                log.info("[Plugin] {} 依赖能力已就绪: {}", pluginId, dep);
+            } else {
+                log.warn("[Plugin] {} 声明依赖能力 '{}' 但在当前容器中找不到对应 Bean，相关功能可能在运行时失败",
+                        pluginId, dep);
+            }
+        }
+    }
+
     private void registerCommands(String id) {
         for (Object inst : pluginCommands.getOrDefault(id, List.of())) {
             commandRegistry.register(inst, id);
@@ -520,16 +623,26 @@ public class XuanJiPluginManager extends DefaultPluginManager {
         }
     }
 
-    /** 调用插件生命周期钩子（onEnable/onDisable） */
+    /** 调用插件生命周期钩子（onEnable/onDisable）+ 同步插件的 @Scheduled 定时任务 */
     private void callHook(PluginWrapper w, boolean enable) {
+        String id = w.getPluginId();
         try {
             Object p = w.getPlugin();
             if (p instanceof XuanJiPluginBase xp) {
-                if (enable) xp.onEnable();
-                else xp.onDisable();
+                if (enable) {
+                    xp.onEnable();
+                    // 启用后扫描 @Scheduled 方法并调度（传入权威 pluginId，与命令注入/取消一致）
+                    try { taskScheduler.scheduleAll(p, id); }
+                    catch (Exception e) { log.warn("[Plugin] 定时任务注册失败 ({}): {}", id, e.getMessage()); }
+                } else {
+                    // 停用前先取消定时任务，避免 onDisable 后仍触发
+                    try { taskScheduler.cancel(id); }
+                    catch (Exception e) { log.debug("[Plugin] 取消定时任务异常(可忽略): {}", e.getMessage()); }
+                    xp.onDisable();
+                }
             }
         } catch (Exception e) {
-            log.warn("[Plugin] 生命周期钩子执行异常 ({}): {}", w.getPluginId(), e.getMessage());
+            log.warn("[Plugin] 生命周期钩子执行异常 ({}): {}", id, e.getMessage());
         }
     }
 
@@ -551,6 +664,9 @@ public class XuanJiPluginManager extends DefaultPluginManager {
     @Override
     public boolean unloadPlugin(String pluginId) {
         PluginWrapper w = getPlugin(pluginId);
+        // 卸载前先取消定时任务（PF4J stopPlugin 仅触发 onUnload，不经过 callHook）
+        try { taskScheduler.cancel(pluginId); }
+        catch (Exception ignored) { /* 可忽略 */ }
         // 记录原 jar 路径（super.unloadPlugin 从仓库移除后无法再取）
         java.nio.file.Path origJar = copyingLoader != null ? copyingLoader.originalJarOf(pluginId) : null;
         AnnotationConfigApplicationContext ctx = pluginContexts.remove(pluginId);
@@ -564,6 +680,11 @@ public class XuanJiPluginManager extends DefaultPluginManager {
             // 先清扫副本（需用 originalJarPaths 映射）再 forget，避免卸载后磁盘残留到下次启动
             copyingLoader.sweepCopiesFor(pluginId);
             copyingLoader.forget(pluginId);
+        }
+        // 清理结构化存储的元数据缓存（表数据不自动 DROP，由显式 purge 处理）
+        if (pluginDataProvider != null) {
+            try { pluginDataProvider.unregister(pluginId); }
+            catch (Exception ignored) { /* 可忽略 */ }
         }
         stateStore.delete(pluginId);
         // 关键：必须调用父类，把插件从 PF4J 内部仓库移除，否则 getPlugins()/前端列表仍显示已卸载插件

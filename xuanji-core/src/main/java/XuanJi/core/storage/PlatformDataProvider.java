@@ -77,6 +77,17 @@ public interface PlatformDataProvider {
         return List.of();
     }
 
+    /**
+     * 过滤查询消息流水（控制台群/单聊消息「服务端筛选 + 分页」用）。
+     * dir(IN/OUT) / type(msg_type) / startTime / endTime(epoch 秒) / q(关键词匹配 user_id/content/group_id)。
+     * 返回 { total, dirDist:[{D,CNT}], typeDist:[{T,CNT}], rows:[按 id 倒序 limit 条] }。默认空实现，平台适配器按需覆盖。
+     */
+    default Map<String, Object> queryMessagesFiltered(String instanceId, String chatType,
+                                                      String dir, String type,
+                                                      long startTime, long endTime, String q, int limit) {
+        return Map.of();
+    }
+
     List<Map<String, Object>> listEvents(String instanceId, int limit);
 
     /**
@@ -138,7 +149,7 @@ public interface PlatformDataProvider {
      * activeBots 含 appId/name/cnt；directionDist 含 direction(IN/OUT)/cnt；
      * eventTypeDist 含 eventType/cnt；dayTrend 含 date(Y-M-D)/cnt。
      */
-    default Map<String, Object> stats(String instanceId, long sinceEpochSeconds) {
+    default Map<String, Object> stats(String instanceId, long sinceEpochSeconds, long untilEpochSeconds) {
         return Map.of();
     }
 

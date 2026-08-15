@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, h } from 'vue'
 import {
   NGrid, NGi, NCard, NStatistic, NButton, NSpace, NIcon, NText,
-  NEmpty, NTag, NDataTable, NAlert, NDivider, NTooltip,
+  NTag, NDataTable, NAlert, NDivider, NTooltip, NSwitch,
   type DataTableColumns
 } from 'naive-ui'
 import {
@@ -14,6 +14,8 @@ import {
 import api from '../api'
 import PageHero from '../components/PageHero.vue'
 import CommonChart from '../components/CommonChart.vue'
+import EmptyState from '../components/EmptyState.vue'
+import dayjs from 'dayjs'
 
 // ══════════════ 数据 ══════════════
 const overview = ref<Record<string, any>>({})
@@ -83,7 +85,7 @@ const qpsOption = computed(() => {
     grid: { left: 40, right: 16, top: 30, bottom: 28 },
     tooltip: { trigger: 'axis' },
     legend: { data: ['入站', '出站'], top: 0, itemWidth: 12, itemHeight: 8, textStyle: { fontSize: 11 } },
-    xAxis: { type: 'category', data: labels, axisLabel: { fontSize: 10, interval: 11 } },
+    xAxis: { type: 'category', data: labels, axisLabel: { fontSize: 10, interval: Math.max(1, Math.floor(labels.length / 6)) } },
     yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { type: 'dashed', opacity: 0.3 } } },
     series: [
       {
@@ -118,6 +120,12 @@ function stopTimer() {
   if (timer != null) { clearInterval(timer); timer = null }
   if (qpsTimer != null) { clearInterval(qpsTimer); qpsTimer = null }
 }
+function toggleAuto(v: boolean) {
+  autoRefresh.value = v
+  localStorage.setItem(AUTO_REFRESH_KEY, String(v))
+  if (v) startTimer()
+  else stopTimer()
+}
 onMounted(() => { load().then(startTimer); loadAlarmStats() })
 onUnmounted(() => { stopTimer() })
 
@@ -150,7 +158,7 @@ function fmtInt(v: any): string {
 function fmtAlarmTime(v: any): string {
   const n = Number(v)
   if (!isFinite(n) || n <= 0) return '—'
-  return new Date(n * 1000).toLocaleString('zh-CN', { hour12: false })
+  return dayjs(n <= 9999999999 ? n * 1000 : n).utcOffset(8).format('YYYY-MM-DD HH:mm:ss')
 }
 
 // 资源状态色
@@ -294,14 +302,16 @@ const poolCols: DataTableColumns = [
 
 <template>
   <div>
-    <NEmpty v-if="err" :description="'加载失败：' + err" style="padding: 60px 0" />
+    <EmptyState v-if="err" :description="'加载失败：' + err" />
 
     <template v-else>
       <!-- ═══════ ① 系统资源（顶部，含 WS 连接 + 熔断） ═══════ -->
       <NCard title="系统资源" class="b-card">
         <template #header-extra>
           <NSpace align="center" :size="6">
-            <NText depth="3" style="font-size: 12px">资源 30s · QPS 曲线 5s 自动刷新</NText>
+            <NText depth="3" style="font-size: 12px">自动刷新</NText>
+            <NSwitch size="small" :value="autoRefresh" @update:value="toggleAuto" />
+            <NText depth="3" style="font-size: 12px">资源 30s · QPS 曲线 5s</NText>
             <NButton size="tiny" quaternary @click="load" :loading="loading">
               <template #icon><NIcon size="13"><RefreshOutline /></NIcon></template>
               刷新
@@ -470,8 +480,8 @@ const poolCols: DataTableColumns = [
             {{ c.label }} × {{ c.val }}
           </NTag>
         </div>
-        <NDataTable v-if="alarms.length" :columns="alarmCols" :data="alarms" :bordered="false" size="small" />
-        <NEmpty v-else description="暂无异常记录" style="padding: 24px 0" />
+        <NDataTable v-if="alarms.length" :columns="alarmCols" :data="alarms" :bordered="false" size="small" :pagination="{ pageSize: 20 }" />
+        <EmptyState v-else description="暂无异常记录" />
       </NCard>
 
       <!-- ═══════ ⑤ 线程池信息 ═══════ -->
@@ -480,8 +490,8 @@ const poolCols: DataTableColumns = [
         <NText depth="3" class="sec-desc">
           框架内部各线程池/连接池的运行指标（核心数/最大数/活跃/排队/完成任务）。活跃接近最大或排队持续增长时说明处理能力吃紧，可到「运行设置 → 性能模板」调整。
         </NText>
-        <NDataTable v-if="pools.length" :columns="poolCols" :data="pools" :bordered="false" size="small" :scroll-x="1200" />
-        <NEmpty v-else description="暂无已注册的线程池（应用启动后自动注册）" style="padding: 30px 0" />
+        <NDataTable v-if="pools.length" :columns="poolCols" :data="pools" :bordered="false" size="small" :scroll-x="1200" :pagination="{ pageSize: 20 }" />
+        <EmptyState v-else description="暂无已注册的线程池（应用启动后自动注册）" />
       </NCard>
     </template>
   </div>

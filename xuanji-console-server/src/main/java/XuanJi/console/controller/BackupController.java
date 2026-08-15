@@ -28,11 +28,16 @@ public class BackupController {
         this.backupService = backupService;
     }
 
-    /** 立即备份。scope: business（业务库）| log（日志库）| all（全部，默认）。 */
+    /** 立即备份。categories 逗号分隔（framework/platform/business/logs/messages，缺省全选）；tag 用于文件名区分（如 msg）。 */
     @PostMapping("/create")
-    public Map<String, Object> create(@RequestParam(defaultValue = "all") String scope,
+    public Map<String, Object> create(@RequestParam(required = false) String categories,
+                                      @RequestParam(defaultValue = "") String tag,
                                       HttpServletRequest req) {
-        String name = backupService.create(scope, ip(req));
+        List<String> cats = (categories == null || categories.isBlank())
+                ? java.util.List.of()
+                : java.util.Arrays.stream(categories.split(","))
+                    .map(String::trim).filter(s -> !s.isEmpty()).toList();
+        String name = backupService.create(cats, tag, ip(req));
         return Map.of("status", "ok", "name", name);
     }
 

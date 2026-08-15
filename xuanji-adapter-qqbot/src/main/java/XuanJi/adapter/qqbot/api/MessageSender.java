@@ -73,14 +73,12 @@ public class MessageSender {
 
     private String getCurrentRobotId() {
         RobotContext ctx = CURRENT_CONTEXT.get();
-        if (ctx != null) return ctx.robotId;
-        // 命令/事件处理线程：优先用「当前正在处理的机器人」（CommandRegistry 事件线程绑定的 botKey=appId），
-        // 避免多机器人时命令回复/插件发送回退到第一个注册机器人（11255 同源问题）。
+        if (ctx != null && ctx.robotId != null && !ctx.robotId.isBlank()) return ctx.robotId;
+        // 命令/事件处理线程：用「当前正在处理的机器人」（事件完整内容必含机器人信息，由事件管线绑定）
         String cmdBot = XuanJi.core.command.CommandRegistry.getCurrentBotKey();
         if (cmdBot != null && !cmdBot.isBlank()) return cmdBot;
-        return robotRegistry.getAllRobots().keySet().stream()
-                .findFirst()
-                .orElseThrow(() -> new RuntimeException("没有注册的机器人"));
+        // 取不到机器人上下文 = 框架逻辑缺陷（事件未绑定机器人）。拒绝发送而非回退到第一个机器人，杜绝错发。
+        throw new IllegalStateException("无法确定当前机器人上下文（事件未绑定机器人），拒绝发送");
     }
 
     private String getCurrentEnvType() {
@@ -89,7 +87,7 @@ public class MessageSender {
         return "PRODUCTION";
     }
 
-    /** 当前上下文机器人 ID（无上下文回退第一个机器人），供统一发送出口 {@code QqXuanJiMessageSender} 使用。 */
+    /** 当前上下文机器人 ID（取不到上下文抛异常，不回退），供统一发送出口 {@code QqXuanJiMessageSender} 使用。 */
     public String currentRobotId() {
         return getCurrentRobotId();
     }

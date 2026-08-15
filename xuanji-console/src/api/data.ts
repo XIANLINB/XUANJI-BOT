@@ -2,8 +2,9 @@
 import { get, del, post } from './http'
 
 export const dataApi = {
-  // 聚合统计
-  getStats: (days = 30, botKey?: string) => get('/console/data/stats', { days, botKey: botKey || '' }),
+  // 聚合统计（startTime/endTime 为 epoch 秒，传 startTime 则用自定义范围覆盖 days）
+  getStats: (days = 30, botKey?: string, startTime?: number, endTime?: number) =>
+    get('/console/data/stats', { days, botKey: botKey || '', startTime: startTime || 0, endTime: endTime || 0 }),
   // 缓存状态（botKey 可选：机器人级项按 bot 过滤）
   getCache: (botKey?: string) => get('/console/data/cache', { botKey: botKey || '' }),
   // 缓存清理：传 categories 数组 + 可选 botKey（转 query string）

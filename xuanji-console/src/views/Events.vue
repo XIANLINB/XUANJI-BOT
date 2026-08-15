@@ -12,6 +12,7 @@ import { useBots } from '../composables/useBots'
 import dayjs from 'dayjs'
 import { exportCsv, exportJson } from '../utils/export'
 import StatCard from '../components/StatCard.vue'
+import EmptyState from '../components/EmptyState.vue'
 
 const { bots, loadBots } = useBots()
 
@@ -46,7 +47,11 @@ const RANGE_OPTIONS = [
 ]
 const filteredRows = computed(() => {
   if (!dateFilter.value) return rows.value
-  const since = dayjs().subtract(dateFilter.value, 'day').startOf('day').unix()
+  const now8 = dayjs().utcOffset(8)
+  // 今天(1)=今日 00:00；近 N 天(7/30)=N 天前 00:00（统一 UTC+8 日界）
+  const since = dateFilter.value === 1
+    ? now8.startOf('day').unix()
+    : now8.subtract(dateFilter.value, 'day').startOf('day').unix()
   return (rows.value || []).filter((r) => Number(r.CREATE_TIME) >= since)
 })
 
@@ -103,10 +108,9 @@ function fmtTime(v: unknown): string {
   if (v == null || v === '') return '—'
   const n = Number(String(v).trim())
   if (!Number.isFinite(n)) return String(v)
-  const d = new Date(n <= 9999999999 ? n * 1000 : n)
-  if (isNaN(d.getTime())) return String(v)
-  const p = (x: number) => String(x).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+  const d = dayjs(n <= 9999999999 ? n * 1000 : n)
+  if (!d.isValid()) return String(v)
+  return d.utcOffset(8).format('YYYY-MM-DD HH:mm:ss')
 }
 
 async function load() {
@@ -181,7 +185,7 @@ function textCell(v: unknown, max = 200) {
 
 // ══════ 统计卡 ══════
 const statCards = computed(() => {
-  const today0 = dayjs().startOf('day').unix()
+  const today0 = dayjs().utcOffset(8).startOf('day').unix()
   const today = rows.value.filter((r) => Number(r.CREATE_TIME) >= today0).length
   const memberEvt = rows.value.filter((r) => ['GROUP_ADD_ROBOT', 'GROUP_DEL_ROBOT', 'GROUP_MEMBER_ADD', 'GROUP_MEMBER_REMOVE'].includes(r.EVENT_TYPE)).length
   const friendEvt = rows.value.filter((r) => ['FRIEND_ADD', 'FRIEND_DEL'].includes(r.EVENT_TYPE)).length
@@ -308,10 +312,9 @@ onUnmounted(stopStream)
     </div>
 
     <NSpin :show="loading" style="min-height: 200px">
-      <NEmpty
+      <EmptyState
         v-if="!loading && !filteredRows.length"
         :description="'暂无系统事件（加群/退群/加好友等会写入）'"
-        style="padding: 48px 0"
       />
       <NDataTable
         v-else

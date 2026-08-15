@@ -27,6 +27,10 @@ export interface LlmConfig {
   visionBindings?: string[] | null
   imageBindings?: string[] | null
   ttsBindings?: string[] | null
+  videoBindings?: string[] | null
+  videoGenBindings?: string[] | null
+  voiceCloneBindings?: string[] | null
+  sttBindings?: string[] | null
   temperature: number
   maxTokens: number
   enabled: boolean
@@ -70,6 +74,7 @@ export interface LlmConfig {
   videoGenEnabled?: boolean
   ttsEnabled?: boolean
   voiceCloneEnabled?: boolean
+  sttEnabled?: boolean
   dailyReportEnabled?: boolean
   // 单聊维度
   c2cEnabled?: boolean
@@ -290,6 +295,8 @@ export const llmApi = {
 
   /** LLM 工具清单（@LlmTool） */
   tools: () => get<LlmToolInfo[]>('/console/llm/tools'),
+  /** MCP 桥接工具（source 以 mcp: 开头，后端过滤，省去前端全量拉取再筛） */
+  mcpTools: () => get<LlmToolInfo[]>('/console/llm/tools?source=mcp'),
 
   /** MCP server 列表 */
   mcpList: (botKey?: string) =>
@@ -356,15 +363,21 @@ export const llmApi = {
     get<ModelRow[]>(`/console/llm/providers-config/models?providerId=${providerId}`),
   modelSave: (m: { providerId: number; modelName: string; capabilities: string }) =>
     post<{ ok: boolean; id: number }>('/console/llm/providers-config/models', m),
+  modelUpdate: (id: number, m: { modelName: string; capabilities: string }) =>
+    post<{ ok: boolean }>(`/console/llm/providers-config/models/${id}`, m),
   modelDelete: (id: number) => del<{ ok: boolean }>(`/console/llm/providers-config/models/${id}`),
   fetchModels: (id: number) =>
     post<{ ok: boolean; models?: string[]; error?: string }>(`/console/llm/providers-config/${id}/fetch-models`),
+  testProvider: (id: number) =>
+    post<{ ok: boolean; models?: number; error?: string }>(`/console/llm/providers-config/${id}/test`),
   // 供应商多 API Key
   keyList: (providerId: number) =>
     get<ApiKeyRow[]>(`/console/llm/providers-config/keys?providerId=${providerId}`),
   keySave: (m: { providerId: number; apiKey: string; remark?: string }) =>
     post<{ ok: boolean; id: number }>('/console/llm/providers-config/keys', m),
-  keyDelete: (id: number) => del<{ ok: boolean }>(`/console/llm/providers-config/keys/${id}`)
+  keyDelete: (id: number) => del<{ ok: boolean }>(`/console/llm/providers-config/keys/${id}`),
+  keyToggle: (id: number, enabled: boolean) =>
+    post<{ ok: boolean }>(`/console/llm/providers-config/keys/${id}/toggle`, { enabled })
 }
 
 export interface ChatStreamHandlers {

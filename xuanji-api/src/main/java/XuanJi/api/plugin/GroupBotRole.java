@@ -3,7 +3,7 @@ package XuanJi.api.plugin;
 import java.util.Map;
 
 /**
- * 机器人在群内的角色（类型化封装，{@link PluginServices#getGroupBotRole}）。
+ * 机器人在群内的角色（类型化封装，{@code Bot.getGroupBotRole()}）。
  *
  * <p>来自本地库 {@code qqbot_group_robot.member_role}（查库免限频）；
  * {@code role} 取值 owner/admin/member；未同步/不在群时为空串。

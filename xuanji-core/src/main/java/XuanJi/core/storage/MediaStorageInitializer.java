@@ -16,7 +16,7 @@ import java.util.Map;
  *
  * <p>启动时从 ConfigService 读取配置并注入 {@link MediaFileDownloader}：
  * <ul>
- *   <li>全局开关 {@code media.download.enabled}（默认 false，按需开启）</li>
+ *   <li>全局开关 {@code media.download.enabled}（默认 true 开启，显式 false 关闭）</li>
  *   <li>单文件上限 {@code media.download.max_file_bytes}（默认 200MB）</li>
  *   <li>保留天数 {@code media.storage.ttl_days}（默认 7 天）</li>
  *   <li>总配额 {@code media.storage.max_bytes}（默认 4GB），超限删最旧</li>
@@ -68,7 +68,8 @@ public class MediaStorageInitializer {
     @Scheduled(fixedDelay = 30_000)
     public void refreshSwitches() {
         try {
-            boolean global = "true".equalsIgnoreCase(configService.getGlobalConfig().get("media.download.enabled"));
+            // 未配置默认开启（仅显式 "false" 时关闭）
+            boolean global = !"false".equalsIgnoreCase(configService.getGlobalConfig().get("media.download.enabled"));
             Map<String, Boolean> perBot = new LinkedHashMap<>();
             // 显式设置了 bot 级开关的机器人都纳入快照
             Map<String, Map<String, String>> botCfg = configService.getBotConfigMap();

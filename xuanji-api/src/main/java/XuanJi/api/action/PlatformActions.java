@@ -43,6 +43,29 @@ public final class PlatformActions {
     /** 入群申请列表。参数：groupOpenid、start(可选)、limit(可选)。返回：平台原始 data。 */
     public static final String GROUP_JOIN_REQUEST_LIST = "group.join_request_list";
 
+    /**
+     * 踢出群成员。参数：groupOpenid、memberOpenid。
+     * <b>注意：QQ 官方机器人开放接口不支持该能力</b>，QQ 适配器注册为「能力不支持 → 明确失败」。
+     */
+    public static final String GROUP_KICK = "group.kick";
+
+    /** 设置群成员名片（昵称）。参数：groupOpenid、memberOpenid、card。QQ 开放接口不支持 → 降级失败。 */
+    public static final String GROUP_SET_CARD = "group.set_card";
+
+    /** 设置/取消群管理员。参数：groupOpenid、memberOpenid、setAdmin(bool)。QQ 开放接口不支持 → 降级失败。 */
+    public static final String GROUP_SET_ADMIN = "group.set_admin";
+
+    /** 发布群公告。参数：groupOpenid、text（公告内容）、imageUrl(可选)。QQ 开放接口不支持 → 降级失败。 */
+    public static final String GROUP_ANNOUNCEMENT = "group.announcement";
+
+    // ──────────── 好友 / 用户 ────────────
+
+    /** 好友申请审批。参数：openid、approve(bool)、reason(可选)。 */
+    public static final String FRIEND_APPROVE = "friend.approve";
+
+    /** 查询单用户资料。参数：openid。返回：平台原始 data（如昵称、头像）。 */
+    public static final String USER_INFO = "user.info";
+
     // ──────────── 群查询（已实现未暴露） ────────────
 
     /** 群禁言状态（restrict_chat_setting）。参数：groupOpenid。返回：平台原始 data。 */

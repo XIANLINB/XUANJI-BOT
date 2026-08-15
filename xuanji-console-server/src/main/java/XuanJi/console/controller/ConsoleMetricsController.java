@@ -237,10 +237,19 @@ public class ConsoleMetricsController {
     public Map<String, Object> versionLog() {
         List<Map<String, Object>> versions = new ArrayList<>();
 
+        // ── v1.3.4 控制台展示优化 + 能力收口 + 运行时兜底（2026-08-15）──
+        versions.add(versionEntry("v1.3.4", "2026-08-15", "正式版",
+                List.of(
+                        "优化 web 控制台展示效果：全站主题统一（品牌色/字号/密度）、个性化设置页（主题模式/品牌色/字号/密度/侧边栏三态/默认首页/时间格式/动效/操作确认/导入导出）、ECharts 图表主题随主题联动、空态组件统一",
+                        "动作能力接口统一：MessageSender 移除「无上下文回退第一个机器人」、动作能力接口收敛为类型化对象",
+                        "添加更多的动作和实现：群管理动作（禁言/审批/入群申请）、富媒体上传发送（图片/语音/视频/本地文件）",
+                        "框架运行时兜底机制：登录失败限速与锁定、setup 白名单安装后动态回收、插件定时任务 Future 泄漏修复、结构化数据库查询（替代自由 SQL）",
+                        "添加更多的数据类型和常量枚举：PluginEntity/PluginColumn/ColumnType/Page/PageReq/Query 等插件数据结构与常量枚举")));
+
         // ── v1.3.2 插件市场实装 + 插件信息类型化（2026-08-13）──
         versions.add(versionEntry("v1.3.2", "2026-08-13", "正式版",
                 List.of(
-                        "插件市场实装：CNB 公开 git 仓库中央插件库（浏览 / 上传 / 审核 / 一键安装），审核台隐藏入口（左下角版本号彩蛋）+ 管理员令牌验证，仓库地址不出后端",
+                        "插件市场实装：CNB 公开 git 仓库中央插件库（浏览 / 上传 / 审核 / 一键安装）",
                         "插件信息类型化：入群申请 JoinRequest / 群信息 GroupInfo / 成员 / 群状态等全部封装为类型化对象，插件告别裸 JSON")));
 
         // ── v1.3.1 入群申请审批能力（2026-08-12）──
@@ -324,7 +333,7 @@ public class ConsoleMetricsController {
                         "控制台最早形态：登录引导 / 基础页面框架")));
 
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("current", "v1.3.2");
+        m.put("current", "v1.3.4");
         m.put("versions", versions);
         return m;
     }

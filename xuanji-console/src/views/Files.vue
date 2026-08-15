@@ -7,10 +7,10 @@
  * - 类型占用分布 ECharts 环形图（byTypeSize 字节）
  * - 媒体为框架级共享存储（data/xuanji/media，内容哈希去重），不区分机器人
  */
-import { ref, computed, onMounted, h } from 'vue'
+import { ref, computed, onMounted, h, watch } from 'vue'
 import {
-  NCard, NButton, NSpace, NIcon, NText, NTag, NDataTable, NSelect, NEmpty,
-  NModal, NAlert, NStatistic, NGrid, NGi, NProgress, NPopconfirm, useMessage
+  NCard, NButton, NSpace, NIcon, NText, NTag, NDataTable, NSelect, NInput,
+  NModal, NAlert, NStatistic, NGrid, NGi, NProgress, NPopconfirm, NPagination, useMessage
 } from 'naive-ui'
 import {
   FolderOpenOutline, RefreshOutline, TrashOutline, ImageOutline, MicOutline,
@@ -19,6 +19,7 @@ import {
 } from '@vicons/ionicons5'
 import PageHero from '../components/PageHero.vue'
 import CommonChart from '../components/CommonChart.vue'
+import EmptyState from '../components/EmptyState.vue'
 import api from '../api'
 import dayjs from 'dayjs'
 
@@ -28,6 +29,17 @@ const clearing = ref(false)
 const files = ref<any[]>([])
 const summary = ref<Record<string, any>>({ total: 0, sizeBytes: 0, quotaBytes: 4 * 1024 * 1024 * 1024, byType: {}, byTypeSize: {} })
 const typeFilter = ref<'all' | 'image' | 'voice' | 'video' | 'file'>('all')
+const search = ref('')
+const sortKey = ref<'mtime' | 'size' | 'path'>('mtime')
+const sortDesc = ref(true)
+const page = ref(1)
+const pageSize = ref(20)
+
+const sortOptions = [
+  { label: '按修改时间', value: 'mtime' },
+  { label: '按大小', value: 'size' },
+  { label: '按文件名', value: 'path' }
+]
 
 const showDelete = ref(false)
 const deleting = ref<any>(null)
@@ -42,8 +54,29 @@ const TYPE_META: Record<string, { label: string; color: string; icon: any }> = {
   file:  { label: '文件', color: '#888780', icon: DocumentOutline }
 }
 
-const filtered = computed(() =>
-  typeFilter.value === 'all' ? files.value : files.value.filter((f: any) => f.type === typeFilter.value))
+// Q3：类型筛选 + 关键词搜索 + 排序
+const filtered = computed(() => {
+  let rows = typeFilter.value === 'all' ? files.value : files.value.filter((f: any) => f.type === typeFilter.value)
+  const q = search.value.trim().toLowerCase()
+  if (q) {
+    rows = rows.filter((f: any) =>
+      String(f.path || '').toLowerCase().includes(q) ||
+      String(f.type || '').toLowerCase().includes(q))
+  }
+  const sorted = [...rows].sort((a: any, b: any) => {
+    let r = 0
+    if (sortKey.value === 'size') r = (Number(a.size) || 0) - (Number(b.size) || 0)
+    else if (sortKey.value === 'mtime') r = (Number(a.mtime) || 0) - (Number(b.mtime) || 0)
+    else r = String(a.path || '').localeCompare(String(b.path || ''))
+    return sortDesc.value ? -r : r
+  })
+  return sorted
+})
+const pagedFiles = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return filtered.value.slice(start, start + pageSize.value)
+})
+watch(filtered, () => { page.value = 1 })
 
 // ============ 配额 ============
 const quota = computed(() => Number(summary.value.quotaBytes || 4 * 1024 * 1024 * 1024))
@@ -79,7 +112,7 @@ function fmtSize(n: number): string {
   return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB'
 }
 function fmtTime(t: number): string {
-  return t > 0 ? dayjs(t * 1000).format('YYYY-MM-DD HH:mm') : '—'
+  return t > 0 ? dayjs(t * 1000).utcOffset(8).format('YYYY-MM-DD HH:mm') : '—'
 }
 
 const typeOptions = [
@@ -200,6 +233,9 @@ onMounted(load)
   <div>
     <PageHero title="文件存储" subtitle="媒体本地存储 · 在线预览 · 按类型清理（磁盘管理闭环）" :icon="FolderOpenOutline">
       <NSelect v-model:value="typeFilter" :options="typeOptions" size="small" style="width: 130px" />
+      <NInput v-model:value="search" placeholder="搜索文件名 / 类型" clearable size="small" style="width: 160px" />
+      <NSelect v-model:value="sortKey" :options="sortOptions" size="small" style="width: 120px" />
+      <NButton size="small" quaternary @click="sortDesc = !sortDesc">{{ sortDesc ? '↓ 降序' : '↑ 升序' }}</NButton>
       <NButton secondary :loading="loading" @click="load">
         <template #icon><NIcon><RefreshOutline /></NIcon></template>
         刷新
@@ -230,7 +266,7 @@ onMounted(load)
             <NIcon size="22" color="#fa8c16"><DocumentOutline /></NIcon>
             <div class="stat-meta">
               <div class="stat-label">总占用</div>
-              <NStatistic :value="fmtSize(used)" style="--n-value-font-size: 22px" />
+              <NText style="font-size:22px;font-weight:600">{{ fmtSize(used) }}</NText>
             </div>
           </div>
         </NCard>
@@ -268,7 +304,7 @@ onMounted(load)
             <NText depth="3" style="font-size:11.5px">各类型文件占用磁盘字节</NText>
           </template>
           <CommonChart v-if="Object.keys(summary.byTypeSize || {}).length" :option="typeSizeOption" height="240px" />
-          <NEmpty v-else description="暂无文件" style="padding: 40px 0" />
+          <EmptyState v-else description="暂无文件" />
         </NCard>
       </NGi>
       <NGi span="24 m:15">
@@ -320,8 +356,20 @@ onMounted(load)
           </NTag>
         </NSpace>
       </template>
-      <NDataTable :columns="columns" :data="filtered" :bordered="false" size="small" :loading="loading" :row-key="(r: any) => r.path" />
-      <NEmpty v-if="!loading && !filtered.length" description="暂无媒体文件" style="padding: 30px 0" />
+      <NDataTable :columns="columns" :data="pagedFiles" :bordered="false" size="small" :loading="loading" :row-key="(r: any) => r.path" />
+      <EmptyState v-if="!loading && !filtered.length" description="暂无媒体文件" />
+      <NSpace v-if="pagedFiles.length" justify="end" align="center" style="margin-top: 12px">
+        <NPagination
+          :page="page"
+          :page-size="pageSize"
+          :item-count="filtered.length"
+          :page-sizes="[20, 50, 100]"
+          show-size-picker
+          size="small"
+          @update:page="(p: number) => page = p"
+          @update:page-size="(s: number) => { pageSize = s; page = 1 }"
+        />
+      </NSpace>
     </NCard>
 
     <!-- ═══ 预览弹窗 ═══ -->

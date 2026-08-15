@@ -23,6 +23,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 /**
@@ -59,6 +60,12 @@ public class QqXuanJiMessageSender implements XuanJiMessageSender, XuanJi.api.ad
     private final MessageSender messageSender;
     private final XuanJi.api.action.PlatformActionHub hub;
     private final XuanJi.adapter.qqbot.storage.QqBotRepository qqBotRepository;
+
+    /** 群信息短缓存 TTL：60 秒内重复查询直接命中，避免高频调 QQ 群信息接口（约 1 QPS 限频）。 */
+    private static final long GROUP_INFO_CACHE_TTL_MS = 60_000;
+
+    /** 群信息 60s 短缓存（key = appId:groupOpenid）。 */
+    private final Map<String, GroupInfoCache> groupInfoCache = new ConcurrentHashMap<>();
 
     public QqXuanJiMessageSender(MessageSender messageSender, XuanJi.api.action.PlatformActionHub hub,
                                  XuanJi.adapter.qqbot.storage.QqBotRepository qqBotRepository) {
@@ -103,13 +110,19 @@ public class QqXuanJiMessageSender implements XuanJiMessageSender, XuanJi.api.ad
     @Override
     public Map<String, PlatformActionHandler> actions() {
         Map<String, PlatformActionHandler> m = new LinkedHashMap<>();
-        // 群基本信息（原始报文转 Map）
-        m.put(PlatformActions.GROUP_INFO,
-                p -> safeGet(() -> toMap(messageSender.getGroupInfo(str(p, "groupOpenid")))));
-        // 群本地档案（查 qqbot_group 表，不调平台 API，避免限频；供插件提示等高频场景）
+        // 群基本信息（查 QQ 最新 + 写表 + 60s 短缓存）
+        m.put(PlatformActions.GROUP_INFO, p -> groupInfoCached(str(p, "groupOpenid")));
+        // 群本地档案（优先复用 60s 缓存；未命中则查 qqbot_group 表，不调平台 API，避免限频）
         m.put(PlatformActions.GROUP_LOCAL_INFO, p -> {
+            String groupOpenid = str(p, "groupOpenid");
+            Map<String, Object> cached = peekGroupInfoCache(groupOpenid);
+            if (cached != null) {
+                return Map.of("found", true,
+                        "group_name", cached.get("group_name") == null ? "" : String.valueOf(cached.get("group_name")),
+                        "member_count", cached.get("group_member_num") == null ? "" : String.valueOf(cached.get("group_member_num")));
+            }
             java.util.Map<String, Object> g = qqBotRepository.getGroupInfo(
-                    messageSender.currentRobotId(), str(p, "groupOpenid"));
+                    messageSender.currentRobotId(), groupOpenid);
             if (g == null) return Map.of("found", false);
             return Map.of("found", true,
                     "group_name", g.get("GROUP_NAME") == null ? "" : String.valueOf(g.get("GROUP_NAME")),
@@ -298,6 +311,66 @@ public class QqXuanJiMessageSender implements XuanJiMessageSender, XuanJi.api.ad
         } catch (Exception e) {
             log.warn("[QQ动作] 执行失败: {}", e.getMessage());
             return null;
+        }
+    }
+
+    /** 查 QQ 最新群信息：命中 60s 缓存直接返回；未命中则调接口 + 写表 + 回填缓存。 */
+    private Map<String, Object> groupInfoCached(String groupOpenid) {
+        if (groupOpenid == null || groupOpenid.isBlank()) return null;
+        String key = messageSender.currentRobotId() + ":" + groupOpenid;
+        GroupInfoCache c = groupInfoCache.get(key);
+        if (c != null && c.fresh()) {
+            return c.data;
+        }
+        Map<String, Object> data = safeGet(() -> toMap(messageSender.getGroupInfo(groupOpenid)));
+        if (data != null) {
+            groupInfoCache.put(key, new GroupInfoCache(data));
+            writeGroupInfo(messageSender.currentRobotId(), groupOpenid, data);
+        }
+        return data;
+    }
+
+    /** 仅当有新鲜缓存时返回缓存数据，否则 null（供 GROUP_LOCAL_INFO 复用，不触发平台 API）。 */
+    private Map<String, Object> peekGroupInfoCache(String groupOpenid) {
+        if (groupOpenid == null || groupOpenid.isBlank()) return null;
+        String key = messageSender.currentRobotId() + ":" + groupOpenid;
+        GroupInfoCache c = groupInfoCache.get(key);
+        return (c != null && c.fresh()) ? c.data : null;
+    }
+
+    /** 群信息写表：复用 GroupProfileSync 的字段映射（group_name/member_num/finger_memo/class_text/tags）。 */
+    private void writeGroupInfo(String appId, String groupOpenid, Map<String, Object> d) {
+        try {
+            String name = str(d, "group_name");
+            String fingerMemo = str(d, "group_finger_memo");
+            String classText = str(d, "group_class_text");
+            String tags = d.get("group_tags") == null ? null : String.valueOf(d.get("group_tags"));
+            Object memberNum = d.get("group_member_num");
+            int memberCount = memberNum instanceof Number n ? n.intValue()
+                    : (memberNum == null ? 0 : Integer.parseInt(String.valueOf(memberNum)));
+            if (name == null && fingerMemo == null && classText == null && memberCount == 0) {
+                return;
+            }
+            qqBotRepository.upsertGroup(appId, groupOpenid, name, null,
+                    memberCount > 0 ? memberCount : null, null, "active",
+                    fingerMemo, classText, tags);
+            qqBotRepository.ensureGroupJoinTime(appId, groupOpenid, System.currentTimeMillis() / 1000);
+            log.debug("[群信息写表] 已更新群档案: group={}, name={}, members={}", groupOpenid, name, memberCount);
+        } catch (Exception e) {
+            log.debug("[群信息写表] 失败 group={}: {}", groupOpenid, e.getMessage());
+        }
+    }
+
+    /** 群信息 60s 短缓存条目。 */
+    private static final class GroupInfoCache {
+        final Map<String, Object> data;
+        final long ts;
+        GroupInfoCache(Map<String, Object> data) {
+            this.data = data;
+            this.ts = System.currentTimeMillis();
+        }
+        boolean fresh() {
+            return System.currentTimeMillis() - ts < GROUP_INFO_CACHE_TTL_MS;
         }
     }
 
@@ -603,29 +676,6 @@ public class QqXuanJiMessageSender implements XuanJiMessageSender, XuanJi.api.ad
         }
     }
 
-    /**
-     * 设置群成员禁言（QQ 官方 restrict_chat_setting，seconds&lt;=0 解除禁言）。
-     * 调用前需由调用方绑定机器人上下文（runWith），否则回退第一个机器人。
-     */
-    @Override
-    public XuanJiSendReceipt mute(XuanJiTarget.Group group, String userId, int seconds) {
-        long t0 = System.currentTimeMillis();
-        try {
-            String robotId = messageSender.currentRobotId();
-            String envType = messageSender.currentEnvType();
-            String op = seconds > 0 ? "add" : "del";
-            String expire = seconds > 0
-                    ? fmtRfc3339(System.currentTimeMillis() / 1000 + seconds)
-                    : "";
-            ObjectNode resp = messageSender.setGroupMute(
-                    robotId, envType, group.groupOpenid(), userId, op, expire);
-            return receipt(resp, t0);
-        } catch (Exception e) {
-            log.warn("[QQ发送] 禁言失败: {}", e.getMessage());
-            return XuanJiSendReceipt.fail(e.getMessage(), System.currentTimeMillis() - t0);
-        }
-    }
-
     /** epoch 秒 → RFC3339 带时区字符串（restrict_chat_setting 的 mute_expire_at 格式）。 */
     private static String fmtRfc3339(long epochSec) {
         return OffsetDateTime.ofInstant(Instant.ofEpochSecond(epochSec), ZoneId.systemDefault())
@@ -664,22 +714,4 @@ public class QqXuanJiMessageSender implements XuanJiMessageSender, XuanJi.api.ad
         return null;
     }
 
-    /**
-     * 入群申请审批（requestId 传申请者 member_openid，target 为群）。
-     * 调用前需由调用方绑定机器人上下文（runWith）。
-     */
-    @Override
-    public XuanJiSendReceipt approve(XuanJiTarget target, String requestId, boolean accept) {
-        long t0 = System.currentTimeMillis();
-        if (!(target instanceof XuanJiTarget.Group g)) {
-            return XuanJiSendReceipt.fail("仅支持群入群审批", System.currentTimeMillis() - t0);
-        }
-        try {
-            ObjectNode resp = messageSender.approveGroupJoinRequest(g.groupOpenid(), requestId, null, accept, null, null);
-            return receipt(resp, t0);
-        } catch (Exception e) {
-            log.warn("[QQ发送] 入群审批失败: {}", e.getMessage());
-            return XuanJiSendReceipt.fail(e.getMessage(), System.currentTimeMillis() - t0);
-        }
-    }
 }

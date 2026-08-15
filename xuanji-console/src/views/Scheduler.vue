@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, h, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, h, nextTick } from 'vue'
 import {
   NCard, NButton, NSpace, NIcon, NText, NTag, NDataTable, NModal, NForm, NFormItem,
-  NInput, NSelect, NSwitch, NDrawer, NDrawerContent, NEmpty, NAlert, NSpin,
+  NInput, NSelect, NSwitch, NDrawer, NDrawerContent, NAlert, NSpin,
   NRadioGroup, NRadioButton, NStatistic, NGrid, NGi, NDatePicker, useMessage
 } from 'naive-ui'
 import {
@@ -12,17 +12,20 @@ import {
 import PageHero from '../components/PageHero.vue'
 import CommonChart from '../components/CommonChart.vue'
 import CronBuilder from '../components/CronBuilder.vue'
+import EmptyState from '../components/EmptyState.vue'
 import api from '../api'
 import dayjs from 'dayjs'
 import { groupName, userName } from '../utils/names'
 import { useContactsStore } from '../stores/contacts'
+import { useBotsStore } from '../stores/bots'
 
 const message = useMessage()
 
 const loading = ref(false)
 const rows = ref<any[]>([])
-const bots = ref<any[]>([])
-// 群/单聊联系人收拢到 Pinia（批次11）
+// 机器人 / 群 / 单聊联系人统一收拢到 Pinia
+const botsStore = useBotsStore()
+const bots = computed(() => botsStore.bots)
 const contacts = useContactsStore()
 const groups = computed(() => contacts.groups)
 const friends = computed(() => contacts.friends)
@@ -100,15 +103,29 @@ const repeatModeOptions = [
   { label: '仅一次', value: 'one_shot' }
 ]
 
-/** 仅一次：根据时间戳生成 cron（秒 分 时 日 月 *），并同步到 form.cron 与后台预览。 */
+/** 仅一次：根据时间戳生成 Spring 6 段 cron（秒 分 时 日 月 周，秒固定 0，UTC+8 墙钟），并同步到 form.cron。 */
 function buildOneShotCron(epochMs: number): string {
-  const d = new Date(epochMs)
-  const s = String(d.getSeconds()).padStart(2, '0')
-  const m = String(d.getMinutes()).padStart(2, '0')
-  const h = String(d.getHours()).padStart(2, '0')
-  const dd = String(d.getDate()).padStart(2, '0')
-  const mo = String(d.getMonth() + 1).padStart(2, '0')
-  return `0 ${s} ${m} ${h} ${dd} ${mo} *`
+  const d = dayjs(epochMs).utcOffset(8)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `0 ${p(d.minute())} ${p(d.hour())} ${p(d.date())} ${p(d.month() + 1)} *`
+}
+
+/** 从 one_shot 的 cron（0 分 时 日 月 *）反推时间戳（UTC+8 墙钟），编辑回显用；非法/缺字段返回 null。 */
+function oneShotFromCron(cron: string): number | null {
+  const parts = (cron || '').trim().split(/\s+/)
+  let minute: number, hour: number, day: number, month: number
+  if (parts.length >= 6) {
+    minute = Number(parts[1]); hour = Number(parts[2]); day = Number(parts[3]); month = Number(parts[4])
+  } else if (parts.length === 5) {
+    minute = Number(parts[0]); hour = Number(parts[1]); day = Number(parts[2]); month = Number(parts[3])
+  } else {
+    return null
+  }
+  if (![minute, hour, day, month].every(n => Number.isFinite(n))) return null
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || day < 1 || day > 31 || month < 1 || month > 12) return null
+  let d = dayjs().utcOffset(8).month(month - 1).date(day).hour(hour).minute(minute).second(0).millisecond(0)
+  if (d.valueOf() < Date.now()) d = d.add(1, 'year')
+  return d.valueOf()
 }
 
 /** 重复模式变化时同步 cron：cron 模式恢复默认（若 form.cron 是"空/上次缓存的一次性"）；one_shot 模式按 oneShotAt 算。 */
@@ -184,7 +201,7 @@ async function load() {
   loading.value = true
   try {
     rows.value = await api.listJobs()
-    bots.value = await api.getBots()
+    await botsStore.loadBots()
     await contacts.loadContacts()
     await loadAnalysis()
   } catch (e: any) {
@@ -197,7 +214,7 @@ async function load() {
 function fmtTime(v: any): string {
   const n = Number(v)
   if (!isFinite(n) || n <= 0) return '—'
-  return dayjs(n * 1000).format('MM-DD HH:mm')
+  return dayjs(n * 1000).utcOffset(8).format('MM-DD HH:mm')
 }
 
 const typeTag: Record<string, { label: string; type: 'info' | 'warning' | 'default' }> = {
@@ -212,15 +229,19 @@ function targetText(r: any): string {
   return `${plat} · ${kind} ${r.targetId}`
 }
 
-// ═══════════ cron 预览 ═══════════
+// ═══════════ cron 预览（400ms 防抖，避免击键高频请求） ═══════════
+let cronTimer: number | null = null
 watch(
   () => form.value.cron,
-  async (cron) => {
+  (cron) => {
+    if (cronTimer !== null) clearTimeout(cronTimer)
     if (!cron || !/^[0-9*?/#,\- ]+$/.test(cron)) { cronNext.value = null; return }
-    try {
-      const r = await api.cronPreview(cron)
-      cronNext.value = r.valid ? r.nextRun : null
-    } catch { cronNext.value = null }
+    cronTimer = window.setTimeout(async () => {
+      try {
+        const r = await api.cronPreview(cron)
+        cronNext.value = r.valid ? r.nextRun : null
+      } catch { cronNext.value = null }
+    }, 400)
   },
   { immediate: true }
 )
@@ -242,9 +263,11 @@ function openEdit(r: any) {
   suppressBotReset = true   // 回显 targetId 时抑制机器人切换清理
   // 兼容老任务（DB 列不存在时 repeatMode 是 undefined）默认 cron
   const rm = (r.repeatMode === 'one_shot' || r.repeatMode === 'cron') ? r.repeatMode : 'cron'
+  // 仅一次任务：从 cron 反推执行时间回显，避免时间丢失 / 保存时报「请选择单次执行时间」
+  const oneShotAt = rm === 'one_shot' ? oneShotFromCron(r.cron) : null
   form.value = {
     name: r.name, jobType: r.jobType, cron: r.cron,
-    repeatMode: rm, oneShotAt: null,
+    repeatMode: rm, oneShotAt,
     targetPlatform: r.targetPlatform || 'qqbot', targetBot: r.targetBot || '',
     targetType: r.targetType || 'GROUP', targetId: r.targetId || '',
     content: r.content || '', remark: r.remark || ''
@@ -298,13 +321,17 @@ async function toggle(r: any, enabled: boolean) {
   }
 }
 
+const runningId = ref<number | null>(null)
 async function run(r: any) {
+  runningId.value = r.id
   try {
     const res = await api.runJob(r.id)
     if (res.status === 'ok') message.success('已触发执行')
     else message.error(res.msg || '触发失败')
   } catch (e: any) {
     message.error((e?.message ?? e))
+  } finally {
+    runningId.value = null
   }
 }
 
@@ -352,7 +379,7 @@ const historyLoading = ref(false)
 
 function jobStateTag(r: any) {
   if (r.deleted) return h(NTag, { size: 'tiny', bordered: false, type: 'default' }, { default: () => '已删除' })
-  if (r.enabled) return h(NTag, { size: 'tiny', bordered: false, type: 'success' }, { default: () => '进行中' })
+  if (r.enabled) return h(NTag, { size: 'tiny', bordered: false, type: 'success' }, { default: () => '已启用' })
   return h(NTag, { size: 'tiny', bordered: false, type: 'warning' }, { default: () => '已停用' })
 }
 
@@ -454,7 +481,7 @@ const columns = [
     title: '操作', key: 'op', width: 150,
     render: (r: any) => h(NSpace, { size: 4 }, { default: () => [
       h(NButton, { size: 'tiny', secondary: true, onClick: () => openEdit(r) }, { default: () => '编辑' }),
-      h(NButton, { size: 'tiny', tertiary: true, onClick: () => run(r) }, { default: () => '执行' }),
+      h(NButton, { size: 'tiny', tertiary: true, loading: runningId.value === r.id, disabled: runningId.value === r.id, onClick: () => run(r) }, { default: () => '执行' }),
       h(NButton, { size: 'tiny', tertiary: true, onClick: () => openLogs(r) }, { default: () => '日志' }),
       h(NButton, { size: 'tiny', type: 'error', ghost: true, onClick: () => askDelete(r) }, { default: () => '删除' })
     ] })
@@ -479,6 +506,9 @@ const analysisCols = [
 ]
 
 onMounted(load)
+onUnmounted(() => {
+  if (cronTimer !== null) clearTimeout(cronTimer)
+})
 </script>
 
 <template>
@@ -507,7 +537,7 @@ onMounted(load)
     <NGrid :cols="24" :x-gap="12" :y-gap="12" responsive="screen" item-responsive style="margin-bottom: 14px">
       <NGi :span="4"><NCard :bordered="true"><NStatistic label="任务总数" :value="analysis.jobTotal ?? 0" /></NCard></NGi>
       <NGi :span="4"><NCard :bordered="true"><NStatistic label="启用中" :value="analysis.jobEnabled ?? 0"><template #suffix><NText depth="3" style="font-size: 12px">个</NText></template></NStatistic></NCard></NGi>
-      <NGi :span="4"><NCard :bordered="true"><NStatistic label="累计成功率" :value="analysis.successRate ?? 100"><template #suffix><NText depth="3" style="font-size: 12px">%</NText></template></NStatistic></NCard></NGi>
+      <NGi :span="4"><NCard :bordered="true"><NStatistic label="累计成功率" :value="analysis.successRate != null ? analysis.successRate : '—'"><template #suffix><NText v-if="analysis.successRate != null" depth="3" style="font-size: 12px">%</NText></template></NStatistic></NCard></NGi>
       <NGi :span="4"><NCard :bordered="true"><NStatistic label="今日执行" :value="analysis.todayRuns ?? 0"><template #suffix><NText depth="3" style="font-size: 12px">次</NText></template></NStatistic></NCard></NGi>
       <NGi :span="4"><NCard :bordered="true"><NStatistic label="今日失败" :value="analysis.todayFails ?? 0"><template #suffix><NText depth="3" style="font-size: 12px">次</NText></template></NStatistic></NCard></NGi>
       <NGi :span="4"><NCard :bordered="true"><NStatistic label="今日平均耗时" :value="analysis.todayAvgMs ?? 0"><template #suffix><NText depth="3" style="font-size: 12px">ms</NText></template></NStatistic></NCard></NGi>
@@ -540,13 +570,13 @@ onMounted(load)
         size="small"
         :row-key="(r: any) => r.jobId"
       />
-      <NEmpty v-if="!(analysis.perJob || []).length" description="暂无执行记录（任务触发后出现）" style="padding: 24px 0" />
+      <EmptyState v-if="!(analysis.perJob || []).length" description="暂无执行记录（任务触发后出现）" />
     </NCard>
 
     <NCard :bordered="true">
       <NSpin :show="loading">
         <NDataTable :columns="columns" :data="rows" :bordered="false" size="small" :row-key="(r: any) => r.id" />
-        <NEmpty v-if="!loading && !rows.length" description="暂无定时任务，点右上角「新建任务」创建" style="padding: 32px 0" />
+        <EmptyState v-if="!loading && !rows.length" description="暂无定时任务，点右上角「新建任务」创建" />
       </NSpin>
     </NCard>
 
@@ -762,7 +792,7 @@ onMounted(load)
           :bordered="false"
           size="small"
         />
-        <NEmpty v-else description="暂无执行记录（任务触发后出现）" style="padding: 32px 0" />
+        <EmptyState v-else description="暂无执行记录（任务触发后出现）" />
       </NDrawerContent>
     </NDrawer>
 
@@ -793,8 +823,9 @@ onMounted(load)
             :bordered="false"
             size="small"
             :row-key="(r: any) => r.id"
+            :pagination="{ pageSize: 20 }"
           />
-          <NEmpty v-if="!historyLoading && !historyRows.length" description="暂无历史任务" style="padding: 40px 0" />
+          <EmptyState v-if="!historyLoading && !historyRows.length" description="暂无历史任务" />
         </NSpin>
       </NDrawerContent>
     </NDrawer>

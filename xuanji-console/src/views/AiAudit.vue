@@ -1,20 +1,30 @@
 <script setup lang="ts">
 import { ref, onMounted, h } from 'vue'
 import { useMessage } from 'naive-ui'
-import { NCard, NButton, NDataTable, NTag, NIcon, NEmpty, NSpin, NAlert } from 'naive-ui'
-import { ShieldCheckmarkOutline, RefreshOutline } from '@vicons/ionicons5'
+import { NCard, NButton, NDataTable, NTag, NIcon, NSpin, NAlert } from 'naive-ui'
+import { ShieldCheckmarkOutline, RefreshOutline, DownloadOutline } from '@vicons/ionicons5'
 import api from '../api'
 import type { AuditLogRow } from '../api/llm'
 import PageHero from '../components/PageHero.vue'
+import EmptyState from '../components/EmptyState.vue'
+import dayjs from 'dayjs'
 
 const message = useMessage()
 const logs = ref<AuditLogRow[]>([])
 const loading = ref(false)
+const auditLimit = ref(100)
+
+/** 时间（后端 UTC/ISO）→ UTC+8 展示。 */
+function fmtSubTime(v: unknown): string {
+  if (v == null || v === '') return '—'
+  const d = dayjs(String(v))
+  return d.isValid() ? d.utcOffset(8).format('YYYY-MM-DD HH:mm:ss') : String(v)
+}
 
 async function load() {
   loading.value = true
   try {
-    logs.value = (await api.llmApi.auditLogs(100)) || []
+    logs.value = (await api.llmApi.auditLogs(auditLimit.value)) || []
   } catch (e: any) {
     message.error('加载拦截记录失败: ' + (e.message || e))
   } finally {
@@ -22,10 +32,15 @@ async function load() {
   }
 }
 
+function loadMore() {
+  auditLimit.value += 100
+  load()
+}
+
 const columns = [
-  { title: '时间', key: 'createdAt', width: 160 },
-  { title: '群', key: 'groupId', width: 200 },
-  { title: '用户', key: 'userId', width: 120 },
+  { title: '时间', key: 'createdAt', width: 160, render: (r: AuditLogRow) => fmtSubTime(r.createdAt) },
+  { title: '群', key: 'groupId', width: 200, ellipsis: { tooltip: true } },
+  { title: '用户', key: 'userId', width: 120, ellipsis: { tooltip: true } },
   { title: '结果', key: 'action', width: 90, render: (r: AuditLogRow) =>
       r.action === 'BLOCK'
         ? h(NTag, { size: 'small', type: 'error' }, { default: () => '拦截' })
@@ -53,8 +68,12 @@ onMounted(load)
 
     <NCard :bordered="true" title="审核记录">
       <NSpin :show="loading">
-        <NEmpty v-if="!loading && logs.length === 0" description="暂无审核记录（未开启审核或尚无消息）" />
-        <NDataTable v-else :columns="columns" :data="logs" :row-key="(r: AuditLogRow) => r.id" :bordered="false" />
+        <EmptyState v-if="!loading && logs.length === 0" description="暂无审核记录（未开启审核或尚无消息）" />
+        <NDataTable v-else :columns="columns" :data="logs" :row-key="(r: AuditLogRow) => r.id" :bordered="false" :pagination="{ pageSize: 20 }" />
+        <NButton v-if="logs.length > 0 && logs.length >= auditLimit" size="small" secondary style="margin-top: 8px" @click="loadMore">
+          <template #icon><NIcon><DownloadOutline /></NIcon></template>
+          加载更多
+        </NButton>
       </NSpin>
     </NCard>
   </div>

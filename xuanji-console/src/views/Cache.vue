@@ -7,13 +7,14 @@
 import { ref, computed, onMounted, watch, h } from 'vue'
 import {
   NCard, NButton, NSpace, NIcon, NText, NTag, NAlert, NModal, NCheckbox,
-  NEmpty, NSpin, NSelect, useMessage
+  NSpin, NSelect, useMessage
 } from 'naive-ui'
 import {
   ServerOutline, PeopleOutline, DocumentTextOutline, ImageOutline,
   TrashOutline, RefreshOutline, AlertCircleOutline
 } from '@vicons/ionicons5'
 import PageHero from '../components/PageHero.vue'
+import EmptyState from '../components/EmptyState.vue'
 import api from '../api'
 import { useBotsStore } from '../stores/bots'
 
@@ -49,25 +50,34 @@ async function load() {
   }
 }
 
-// 缓存项定义（与后端 DataCenterController cache() 返回的 keys 一致）
-const items = computed(() => {
-  const list = [
-    { key: 'dedup', icon: ServerOutline, iconColor: '#5b5bd6' },
-    { key: 'sessions', icon: PeopleOutline, iconColor: '#18a058' },
-    { key: 'frameworkLog', icon: DocumentTextOutline, iconColor: '#f0a020' },
-    { key: 'auditLog', icon: DocumentTextOutline, iconColor: '#722ed1' },
-    { key: 'eventLog', icon: AlertCircleOutline, iconColor: '#13c2c2' },
-    { key: 'schedulerLog', icon: DocumentTextOutline, iconColor: '#5b8def' },
-    { key: 'blacklistLog', icon: AlertCircleOutline, iconColor: '#9aa0a6' },
-    { key: 'alertRecord', icon: AlertCircleOutline, iconColor: '#e5484d' },
-    { key: 'messages', icon: ServerOutline, iconColor: '#5b5bd6' },
-    { key: 'mediaFiles', icon: ImageOutline, iconColor: '#fa8c16' }
-  ]
-  return list.map(it => ({
-    ...it,
-    ...(cache.value[it.key] || { name: it.key, source: '', level: 'safe', scope: 'framework', desc: '', rows: 0 })
-  }))
-})
+// 图标/颜色映射（key → icon + color），未知 key 用默认图标（Q5：动态遍历后端返回的 keys）
+const ICON_MAP: Record<string, { icon: any; color: string }> = {
+  dedup: { icon: ServerOutline, color: '#5b5bd6' },
+  sessions: { icon: PeopleOutline, color: '#18a058' },
+  frameworkLog: { icon: DocumentTextOutline, color: '#f0a020' },
+  auditLog: { icon: DocumentTextOutline, color: '#722ed1' },
+  eventLog: { icon: AlertCircleOutline, color: '#13c2c2' },
+  schedulerLog: { icon: DocumentTextOutline, color: '#5b8def' },
+  blacklistLog: { icon: AlertCircleOutline, color: '#9aa0a6' },
+  alertRecord: { icon: AlertCircleOutline, color: '#e5484d' },
+  opLog: { icon: DocumentTextOutline, color: '#2080f0' },
+  messages: { icon: ServerOutline, color: '#5b5bd6' },
+  mediaFiles: { icon: ImageOutline, color: '#fa8c16' }
+}
+const DEFAULT_ICON = { icon: ServerOutline, color: '#86909c' }
+
+// 动态遍历后端返回的 keys，前端仅做图标/颜色映射
+const items = computed(() =>
+  Object.entries(cache.value || {}).map(([key, val]: [string, any]) => {
+    const meta = ICON_MAP[key] || DEFAULT_ICON
+    return {
+      key,
+      icon: meta.icon,
+      iconColor: meta.color,
+      ...(val || { name: key, source: '', level: 'safe', scope: 'framework', desc: '', rows: 0 })
+    }
+  })
+)
 
 const totalRows = computed(() => items.value.reduce((s, it) => s + Number(it.rows || 0), 0))
 const selectedItems = computed(() => items.value.filter(it => selected.value.includes(it.key)))
@@ -93,6 +103,11 @@ function toggleAll() {
 }
 function clearSelection() {
   selected.value = []
+}
+function toggleItem(key: string) {
+  selected.value = selected.value.includes(key)
+    ? selected.value.filter(k => k !== key)
+    : [...selected.value, key]
 }
 
 async function confirmClear() {
@@ -190,11 +205,9 @@ onMounted(() => {
             :key="it.key"
             class="item-card"
             :class="{ selected: selected.includes(it.key), caution: it.level === 'caution', lossy: it.level === 'lossy' }"
+            @click="toggleItem(it.key)"
           >
-            <NCheckbox
-              :checked="selected.includes(it.key)"
-              @update:checked="(v: boolean) => selected = v ? [...selected, it.key] : selected.filter(k => k !== it.key)"
-            />
+            <NCheckbox :checked="selected.includes(it.key)" />
             <div class="item-icon" :style="{ background: it.iconColor + '15', color: it.iconColor }">
               <NIcon size="22"><component :is="it.icon" /></NIcon>
             </div>
@@ -214,7 +227,7 @@ onMounted(() => {
             </div>
           </div>
         </div>
-        <NEmpty v-if="!items.length" description="暂无缓存项" style="padding: 40px 0" />
+        <EmptyState v-if="!items.length" description="暂无缓存项" />
       </NSpin>
     </NCard>
 
@@ -230,6 +243,7 @@ onMounted(() => {
           <NTag :bordered="false" :type="levelMeta[it.level]?.type ?? 'default'" size="tiny">
             {{ levelMeta[it.level]?.label ?? it.level }}
           </NTag>
+          <NTag v-if="it.level === 'caution'" :bordered="false" type="error" size="tiny">清理后不可恢复</NTag>
         </div>
       </div>
       <template #footer>

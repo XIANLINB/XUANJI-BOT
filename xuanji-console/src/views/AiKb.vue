@@ -3,20 +3,31 @@ import { ref, computed, onMounted, h } from 'vue'
 import { useMessage } from 'naive-ui'
 import {
   NCard, NButton, NSpace, NSelect, NInput, NDataTable, NModal, NForm, NFormItem,
-  NIcon, NPopconfirm, NEmpty, NSpin, NTag, NAlert, NText, NUpload
+  NIcon, NPopconfirm, NSpin, NTag, NAlert, NText, NUpload
 } from 'naive-ui'
 import { LibraryOutline, AddOutline, TrashOutline, SearchOutline, DocumentTextOutline } from '@vicons/ionicons5'
 import api from '../api'
 import type { KbDocRow } from '../api/llm'
 import PageHero from '../components/PageHero.vue'
+import EmptyState from '../components/EmptyState.vue'
+import dayjs from 'dayjs'
+import { useBotsStore } from '../stores/bots'
+import { renderMarkdown } from '../utils/markdown'
 
 const message = useMessage()
-const bots = ref<any[]>([])
+const botsStore = useBotsStore()
 const botKey = ref<string>('')
 const docs = ref<KbDocRow[]>([])
 const loading = ref(false)
 
-const botOpts = computed(() => bots.value.map(b => ({ label: b.name || b.botKey || b.appId || '', value: b.botKey || b.appId || '' })))
+const botOpts = computed(() => botsStore.bots.map(b => ({ label: b.name || b.botKey || b.appId || '', value: b.botKey || b.appId || '' })))
+
+/** 时间（后端 UTC/ISO）→ UTC+8 展示。 */
+function fmtSubTime(v: unknown): string {
+  if (v == null || v === '') return '—'
+  const d = dayjs(String(v))
+  return d.isValid() ? d.utcOffset(8).format('YYYY-MM-DD HH:mm:ss') : String(v)
+}
 
 const showModal = ref(false)
 const docName = ref('')
@@ -41,10 +52,10 @@ async function load() {
 
 async function loadBots() {
   try {
-    bots.value = (await api.getBots()) || []
-    if (bots.value.length > 0) botKey.value = bots.value[0].botKey || bots.value[0].appId || ''
+    await botsStore.loadBots()
+    if (botsStore.bots.length > 0) botKey.value = botsStore.bots[0].botKey || botsStore.bots[0].appId || ''
   } catch {
-    bots.value = []
+    // 忽略
   }
 }
 
@@ -72,6 +83,11 @@ async function handleFileUpload({ file, onFinish, onError }: any) {
   try {
     const raw = file.file as File
     if (!raw) return
+    if (raw.size > 100 * 1024 * 1024) {
+      message.error('文件超过 100MB 上限')
+      onError()
+      return
+    }
     const res = await api.llmApi.kbUploadFile(botKey.value, raw)
     if (res && res.ok) {
       message.success(`已上传「${res.name || raw.name}」到知识库`)
@@ -98,7 +114,7 @@ async function remove(r: KbDocRow) {
 }
 
 async function search() {
-  if (!q.value.trim()) return
+  if (!q.value.trim()) { message.warning('请输入检索问题'); return }
   searching.value = true
   try {
     const res = await api.llmApi.kbSearch(botKey.value, q.value.trim())
@@ -115,7 +131,7 @@ const columns = [
   { title: '名称', key: 'name', ellipsis: { tooltip: true }, render: (r: KbDocRow) => r.name || '—' },
   { title: '字符数', key: 'charCount', width: 90 },
   { title: '分段数', key: 'chunkCount', width: 90 },
-  { title: '上传时间', key: 'createdAt', width: 160 },
+  { title: '上传时间', key: 'createdAt', width: 160, render: (r: KbDocRow) => fmtSubTime(r.createdAt) },
   { title: '操作', key: 'actions', width: 80, render: (r: KbDocRow) =>
       h(NPopconfirm, { onPositiveClick: () => remove(r) }, {
         trigger: () => h(NButton, { size: 'tiny', type: 'error', secondary: true }, { default: () => '删除' }),
@@ -143,8 +159,8 @@ onMounted(async () => {
 
     <NCard :bordered="true">
       <NSpin :show="loading">
-        <NEmpty v-if="!loading && docs.length === 0" description="暂无文档，点击「上传文档」添加（支持 txt/md 文本）" />
-        <NDataTable v-else :columns="columns" :data="docs" :row-key="(r: KbDocRow) => r.id" :bordered="false" />
+        <EmptyState v-if="!loading && docs.length === 0" description="暂无文档，点击「上传文档」添加（支持 txt/md 文本）" />
+        <NDataTable v-else :columns="columns" :data="docs" :row-key="(r: KbDocRow) => r.id" :bordered="false" :pagination="{ pageSize: 20 }" />
       </NSpin>
     </NCard>
 
@@ -157,7 +173,7 @@ onMounted(async () => {
         </NButton>
       </NSpace>
       <NAlert v-if="searchResult" type="info" :bordered="false" class="result" :show-icon="false">
-        <NText depth="2" style="white-space: pre-wrap">{{ searchResult }}</NText>
+        <div class="kb-result" v-html="renderMarkdown(searchResult)"></div>
       </NAlert>
     </NCard>
 
@@ -197,4 +213,9 @@ onMounted(async () => {
 .result {
   margin-top: 12px;
 }
+.kb-result { font-size: 13px; line-height: 1.7; word-break: break-word; }
+.kb-result :deep(p) { margin: 0 0 6px; }
+.kb-result :deep(pre) { background: rgba(0, 0, 0, 0.05); padding: 8px; border-radius: 6px; overflow: auto; }
+.kb-result :deep(code) { background: rgba(0, 0, 0, 0.05); padding: 1px 4px; border-radius: 4px; font-size: 12px; }
+.kb-result :deep(ul), .kb-result :deep(ol) { padding-left: 18px; margin: 4px 0; }
 </style>

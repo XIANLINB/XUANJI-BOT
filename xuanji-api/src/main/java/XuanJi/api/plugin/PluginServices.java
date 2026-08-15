@@ -1,12 +1,10 @@
 package XuanJi.api.plugin;
 
-import XuanJi.api.message.XuanJiMessage;
-import XuanJi.api.sender.XuanJiSendReceipt;
-
-import java.util.List;
-
 /**
- * 插件能力门面 — 插件访问框架服务（LLM / 群管 / 主动发送）的统一入口。
+ * 插件能力门面 — 插件访问框架服务（仅 LLM 对话）的统一入口。
+ *
+ * <p>群管 / 主动发送 / 平台查询等能力已统一收敛到 {@link XuanJi.sdk.bot.Bot} 门面，
+ * 插件命令方法声明 {@code Bot} 参数即可由框架自动注入（携带当前事件上下文）。
  *
  * <p>插件命令方法声明本类型参数即由框架自动注入（与 {@link PluginStorage} 同理）：
  * <pre>
@@ -14,159 +12,12 @@ import java.util.List;
  *       return svc.chat(e.getPlainText());
  *   }
  * </pre>
- *
- * <p><b>botKey 参数约定</b>：群管/主动发送需要绑定具体机器人上下文（多机器人时必填，
- * 可用空串让框架回退到第一个机器人）。LLM 对话使用全局配置的默认供应商/模型。
  */
 public interface PluginServices {
-
-    // ──────────── LLM 能力 ────────────
 
     /** 单轮对话（用户消息），使用全局配置默认模型。 */
     String chat(String user);
 
     /** 带系统指令的单轮对话。 */
     String chat(String system, String user);
-
-    // ──────────── 主动发送 ────────────
-
-    /** 主动向群发送消息链（需绑定 botKey）。 */
-    XuanJiSendReceipt sendToGroup(String botKey, String groupOpenid, XuanJiMessage chain);
-
-    /** 主动向私聊发送消息链（需绑定 botKey）。 */
-    XuanJiSendReceipt sendToPrivate(String botKey, String openid, XuanJiMessage chain);
-
-    // ──────────── 群管（需绑定 botKey） ────────────
-
-    /**
-     * 入群申请审批。
-     *
-     * @param botKey        机器人标识（空串回退第一个机器人）
-     * @param groupOpenid   目标群 openid
-     * @param memberOpenid  申请者 openid
-     * @param joinRequestId 申请 ID（必填；来自入群申请事件 {@code getJoinRequestInfo().joinRequestId}，
-     *                      审批令牌定位用；无则传 null 交给平台报错）
-     * @param approve       true=同意入群 false=拒绝
-     * @param reason        拒绝理由（拒绝时可选）
-     * @return 执行结果（含成功提示或失败原因，可面向用户）
-     */
-    OpResult approveGroupJoin(String botKey, String groupOpenid, String memberOpenid, String joinRequestId,
-                              boolean approve, String reason);
-
-    /**
-     * 入群申请列表（类型化返回）。
-     *
-     * @param botKey      机器人标识
-     * @param groupOpenid 目标群 openid
-     * @return 入群申请列表（含 next_cursor）；平台不支持或失败时返回空列表
-     * @see JoinRequestList JoinRequestList
-     */
-    JoinRequestList listGroupJoinRequests(String botKey, String groupOpenid);
-
-    /**
-     * 群成员禁言（单目标）。
-     *
-     * <p>时长参数为<b>分钟</b>（分钟→秒的换算由平台适配器内部完成，插件无需 ×60）。
-     *
-     * @param minutes 禁言分钟数（&lt;=0 解除禁言）
-     * @return 执行结果（成功含禁言时长/解除提示；失败含具体原因，如
-     *         机器人不是群管理、不能禁言群主/管理员/其他机器人、参数不合法等）
-     */
-    OpResult muteGroupMember(String botKey, String groupOpenid, String memberOpenid, int minutes);
-
-    /**
-     * 批量群成员禁言（支持多个目标：可传 {@code Mention} 列表的 userId，
-     * 或插件自己收集的 memberOpenid 列表）。
-     *
-     * <p>每个目标独立执行（一个失败不影响其它），返回汇总结果：
-     * 成功 N 人、失败明细（成员 + 原因）。已解除/机器人类目标的过滤由调用方（插件）
-     * 按消息字段自行处理，框架只负责执行与结果汇总。
-     *
-     * @param memberOpenids 目标成员 openid 列表（非空；单个目标请用 {@link #muteGroupMember}）
-     * @param minutes       禁言分钟数（&lt;=0 解除禁言）
-     * @return 汇总结果（含成功数与失败明细）
-     */
-    OpResult muteGroupMembers(String botKey, String groupOpenid, List<String> memberOpenids, int minutes);
-
-    /** 撤回群消息。 */
-    OpResult recallGroupMessage(String botKey, String groupOpenid, String msgId);
-
-    /**
-     * 撤回群内某成员最近 N 条消息（框架负责查库与校验）。
-     *
-     * <p>框架内部完成：① 校验机器人必须为群管理；② 查该成员最近 {@code count} 条入站消息；
-     * ③ 逐条判断是否在 2 分钟撤回窗口内（超时跳过）；④ 撤回成功并标记已撤回。
-     *
-     * @param count 撤回条数（默认 1，上限 50）
-     * @return 汇总结果（成功条数 / 跳过条数与原因，如超 2 分钟、平台拒绝）
-     */
-    OpResult recallRecentMessages(String botKey, String groupOpenid, String memberOpenid, int count);
-
-    /** 撤回群内某成员最近 1 条消息（框架默认条数=1）。 */
-    OpResult recallRecentMessages(String botKey, String groupOpenid, String memberOpenid);
-
-    /** 撤回单聊消息。 */
-    OpResult recallPrivateMessage(String botKey, String openid, String msgId);
-
-    // ──────────── 平台信息查询 ────────────
-
-    /**
-     * 查询群基本信息（远程平台接口，实时）。
-     *
-     * @param botKey       机器人标识（空串回退第一个机器人）
-     * @param groupOpenid  目标群 openid
-     * @return 群信息；平台不支持或失败时返回 null
-     */
-    GroupInfo getGroupInfo(String botKey, String groupOpenid);
-
-    /**
-     * 查询群本地档案（查平台库，不调远程接口，避免限频）。
-     * 适用于高频场景（如入群/退群提示）。
-     *
-     * @return 群信息（{@code found=false} 表示本地无档案）
-     */
-    GroupInfo getLocalGroupInfo(String botKey, String groupOpenid);
-
-    /**
-     * 查询机器人在群内的状态（远程平台接口）。
-     *
-     * @return 机器人群内状态（{@code botState}: 1=正常 2=被移出 3=群解散 4=被禁言；
-     *         {@code isOnline()} 即 botState==1）；平台不支持或失败时返回 null
-     */
-    BotGroupState getBotGroupState(String botKey, String groupOpenid);
-
-    /**
-     * 查询群禁言状态（restrict_chat_setting 接口）。
-     *
-     * @return 群禁言状态（{@code isMuted()} 快速判断）；平台不支持或失败时返回 null
-     */
-    GroupMuteStatus getGroupMuteStatus(String botKey, String groupOpenid);
-
-    /**
-     * 列出群成员（查本地库，不调远程接口，避免限频）。
-     *
-     * @return 成员列表；平台不支持或失败时返回空列表
-     */
-    List<GroupMember> listGroupMembers(String botKey, String groupOpenid);
-
-    /**
-     * 列出机器人所在群（查本地库）。
-     *
-     * @return 群列表；平台不支持或失败时返回空列表
-     */
-    List<GroupInfo> listGroups(String botKey);
-
-    /**
-     * 查询机器人在群内的角色（查本地库；owner/admin/member）。
-     *
-     * @return 机器人角色（{@code isManager()/isOwner()/isAdmin()} 便捷判断）；平台不支持或失败时返回 null
-     */
-    GroupBotRole getGroupBotRole(String botKey, String groupOpenid);
-
-    /**
-     * 列出单聊用户（查本地库）。
-     *
-     * @return 用户列表；平台不支持或失败时返回空列表
-     */
-    List<UserInfo> listUsers(String botKey);
 }

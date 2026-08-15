@@ -14,10 +14,11 @@ import {
   StorefrontOutline, KeyOutline, ArchiveOutline, TimeOutline,
   StatsChartOutline, TrashOutline, FolderOpenOutline, WarningOutline,
   ChatbubblesOutline, SparklesOutline, LibraryOutline, NewspaperOutline,
-  BookOutline
+  BookOutline, ClipboardOutline
 } from '@vicons/ionicons5'
 import { routes } from '../router'
 import api from '../api'
+import { usePreferencesStore } from '../stores/preferences'
 import { brand } from '../theme'
 
 const brandColor = brand.primary
@@ -37,12 +38,14 @@ const iconMap: Record<string, Component> = {
   files: FolderOpenOutline,
   'center-admin': RocketOutline,
   qqbot: RocketOutline,
+  'group-op-log': ClipboardOutline,
   groups: PeopleOutline,
   friends: PersonOutline,
   'group-messages': ChatbubbleOutline,
   'c2c-messages': ChatbubbleOutline,
   'plugin-admin': ExtensionPuzzleOutline,
   'plugin-market': StorefrontOutline,
+  'plugin-review': ShieldCheckmarkOutline,
   'ops-admin': PulseOutline,
   events: FlashOutline,
   audit: ShieldCheckmarkOutline,
@@ -54,6 +57,7 @@ const iconMap: Record<string, Component> = {
   scheduler: TimeOutline,
   health: PulseOutline,
   settings: SettingsOutline,
+  preferences: ColorPaletteOutline,
   logs: DocumentTextOutline,
   tune: StatsChartOutline,
   monitor: ChatbubblesOutline,
@@ -102,6 +106,12 @@ const guideItem: MenuOption = {
   icon: renderIcon(BookOutline)
 }
 
+const reviewItem: MenuOption = {
+  label: '插件审核',
+  key: 'plugin-review',
+  icon: renderIcon(ShieldCheckmarkOutline)
+}
+
 // 注意：必须 computed——pluginMenuItems 更新后菜单要能重新构建（否则扫描出新插件菜单不刷新）
 const menuOptions = computed<MenuOption[]>(() =>
   routes
@@ -112,9 +122,9 @@ const menuOptions = computed<MenuOption[]>(() =>
         key: r.name as string,
         icon: renderIcon(iconMap[r.name as string] ?? GridOutline)
       }
-      // 插件管理：子菜单 = 插件市场 + 每个插件一个页面（扫描入口已移到市场页）
+      // 插件管理：子菜单 = 插件市场 + 插件审核 + 每个插件一个页面（扫描入口已移到市场页）
       if (r.name === 'plugin-admin') {
-        item.children = [marketItem, guideItem, ...pluginMenuItems.value]
+        item.children = [marketItem, reviewItem, guideItem, ...pluginMenuItems.value]
         return item
       }
       const children = r.children?.filter((c) => c.name && c.meta?.title)
@@ -173,22 +183,18 @@ async function logout() {
   router.replace('/login')
 }
 
-const collapsed = ref(false)
-
-// ===== 版本号彩蛋：10 秒内点击左下角 v1.0 共 6 次 → 解锁插件市场审核台 =====
-const UNLOCK_KEY = 'xuanji_audit_unlocked'
-const verClicks = ref<number[]>([])
-function onVerClick() {
-  const now = Date.now()
-  verClicks.value.push(now)
-  verClicks.value = verClicks.value.filter((t) => now - t <= 10000)
-  if (verClicks.value.length >= 6) {
-    verClicks.value = []
-    sessionStorage.setItem(UNLOCK_KEY, '1')
-    window.dispatchEvent(new Event('xuanji-audit-unlocked'))
-    // 无提示：静默解锁（审核台入口保持隐蔽）
-  }
-}
+// 侧边栏三态：expanded / collapsed / auto（悬停展开），由个性化设置驱动
+const prefs = usePreferencesStore()
+const hoverExpand = ref(false)
+const collapsed = computed(() => {
+  if (prefs.prefs.sidebarMode === 'expanded') return false
+  if (prefs.prefs.sidebarMode === 'collapsed') return true
+  // auto：常态折叠，鼠标悬停时展开
+  return !hoverExpand.value
+})
+// 用户手动折叠/展开 → 同步到 preferences 持久化
+function onCollapse() { prefs.update({ sidebarMode: 'collapsed' }) }
+function onExpand() { prefs.update({ sidebarMode: 'expanded' }) }
 
 onMounted(loadPluginsMenu)
 // 每次导航刷新插件菜单（插件市场扫描/卸载后，菜单能同步新增/移除插件页面）
@@ -218,8 +224,10 @@ watch(
       :width="232"
       :collapsed="collapsed"
       show-trigger
-      @collapse="collapsed = true"
-      @expand="collapsed = false"
+      @collapse="onCollapse"
+      @expand="onExpand"
+      @mouseenter="hoverExpand = true"
+      @mouseleave="hoverExpand = false"
     >
       <div class="sider">
         <div class="brand">
@@ -263,7 +271,7 @@ watch(
               </template>
               框架运行中
             </NTooltip>
-            <span v-if="!collapsed" class="ver" @click="onVerClick">v1.0</span>
+            <span v-if="!collapsed" class="ver">v1.0</span>
           </div>
         </div>
       </div>

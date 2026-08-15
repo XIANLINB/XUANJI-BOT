@@ -21,7 +21,7 @@ import java.util.Set;
 /**
  * 供应商 / 模型管理 —— 多供应商（DeepSeek / 智谱 / 小米 / Fish…）+ 多模型能力管理。
  *
- * <p>供应商表存凭据（baseUrl/apiKey），模型表存模型名 + 能力位（CHAT/VISION/IMAGE_GEN/TTS）。
+ * <p>供应商表存凭据（baseUrl/apiKey），模型表存模型名 + 能力位（CHAT/IMAGE_UNDERSTAND/IMAGE_GEN/TTS 等，见 LlmCapability 枚举）。
  * AI 设置页按能力选择「供应商 + 模型」，运行时各能力服务从本服务解析凭据与模型名。
  *
  * <p>支持从 OpenAI 兼容供应商自动拉取模型列表（GET {baseUrl}/models）。
@@ -77,16 +77,24 @@ public class ProviderService {
     public long saveProvider(Long id, String name, String providerType, String baseUrl, String apiKey, Integer status) {
         int st = status == null ? 1 : status;
         // api_key 始终加密；base_url 是否加密受配置开关 encryptBaseUrl 控制（默认不加密，其为公开端点）
-        String encApiKey = LlmCredentialCipher.encrypt(apiKey);
         boolean encBase = configStore.get().isEncryptBaseUrl();
         String encBaseUrl = encBase ? LlmCredentialCipher.encrypt(baseUrl) : baseUrl;
         if (id != null && id > 0) {
-            jdbc.update("""
-                UPDATE xuanji_llm_provider SET name=?, provider_type=?, base_url=?, api_key=?, status=? WHERE id=?
-                """, name, providerType, encBaseUrl, encApiKey, st, id);
+            if (apiKey == null || apiKey.isBlank()) {
+                // 编辑留空 = 保留原 key（仅更新 name/type/baseUrl/status）
+                jdbc.update("""
+                    UPDATE xuanji_llm_provider SET name=?, provider_type=?, base_url=?, status=? WHERE id=?
+                    """, name, providerType, encBaseUrl, st, id);
+            } else {
+                String encApiKey = LlmCredentialCipher.encrypt(apiKey);
+                jdbc.update("""
+                    UPDATE xuanji_llm_provider SET name=?, provider_type=?, base_url=?, api_key=?, status=? WHERE id=?
+                    """, name, providerType, encBaseUrl, encApiKey, st, id);
+            }
             log.info("[PROVIDER] 供应商已更新: id={}, name={}", id, name);
             return id;
         }
+        String encApiKey = LlmCredentialCipher.encrypt(apiKey == null ? "" : apiKey);
         jdbc.update("""
             INSERT INTO xuanji_llm_provider (name, provider_type, base_url, api_key, status)
             VALUES (?, ?, ?, ?, ?)
@@ -159,6 +167,11 @@ public class ProviderService {
         jdbc.update("DELETE FROM xuanji_llm_api_key WHERE id = ?", id);
     }
 
+    /** 启用/停用某个 API Key（停用后不再参与轮询容灾）。 */
+    public void setKeyEnabled(long id, boolean enabled) {
+        jdbc.update("UPDATE xuanji_llm_api_key SET enabled = ? WHERE id = ?", enabled ? 1 : 0, id);
+    }
+
     // ════════════ 模型 ════════════
 
     public List<Map<String, Object>> listModels(long providerId) {
@@ -188,6 +201,22 @@ public class ProviderService {
 
     public void deleteModel(long id) {
         jdbc.update("DELETE FROM xuanji_llm_model WHERE id = ?", id);
+    }
+
+    /** 更新模型（名称 + 能力位）。 */
+    public void updateModel(long id, String modelName, String capabilities) {
+        jdbc.update("UPDATE xuanji_llm_model SET model_name = ?, capabilities = ? WHERE id = ?",
+                modelName, capabilities, id);
+    }
+
+    /** 测试供应商连接（GET {baseUrl}/models，复用拉取逻辑的凭据解析）。 */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> testProvider(long providerId) {
+        Object r = fetchModels(providerId);
+        if (r instanceof Map<?, ?> m && m.containsKey("models")) {
+            return Map.of("ok", true, "models", ((java.util.List<?>) m.get("models")).size());
+        }
+        return Map.of("ok", false, "error", String.valueOf(r));
     }
 
     // ════════════ 能力绑定解析 ════════════

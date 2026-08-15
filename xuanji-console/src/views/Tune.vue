@@ -1,19 +1,22 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useMessage } from 'naive-ui'
+import { useMessage, useDialog } from 'naive-ui'
 import {
-  NCard, NButton, NSpace, NIcon, NText, NTag, NEmpty, NDivider, NInput,
+  NCard, NButton, NSpace, NIcon, NText, NTag, NDivider, NInput,
   NRadioGroup, NRadioButton, NSpin, NAlert, NModal, NGrid, NGi, NTooltip
 } from 'naive-ui'
 import {
   SettingsOutline, InformationCircleOutline, StatsChartOutline,
-  DownloadOutline, RefreshOutline
+  DownloadOutline, RefreshOutline, CopyOutline
 } from '@vicons/ionicons5'
 import { systemApi } from '../api/system'
 import api from '../api'
 import PageHero from '../components/PageHero.vue'
+import EmptyState from '../components/EmptyState.vue'
+import dayjs from 'dayjs'
 
 const message = useMessage()
+const dialog = useDialog()
 
 // ═══════════════════ 三档模板选择 ═══════════════════
 const tuneMode = ref<'eco' | 'sport' | 'perf'>('eco')
@@ -93,7 +96,16 @@ async function loadTune() {
   }
 }
 
-async function applyTuneMode() {
+function applyTuneMode() {
+  dialog.warning({
+    title: '应用性能模板',
+    content: `确认应用「${tuneMode.value}」模板？出站节奏立即生效，线程池参数需重启框架。`,
+    positiveText: '应用',
+    negativeText: '取消',
+    onPositiveClick: doApplyTune
+  })
+}
+async function doApplyTune() {
   tuneApplying.value = true
   try {
     const r = await api.applyTune(tuneMode.value)
@@ -133,23 +145,25 @@ async function doRestart() {
   }
 }
 
+const startScriptContent = ref('')
+const showScriptModal = ref(false)
 async function showStartScript() {
   try {
-    const content = await systemApi.getStartScript()
-    message.info('脚本已加载（按 F12 查看 response）', { duration: 3000 })
-    console.log('[Start.sh]\n' + content)
-    await navigator.clipboard.writeText(content)
-    message.success('start.sh 已复制到剪贴板，粘贴到 JAR 同目录即可使用')
+    startScriptContent.value = await systemApi.getStartScript()
+    showScriptModal.value = true
   } catch (e: any) {
     message.error('获取脚本失败：' + (e?.message ?? e))
   }
 }
-
-function fmtDetected(ms: any): string {
-  const n = Number(ms)
-  if (!isFinite(n) || n <= 0) return '—'
-  return new Date(n).toLocaleTimeString('zh-CN', { hour12: false })
+async function copyScript() {
+  try {
+    await navigator.clipboard.writeText(startScriptContent.value)
+    message.success('start.sh 已复制到剪贴板')
+  } catch {
+    message.error('复制失败')
+  }
 }
+
 function fmtTuneInt(v: any): string {
   const n = Number(v)
   return isFinite(n) && n >= 0 ? String(n) : '—'
@@ -157,7 +171,8 @@ function fmtTuneInt(v: any): string {
 function fmtAppliedAt(ms: any): string {
   const n = Number(ms)
   if (!isFinite(n) || n <= 0) return '—'
-  return new Date(n).toLocaleString('zh-CN', { hour12: false })
+  // 兼容 epoch 秒 / 毫秒两种单位
+  return dayjs(n <= 9999999999 ? n * 1000 : n).utcOffset(8).format('YYYY-MM-DD HH:mm:ss')
 }
 
 onMounted(loadTune)
@@ -435,10 +450,25 @@ onMounted(loadTune)
               </NSpace>
             </div>
           </template>
-          <NEmpty v-else description="模板加载中…" style="padding: 24px 0" />
+          <EmptyState v-else description="模板加载中…" />
         </NSpin>
       </NSpace>
     </template>
+
+    <!-- ═══════ start.sh 脚本弹窗 ═══════ -->
+    <NModal v-model:show="showScriptModal" preset="card" title="start.sh 守护脚本" style="width: 640px; max-width: 94vw">
+      <NText depth="3" style="font-size: 12px; display: block; margin-bottom: 10px">将脚本保存为 JAR 同目录的 start.sh，用于崩溃/重启后自动拉起框架。</NText>
+      <pre class="script-box">{{ startScriptContent }}</pre>
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="showScriptModal = false">关闭</NButton>
+          <NButton type="primary" @click="copyScript">
+            <template #icon><NIcon><CopyOutline /></NIcon></template>
+            复制脚本
+          </NButton>
+        </NSpace>
+      </template>
+    </NModal>
 
     <!-- ═══════ 重启框架确认弹窗 ═══════ -->
     <NModal v-model:show="showRestartModal" preset="card" title="一键重启框架" style="width: 500px" :mask-closable="false">
@@ -609,5 +639,16 @@ onMounted(loadTune)
   padding-left: 18px;
   line-height: 1.8;
   font-size: 13px;
+}
+.script-box {
+  background: #1d2129;
+  color: #e6e8eb;
+  padding: 12px;
+  border-radius: 8px;
+  overflow: auto;
+  font-family: ui-monospace, "JetBrains Mono", Consolas, monospace;
+  font-size: 12px;
+  max-height: 420px;
+  white-space: pre;
 }
 </style>

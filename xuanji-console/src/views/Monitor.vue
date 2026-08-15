@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useMessage } from 'naive-ui'
 import {
-  NButton, NIcon, NText, NTag, NEmpty, NScrollbar, NSpin, NAvatar,
+  NButton, NIcon, NText, NTag, NEmpty, NScrollbar, NSpin, NAvatar, NVirtualList,
   NModal, NDivider, NInput, NTooltip, NAlert, NUpload, NRadioGroup,
   NRadioButton, useThemeVars
 } from 'naive-ui'
@@ -76,34 +76,36 @@ function sessionKey(type: 'group' | 'c2c', id: string, bot: string): string {
   return `${type}:${bot}:${id}`
 }
 
+// 时间统一 UTC+8 口径（与 Dashboard/Stats 一致），避免本地时区导致「今天/昨天」错位
 function fmtTime(sec: any): string {
   const n = Number(sec)
   if (!isFinite(n) || n <= 0) return '—'
-  const d = dayjs(n * 1000)
-  if (d.isSame(dayjs(), 'day')) return d.format('HH:mm')
-  if (d.isSame(dayjs().subtract(1, 'day'), 'day')) return '昨天'
-  if (d.isSame(dayjs(), 'year')) return d.format('MM-DD')
+  const d = dayjs(n * 1000).utcOffset(8)
+  const now = dayjs().utcOffset(8)
+  if (d.isSame(now, 'day')) return d.format('HH:mm')
+  if (d.isSame(now.subtract(1, 'day'), 'day')) return '昨天'
+  if (d.isSame(now, 'year')) return d.format('MM-DD')
   return d.format('YYYY-MM-DD')
 }
 
 function fmtTimeFull(sec: any): string {
   const n = Number(sec)
   if (!isFinite(n) || n <= 0) return ''
-  const d = dayjs(n * 1000)
-  if (d.isSame(dayjs(), 'day')) return d.format('HH:mm:ss')
+  const d = dayjs(n * 1000).utcOffset(8)
+  if (d.isSame(dayjs().utcOffset(8), 'day')) return d.format('HH:mm:ss')
   return d.format('MM-DD HH:mm:ss')
 }
 
 function fmtChatTime(sec: any): string {
   const n = Number(sec)
   if (!isFinite(n) || n <= 0) return ''
-  return dayjs(n * 1000).format('YYYY-MM-DD HH:mm:ss')
+  return dayjs(n * 1000).utcOffset(8).format('YYYY-MM-DD HH:mm:ss')
 }
 
 function fmtTodayDivider(sec: any): string {
   const n = Number(sec)
   if (!isFinite(n) || n <= 0) return ''
-  return dayjs(n * 1000).format('MM-DD HH:mm')
+  return dayjs(n * 1000).utcOffset(8).format('MM-DD HH:mm')
 }
 
 function isOut(m: any): boolean {
@@ -132,6 +134,29 @@ function isMarkdown(m: any): boolean {
 }
 function isMedia(m: any): boolean {
   return isImage(m) || isVideo(m) || isVoice(m)
+}
+/** 消息稳定 ID（数据库自增主键 id，乐观消息用 _id 兜底）。Q5 去重依据。 */
+function msgId(m: any): string {
+  return String(m.ID ?? m.id ?? m._id ?? '')
+}
+/** 按时间升序（早→晚），用于合并后排序保证聊天顺序。 */
+function byTime(a: any, b: any): number {
+  return Number(a.CREATE_TIME ?? a.create_time ?? 0) - Number(b.CREATE_TIME ?? b.create_time ?? 0)
+}
+/** 媒体加载失败集合：加载失败后回退为「[类型] 链接」文案，避免空白。 */
+const mediaFailedSet = ref<Set<string>>(new Set())
+function mediaKey(m: any): string {
+  return msgId(m) || (String(m.CREATE_TIME ?? m.create_time ?? '') + ':' + msgContent(m).slice(0, 24))
+}
+function isMediaFailed(m: any): boolean { return mediaFailedSet.value.has(mediaKey(m)) }
+function markMediaFailed(m: any) {
+  const s = new Set(mediaFailedSet.value); s.add(mediaKey(m)); mediaFailedSet.value = s
+}
+/** 媒体渲染地址：QQ 富媒体原始 URL 无法浏览器直连，统一走后端同源代理（Q12）。 */
+function mediaSrc(content: string): string {
+  if (!content) return ''
+  if (content.startsWith('data:') || content.startsWith('/')) return content
+  return '/xuanji/api/v1/console/media?ref=' + encodeURIComponent(content)
 }
 
 function senderName(m: any): string {
@@ -261,29 +286,26 @@ async function loadSessions() {
 
 async function loadPreviews() {
   const list = sessions.value.slice(0)
-  // 并发拉最新预览（限并发避免过载）
-  const chunk = 8
-  for (let i = 0; i < list.length; i += chunk) {
-    const slice = list.slice(i, i + chunk)
-    await Promise.all(slice.map(async (s) => {
-      try {
-        const res = await api.getContactMessages({
-          type: s.type,
-          targetId: (s as any)._targetId,
-          limit: 1
-        })
-        const rows = (res?.rows || []) as MsgRow[]
-        if (rows.length) {
-          const m = rows[0]
-          s.preview = msgContent(m).slice(0, 40) || `[${msgType(m) || '消息'}]`
-          s.previewTime = Number(m.CREATE_TIME ?? m.create_time ?? 0)
-        } else {
-          s.preview = '暂无消息'
-        }
-      } catch { s.preview = '' }
-    }))
+  if (!list.length) return
+  // Q4：后端一次性聚合返回各会话最新预览，替代逐会话轮询
+  try {
+    const targets = list.map(s => ({ bot: s.bot, type: s.type, targetId: (s as any)._targetId }))
+    const res = await api.getContactPreviews(targets)
+    const previews = (res?.previews || {}) as Record<string, any>
+    for (const s of list) {
+      const key = `${s.type}:${s.bot}:${(s as any)._targetId}`
+      const pv = previews[key]
+      if (pv && (pv.preview || pv.msgType)) {
+        s.preview = String(pv.preview || '').slice(0, 40) || `[${pv.msgType || '消息'}]`
+        s.previewTime = Number(pv.previewTime ?? 0)
+      } else {
+        s.preview = '暂无消息'
+      }
+    }
+  } catch {
+    for (const s of list) s.preview = s.preview || ''
   }
-  // 触发响应式（数组已修改但 Vue 可能检测不到引用层）
+  // 触发响应式
   sessions.value = [...sessions.value]
 }
 
@@ -316,12 +338,18 @@ async function loadMessages(today = false, before?: number) {
   chatLoading.value = true
   try {
     const params: any = { type: chatTargetType.value, targetId: chatTargetId.value, limit: 100 }
-    if (today) params.startTime = dayjs().startOf('day').unix()
+    if (today) params.startTime = dayjs().utcOffset(8).startOf('day').unix()
     else if (before) params.beforeTime = before
     const res = await api.getContactMessages(params)
     const rows = (res?.rows || []) as MsgRow[]
-    if (today) chatMessages.value = rows
-    else chatMessages.value = [...rows, ...chatMessages.value]
+    // Q5：基于消息 ID 去重，避免轮询/上滑重复追加
+    const baseIds = new Set(chatMessages.value.map(msgId).filter(Boolean))
+    const unique = rows.filter(r => {
+      const id = msgId(r); if (!id) return true
+      if (baseIds.has(id)) return false; baseIds.add(id); return true
+    })
+    if (today) chatMessages.value = unique
+    else chatMessages.value = [...unique, ...chatMessages.value].sort(byTime)
     chatHasMore.value = !!res?.hasMore
     await nextTick()
     if (today) scrollToBottom()
@@ -366,24 +394,36 @@ function startPoll() {
 function stopPoll() {
   if (pollTimer !== null) { clearInterval(pollTimer); pollTimer = null }
 }
-async function refreshLatest() {
-  if (!chatTargetId.value) return
+async function refreshLatest(): Promise<number> {
+  if (!chatTargetId.value) return 0
   try {
     const res = await api.getContactMessages({
       type: chatTargetType.value, targetId: chatTargetId.value, limit: 50
     })
     pollFails.value = 0
     const rows = (res?.rows || []) as MsgRow[]
-    if (!rows.length) return
-    const lastLocal = chatMessages.value[chatMessages.value.length - 1]
-    const lastLocalTime = lastLocal ? Number(lastLocal.CREATE_TIME ?? lastLocal.create_time ?? 0) : 0
-    const newOnes = rows.filter(r => Number(r.CREATE_TIME ?? r.create_time ?? 0) > lastLocalTime)
-    if (newOnes.length) {
-      chatMessages.value = [...chatMessages.value, ...newOnes]
-      // 同步更新左侧预览
-      updatePreviewInList(newOnes)
-      await nextTick(); scrollToBottom()
+    if (!rows.length) return 0
+    // Q3：移除被真实消息覆盖的乐观占位（同 OUT + 同内容 + 时间差 ≤ 3s）
+    const stillOptimistic = chatMessages.value.filter(e => {
+      if (!e._optimistic) return true
+      return !rows.some(r => r.DIRECTION === 'OUT' && r.CONTENT === e.CONTENT &&
+        Math.abs(Number(r.CREATE_TIME ?? r.create_time ?? 0) - Number(e.CREATE_TIME ?? 0)) <= 3)
+    })
+    // Q5：基于消息 ID 去重
+    const baseIds = new Set(stillOptimistic.map(msgId).filter(Boolean))
+    const newOnes = rows.filter(r => {
+      const id = msgId(r); if (!id) return true
+      if (baseIds.has(id)) return false; baseIds.add(id); return true
+    })
+    if (stillOptimistic.length !== chatMessages.value.length || newOnes.length) {
+      chatMessages.value = [...stillOptimistic, ...newOnes].sort(byTime)
+      if (newOnes.length) {
+        // 同步更新左侧预览
+        updatePreviewInList(newOnes)
+        await nextTick(); scrollToBottom()
+      }
     }
+    return newOnes.length
   } catch {
     // 后端不可用时的轮询失败兜底：只提示一次（连续失败期间不重复弹），恢复后自动重置
     pollFails.value++
@@ -391,6 +431,7 @@ async function refreshLatest() {
       message.warning('与后端连接异常，消息轮询中断，将自动重试')
     }
   }
+  return 0
 }
 function updatePreviewInList(newOnes: MsgRow[]) {
   const sid = selectedSessionId.value
@@ -425,6 +466,7 @@ async function sendText() {
       chatMessages.value.push({
         DIRECTION: 'OUT', MSG_TYPE: msgType, CONTENT: content,
         CREATE_TIME: Math.floor(Date.now() / 1000),
+        _id: 'opt-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
         _optimistic: true
       })
       await nextTick(); scrollToBottom()
@@ -515,7 +557,9 @@ async function sendMedia() {
       chatMessages.value.push({
         DIRECTION: 'OUT', MSG_TYPE: mediaType.value,
         CONTENT: `[${mediaType.value}] ${mediaFilename.value}`,
-        CREATE_TIME: Math.floor(Date.now() / 1000), _optimistic: true
+        CREATE_TIME: Math.floor(Date.now() / 1000),
+        _id: 'opt-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+        _optimistic: true
       })
       await nextTick(); scrollToBottom()
       setTimeout(refreshLatest, 1000)
@@ -543,12 +587,32 @@ onMounted(async () => {
   if (first) await openSession(first)
 })
 
-onUnmounted(() => stopPoll())
+// Q6：恢复可见时立即补齐拉取（后台期间可能漏掉多条消息），最多补 5 轮（每轮 50 条）
+function onVisibilityChange() {
+  if (document.visibilityState !== 'visible') return
+  pollFails.value = 0
+  catchUp()
+}
+async function catchUp() {
+  for (let i = 0; i < 5; i++) {
+    const n = await refreshLatest()
+    if (n < 50) break
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('visibilitychange', onVisibilityChange)
+})
+onUnmounted(() => {
+  window.removeEventListener('visibilitychange', onVisibilityChange)
+  stopPoll()
+})
 
 function dayChanged(a: any, b: any): boolean {
   const ta = Number(a), tb = Number(b)
   if (!isFinite(ta) || !isFinite(tb)) return false
-  return new Date(ta * 1000).toDateString() !== new Date(tb * 1000).toDateString()
+  // UTC+8 日界比较（与全局时间口径一致）
+  return dayjs(ta * 1000).utcOffset(8).format('YYYY-MM-DD') !== dayjs(tb * 1000).utcOffset(8).format('YYYY-MM-DD')
 }
 function roleClass(role: string | undefined): string {
   if (role === 'owner') return 'role-owner'
@@ -567,7 +631,7 @@ function roleLabel(role: string | undefined): string {
 const sortedGroupMembers = computed(() => {
   const rank = (r: string | undefined) =>
     r === 'owner' ? 0 : r === 'admin' ? 1 : 2
-  return [...groupMembers.value].sort((a: any, b: any) => {
+  return [...groupMembers.value].map(m => ({ ...m, mid: idOf(m) })).sort((a: any, b: any) => {
     const ra = rank(a.ROLE ?? a.role)
     const rb = rank(b.ROLE ?? b.role)
     if (ra !== rb) return ra - rb
@@ -608,30 +672,28 @@ watch(sessionTab, () => {
             placeholder="按机器人筛选"
           />
         </div>
-        <NScrollbar class="chat-list">
-          <div v-if="!filteredSessions.length" class="empty-tip">
-            <NEmpty :description="sessionTab === 'group' ? '暂无群聊' : '暂无单聊'" size="small" />
-          </div>
-          <div
-            v-for="s in filteredSessions"
-            :key="s.id"
-            class="chat-item"
-            :class="{ active: selectedSessionId === s.id }"
-            @click="openSession(s)"
-          >
-            <div class="avatar" :style="{ background: avatarColor(s.name) }">{{ s.name.charAt(0).toUpperCase() }}</div>
-            <div class="ci-main">
-              <div class="ci-top">
-                <span class="ci-name">{{ s.name }}</span>
-                <span class="ci-time">{{ fmtTime(s.previewTime) }}</span>
+        <NVirtualList class="chat-list" :item-size="62" :items="filteredSessions" key-field="id">
+          <template #default="{ item }">
+            <div
+              class="chat-item"
+              :class="{ active: selectedSessionId === item.id }"
+              @click="openSession(item)"
+            >
+              <div class="avatar" :style="{ background: avatarColor(item.name) }">{{ item.name.charAt(0).toUpperCase() }}</div>
+              <div class="ci-main">
+                <div class="ci-top">
+                  <span class="ci-name">{{ item.name }}</span>
+                  <span class="ci-time">{{ fmtTime(item.previewTime) }}</span>
+                </div>
+                <div class="ci-bottom">
+                  <span class="ci-preview">{{ item.preview || '加载中…' }}</span>
+                </div>
+                <div class="ci-sub">{{ item.sub }}</div>
               </div>
-              <div class="ci-bottom">
-                <span class="ci-preview">{{ s.preview || '加载中…' }}</span>
-              </div>
-              <div class="ci-sub">{{ s.sub }}</div>
             </div>
-          </div>
-        </NScrollbar>
+          </template>
+        </NVirtualList>
+        <NEmpty v-if="!filteredSessions.length" class="empty-tip" :description="sessionTab === 'group' ? '暂无群聊' : '暂无单聊'" size="small" />
       </aside>
 
       <!-- ═══════ 中间 ═══════ -->
@@ -689,17 +751,18 @@ watch(sessionTab, () => {
                   <span class="msg-time">{{ fmtTimeFull(m.CREATE_TIME ?? m.create_time) }}</span>
                 </div>
                 <div class="bubble" :class="{ md: isMarkdown(m) }">
-                  <!-- 富媒体消息 -->
+                  <!-- 富媒体消息（src 仅取消息自身内容，杜绝上传暂存 mediaBase64 污染） -->
                   <template v-if="isImage(m)">
-                    <img class="msg-img" :src="mediaBase64 || msgContent(m)" :alt="msgContent(m)" @error="$event.target.style.display='none'" v-if="msgContent(m).startsWith('data:') || msgContent(m).match(/\.(jpg|jpeg|png|gif|webp)/i)" />
+                    <img v-if="msgContent(m) && !isMediaFailed(m)" class="msg-img" :src="mediaSrc(msgContent(m))" :alt="msgContent(m)" @error="markMediaFailed(m)" />
                     <NText v-else class="msg-media-hint">[图片] {{ msgContent(m) }}</NText>
                   </template>
                   <template v-else-if="isVideo(m)">
-                    <video class="msg-video" controls :src="msgContent(m)" v-if="msgContent(m).startsWith('data:') || msgContent(m).match(/\.(mp4|mov)/i)"></video>
+                    <video v-if="msgContent(m) && !isMediaFailed(m)" class="msg-video" controls :src="mediaSrc(msgContent(m))" @error="markMediaFailed(m)"></video>
                     <NText v-else class="msg-media-hint">[视频] {{ msgContent(m) }}</NText>
                   </template>
                   <template v-else-if="isVoice(m)">
-                    <div class="voice-chip">▶ 语音消息 {{ msgContent(m) }}</div>
+                    <audio v-if="msgContent(m) && !isMediaFailed(m)" class="msg-audio" controls :src="mediaSrc(msgContent(m))" @error="markMediaFailed(m)"></audio>
+                    <div v-else class="voice-chip">▶ 语音消息 {{ msgContent(m) }}</div>
                   </template>
                   <NText v-else>{{ msgContent(m) }}</NText>
                 </div>
@@ -788,17 +851,21 @@ watch(sessionTab, () => {
             <h3>成员列表 <span class="member-count">· {{ sortedGroupMembers.length }} 人</span></h3>
             <NSpin :show="membersLoading" size="small">
               <NEmpty v-if="!membersLoading && !sortedGroupMembers.length" description="暂无成员数据" size="small" style="padding: 12px 0" />
-              <div v-for="mb in sortedGroupMembers" :key="idOf(mb)" class="member-item">
-                <div class="m-avatar" :style="{ background: avatarColor(String(mb.NICKNAME || mb.nickname || idOf(mb))) }">
-                  {{ (mb.NICKNAME || mb.nickname || idOf(mb)).charAt(0).toUpperCase() }}
-                </div>
-                <div class="m-info">
-                  <div class="m-name">{{ mb.NICKNAME || mb.nickname || '未知' }}</div>
-                  <div class="m-role mono">{{ idOf(mb) }}</div>
-                </div>
-                <span :class="['role-tag', roleClass(mb.ROLE ?? mb.role)]">{{ roleLabel(mb.ROLE ?? mb.role) }}</span>
-              </div>
-              <NText v-if="groupMembers.length > 50" depth="3" style="font-size: 11px; display: block; padding: 6px 0">仅展示前 50 人</NText>
+              <NVirtualList :item-size="52" :items="sortedGroupMembers" key-field="mid" style="max-height: 460px; overflow-y: auto;">
+                <template #default="{ item }">
+                  <div class="member-item">
+                    <div class="m-avatar" :style="{ background: avatarColor(String(item.NICKNAME || item.nickname || idOf(item))) }">
+                      {{ (item.NICKNAME || item.nickname || idOf(item)).charAt(0).toUpperCase() }}
+                    </div>
+                    <div class="m-info">
+                      <div class="m-name">{{ item.NICKNAME || item.nickname || '未知' }}</div>
+                      <div class="m-role mono">{{ idOf(item) }}</div>
+                    </div>
+                    <span :class="['role-tag', roleClass(item.ROLE ?? item.role)]">{{ roleLabel(item.ROLE ?? item.role) }}</span>
+                  </div>
+                </template>
+              </NVirtualList>
+              <NText v-if="groupMembers.length > 50" depth="3" style="font-size: 11px; display: block; padding: 6px 0">共 {{ groupMembers.length }} 人</NText>
             </NSpin>
           </section>
         </template>

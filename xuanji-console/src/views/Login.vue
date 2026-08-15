@@ -11,9 +11,11 @@ import {
 } from '@vicons/ionicons5'
 import api from '../api'
 import { brand } from '../theme'
+import { usePreferencesStore } from '../stores/preferences'
 
 const message = useMessage()
 const router = useRouter()
+const prefs = usePreferencesStore()
 
 const form = reactive({ pin: '' })
 const pinError = ref('')
@@ -37,7 +39,13 @@ async function login() {
       return
     }
     message.success('登录成功')
-    router.replace('/dashboard')
+    // 默认首页：读个性化配置（登录后拉取 preferences 并跳转）
+    try {
+      await prefs.load()
+      router.replace('/' + (prefs.prefs.homeRoute || 'dashboard'))
+    } catch {
+      router.replace('/dashboard')
+    }
   } catch (e: any) {
     pinError.value = '登录失败：' + (e?.message ?? e)
   } finally {

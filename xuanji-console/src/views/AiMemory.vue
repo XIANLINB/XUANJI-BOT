@@ -3,20 +3,30 @@ import { ref, computed, onMounted, h } from 'vue'
 import { useMessage } from 'naive-ui'
 import {
   NCard, NButton, NSpace, NSelect, NInput, NDataTable, NModal, NForm, NFormItem,
-  NIcon, NPopconfirm, NEmpty, NSpin, NTag, NText, NAlert
+  NIcon, NPopconfirm, NSpin, NTag, NText, NAlert
 } from 'naive-ui'
 import { ArchiveOutline, AddOutline, SearchOutline } from '@vicons/ionicons5'
 import api from '../api'
 import type { LlmMemoryRow } from '../api/llm'
 import PageHero from '../components/PageHero.vue'
+import EmptyState from '../components/EmptyState.vue'
+import dayjs from 'dayjs'
+import { useBotsStore } from '../stores/bots'
 
 const message = useMessage()
-const bots = ref<any[]>([])
+const botsStore = useBotsStore()
 const botKey = ref<string>('')
 const mems = ref<LlmMemoryRow[]>([])
 const loading = ref(false)
 
-const botOpts = computed(() => bots.value.map(b => ({ label: b.name || b.botKey || b.appId || '', value: b.botKey || b.appId || '' })))
+const botOpts = computed(() => botsStore.bots.map(b => ({ label: b.name || b.botKey || b.appId || '', value: b.botKey || b.appId || '' })))
+
+/** 时间（后端 UTC/ISO）→ UTC+8 展示。 */
+function fmtSubTime(v: unknown): string {
+  if (v == null || v === '') return '—'
+  const d = dayjs(String(v))
+  return d.isValid() ? d.utcOffset(8).format('YYYY-MM-DD HH:mm:ss') : String(v)
+}
 
 // 新增记忆
 const showAdd = ref(false)
@@ -40,10 +50,10 @@ async function load() {
 
 async function loadBots() {
   try {
-    bots.value = (await api.getBots()) || []
-    if (bots.value.length > 0) botKey.value = bots.value[0].botKey || bots.value[0].appId || ''
+    await botsStore.loadBots()
+    if (botsStore.bots.length > 0) botKey.value = botsStore.bots[0].botKey || botsStore.bots[0].appId || ''
   } catch {
-    bots.value = []
+    // 忽略
   }
 }
 
@@ -81,13 +91,13 @@ async function del(r: LlmMemoryRow) {
 
 const columns = [
   { title: 'ID', key: 'id', width: 70 },
-  { title: '群', key: 'groupId', width: 170, render: (r: LlmMemoryRow) => r.groupId || '—' },
-  { title: '用户', key: 'userId', width: 170, render: (r: LlmMemoryRow) => r.userId || '—' },
+  { title: '群', key: 'groupId', width: 170, ellipsis: { tooltip: true }, render: (r: LlmMemoryRow) => r.groupId || '—' },
+  { title: '用户', key: 'userId', width: 170, ellipsis: { tooltip: true }, render: (r: LlmMemoryRow) => r.userId || '—' },
   { title: '类型', key: 'type', width: 90, render: (r: LlmMemoryRow) =>
-      h(NTag, { size: 'small', type: r.type === 'SUMMARY' ? 'warning' : 'info' }, { default: () => r.type || 'DETAIL' }) },
+      h(NTag, { size: 'small', type: r.type === 'SUMMARY' ? 'warning' : 'info' }, { default: () => r.type === 'SUMMARY' ? '摘要' : '详情' }) },
   { title: '关键名', key: 'key', ellipsis: { tooltip: true } },
   { title: '内容', key: 'value', ellipsis: { tooltip: true } },
-  { title: '更新时间', key: 'updatedAt', width: 160 },
+  { title: '更新时间', key: 'updatedAt', width: 160, render: (r: LlmMemoryRow) => fmtSubTime(r.updatedAt) },
   { title: '操作', key: 'actions', width: 80, render: (r: LlmMemoryRow) =>
       h(NPopconfirm, { onPositiveClick: () => del(r) }, {
         trigger: () => h(NButton, { size: 'tiny', type: 'error', secondary: true }, { default: () => '删除' }),
@@ -115,8 +125,8 @@ onMounted(async () => {
 
     <NCard :bordered="true" title="长期记忆列表">
       <NSpin :show="loading">
-        <NEmpty v-if="!loading && mems.length === 0" description="暂无记忆。在群里对 AI 说「记住…」即可让 AI 记住" />
-        <NDataTable v-else :columns="columns" :data="mems" :row-key="(r: LlmMemoryRow) => r.id" :bordered="false" />
+        <EmptyState v-if="!loading && mems.length === 0" description="暂无记忆。在群里对 AI 说「记住…」即可让 AI 记住" />
+        <NDataTable v-else :columns="columns" :data="mems" :row-key="(r: LlmMemoryRow) => r.id" :bordered="false" :pagination="{ pageSize: 20 }" />
       </NSpin>
     </NCard>
 

@@ -91,7 +91,7 @@ public class GroupMessageEvent implements MessageEvent {
         return mentionedUsers;
     }
     public String getPlatform() { return platform; }
-    /** 已解析消息链（OneBot 直塞；QQ 侧为 null 时调用方自行解析）。 */
+    /** 已解析消息链：OneBot 直塞；QQ 官方机器人由 {@code QqMessageConverter.fromQqData} 解析后直塞（永不为 null）。 */
     public XuanJiMessage chain() { return chain; }
     @Override public XuanJiMessage getChain() { return chain; }
     @Override public Stripped getStripped() {

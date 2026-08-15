@@ -8,6 +8,7 @@ import { RefreshOutline, SearchOutline } from '@vicons/ionicons5'
 import api from '../api'
 import { useBots } from '../composables/useBots'
 import dayjs from 'dayjs'
+import EmptyState from '../components/EmptyState.vue'
 
 const { bots, loadBots } = useBots()
 const message = useMessage()
@@ -51,10 +52,9 @@ function fmtTime(v: unknown): string {
   if (v == null || v === '') return '—'
   const n = Number(String(v).trim())
   if (!Number.isFinite(n)) return String(v)
-  const d = new Date(n <= 9999999999 ? n * 1000 : n)
-  if (isNaN(d.getTime())) return String(v)
-  const p = (x: number) => String(x).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+  const d = dayjs(n <= 9999999999 ? n * 1000 : n)
+  if (!d.isValid()) return String(v)
+  return d.utcOffset(8).format('YYYY-MM-DD HH:mm:ss')
 }
 
 function fmtDuration(v: unknown): string {
@@ -198,10 +198,9 @@ onMounted(async () => {
     <NAlert v-if="err" type="error" :title="'加载失败'" style="margin-bottom: 16px">{{ err }}</NAlert>
 
     <NSpin :show="loading" style="min-height: 200px">
-      <NEmpty
+      <EmptyState
         v-if="!loading && !rows.length"
         :description="'暂无操作日志（禁言/撤回/审批等管理操作会写入，需重启应用后生效）'"
-        style="padding: 48px 0"
       />
       <NDataTable
         v-else

@@ -25,6 +25,8 @@ import {
 } from '@vicons/ionicons5'
 import api from '../api'
 import PageHero from '../components/PageHero.vue'
+import EmptyState from '../components/EmptyState.vue'
+import dayjs from 'dayjs'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -78,9 +80,7 @@ async function openDetail(botKey: string) {
 function fmtTime(ts: number | string): string {
   const n = Number(ts)
   if (!isFinite(n) || n <= 0) return '—'
-  const d = new Date(n * 1000)
-  const pad = (x: number) => String(x).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  return dayjs(n <= 9999999999 ? n * 1000 : n).utcOffset(8).format('YYYY-MM-DD HH:mm')
 }
 function copy(text: string) {
   if (!text) { message.warning('内容为空'); return }
@@ -103,29 +103,6 @@ const webhookUrl = computed(() => {
   if (!d) return ''
   return d.startsWith('http') ? d : `https://${d}/webhook/${detail.value.appId}`
 })
-
-// ============ 模块1：欢迎语编辑 ============
-const editingWelcome = ref(false)
-const welcomeDraft = ref('')
-const welcomeSaving = ref(false)
-function startEditWelcome() {
-  welcomeDraft.value = detail.value.welcomeMsg || ''
-  editingWelcome.value = true
-}
-async function saveWelcome() {
-  welcomeSaving.value = true
-  try {
-    const r: any = await api.putGlobalConfig({ welcome_msg: welcomeDraft.value })
-    if (r.error) {
-      message.error(r.error)
-    } else {
-      message.success('欢迎语已保存')
-      detail.value.welcomeMsg = welcomeDraft.value
-      editingWelcome.value = false
-    }
-  } catch (e: any) { message.error('保存失败：' + (e?.message ?? e)) }
-  finally { welcomeSaving.value = false }
-}
 
 // ============ 分享链接主动生成（POST /v2/generate_url_link，可带 callback_data） ============
 const shareDraft = ref('')
@@ -319,7 +296,7 @@ async function onAdd() {
         删除机器人会将数据目录移入归档，保留 30 天。到期未恢复将自动清理；恢复后档案与数据完整还原。
       </NAlert>
       <div v-if="archiveLoading" style="text-align:center;padding:24px"><NSpin /></div>
-      <NEmpty v-else-if="!archives.length" description="回收站为空" />
+      <EmptyState v-else-if="!archives.length" description="回收站为空" />
       <div v-else style="max-height:420px;overflow:auto">
         <NCard v-for="a in archives" :key="a.id" size="small" style="margin-bottom:8px">
           <div style="display:flex;justify-content:space-between;align-items:center">
@@ -437,10 +414,9 @@ async function onAdd() {
       </NCard>
     </div>
 
-    <NEmpty
+    <EmptyState
       v-else-if="!loading"
       description="暂无机器人，请点击右上「添加机器人」注册"
-      style="padding: 60px 0"
     />
 
     <!-- ═══════════ 详情抽屉（三模块） ═══════════ -->
@@ -550,26 +526,13 @@ async function onAdd() {
 
             <NDivider style="margin: 12px 0" />
 
-            <!-- 欢迎语（独立段） -->
+            <!-- 欢迎语（QQ 开放平台配置同步，只读展示） -->
             <div class="welcome-section">
               <div class="section-head">
                 <span class="section-title">欢迎语</span>
-                <NSpace :size="6">
-                  <NButton v-if="!editingWelcome" quaternary size="tiny" @click="startEditWelcome">编辑</NButton>
-                  <template v-else>
-                    <NButton quaternary size="tiny" @click="editingWelcome = false">取消</NButton>
-                    <NButton size="tiny" type="primary" :loading="welcomeSaving" @click="saveWelcome">保存</NButton>
-                  </template>
-                </NSpace>
+                <NText depth="3" style="font-size: 11px">来自 QQ 开放平台配置，自动同步</NText>
               </div>
-              <NInput
-                v-if="editingWelcome"
-                v-model:value="welcomeDraft"
-                type="textarea"
-                placeholder="新成员加入时自动发送的欢迎内容"
-                :autosize="{ minRows: 2, maxRows: 6 }"
-              />
-              <div v-else class="welcome-text">{{ detail.welcomeMsg || '（未设置）' }}</div>
+              <div class="welcome-text">{{ detail.welcomeMsg || '（未设置）' }}</div>
             </div>
 
             <NDivider style="margin: 12px 0" />

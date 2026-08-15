@@ -3,7 +3,7 @@ package XuanJi.api.plugin;
 import java.util.Map;
 
 /**
- * 单聊用户（类型化封装，{@link PluginServices#listUsers}）。
+ * 单聊用户（类型化封装，{@code Bot.listUsers()}）。
  *
  * <p>来自本地库 {@code qqbot_user}（查库免限频）。
  */

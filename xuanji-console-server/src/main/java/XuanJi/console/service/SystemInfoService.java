@@ -75,7 +75,16 @@ public class SystemInfoService {
         m.put("jvmRatio", jvmMax > 0 ? Math.round(jvmUsed * 1000.0 / jvmMax) / 10.0 : 0);
 
         // ── 磁盘（容量 + IO 速率采样） ──
-        m.put("disks", snapshotDisks());
+        List<Map<String, Object>> disks = snapshotDisks();
+        m.put("disks", disks);
+        long diskTotal = 0, diskUsed = 0;
+        for (Map<String, Object> d : disks) {
+            diskTotal += ((Number) d.get("total")).longValue();
+            diskUsed += ((Number) d.get("used")).longValue();
+        }
+        m.put("diskTotal", diskTotal);
+        m.put("diskUsed", diskUsed);
+        m.put("diskRatio", diskTotal > 0 ? Math.round(diskUsed * 1000.0 / diskTotal) / 10.0 : 0);
 
         // ── 运行时间 / 系统信息 ──
         m.put("uptimeSeconds", ManagementFactory.getRuntimeMXBean().getUptime() / 1000L);

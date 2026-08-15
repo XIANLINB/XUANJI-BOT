@@ -3,7 +3,7 @@
 // 全站唯一的后端地址定义处。后端侧对应 dev.xuanji.console.config.XuanjiApiRoutes.API_PREFIX，
 // 两边必须同步；升级到 v2 时只改这一行 + 后端 XuanjiApiRoutes.API_VERSION。
 // 注意：/actuator/** 是 Spring Boot Actuator 的固定路径，不在本前缀之下（见 getActuatorMetric）。
-const BASE = '/xuanji/api/v1'
+export const BASE = '/xuanji/api/v1'
 
 /**
  * 后端统一错误响应体的常见字段（见 console-server 全局异常处理器）。

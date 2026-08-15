@@ -61,11 +61,17 @@ public class DataCenterController {
     // ═══════════════════ 聚合统计 ═══════════════════
 
     /** 跨所有 bot 聚合：热力图 + 消息类型分布 + 活跃群/用户/机器人 TOP + 方向 + 事件类型。days 默认 30。
-     * botKey 可选：传值则只统计该机器人数据（按 appId 过滤），不传则聚合全部机器人。 */
+     * botKey 可选：传值则只统计该机器人数据（按 appId 过滤），不传则聚合全部机器人。
+     * startTime/endTime 可选（epoch 秒）：传 startTime 则用自定义时间范围（覆盖 days），endTime 缺省=当前。 */
     @GetMapping("/stats")
     public Map<String, Object> stats(@RequestParam(defaultValue = "30") int days,
-                                     @RequestParam(required = false) String botKey) {
-        long since = System.currentTimeMillis() / 1000 - (long) Math.min(Math.max(days, 1), 90) * 86400L;
+                                     @RequestParam(required = false) String botKey,
+                                     @RequestParam(defaultValue = "0") long startTime,
+                                     @RequestParam(defaultValue = "0") long endTime) {
+        long now = System.currentTimeMillis() / 1000;
+        long until = endTime > 0 ? endTime : Long.MAX_VALUE;
+        long since = startTime > 0 ? startTime
+                : now - (long) Math.min(Math.max(days, 1), 90) * 86400L;
 
         long[][] heat = new long[7][24];                     // [dow-1][hour]
         Map<String, Long> typeCnt = new HashMap<>();
@@ -87,7 +93,7 @@ public class DataCenterController {
             }
             PlatformDataProvider p = queryService.providerFor(ref.platform());
             if (p == null) continue;
-            Map<String, Object> st = p.stats(ref.instanceId(), since);
+            Map<String, Object> st = p.stats(ref.instanceId(), since, until);
             // ... 累加到 heatmap/typeDist/activeGroups/activeUsers/dirCnt/evtCnt
             for (Map<String, Object> row : castList(st.get("heatmap"))) {
                 int dow = (int) num(row.get("DOW"), row.get("dow")) - 1;
@@ -235,6 +241,10 @@ public class DataCenterController {
         m.put("alertRecord", item("告警记录", "xuanji_alert_record 表", "safe", "framework",
                 "7 类检查器命中后的告警记录；清空后历史告警丢失", null,
                 count(jdbc, "SELECT COUNT(*) FROM xuanji_alert_record")));
+        // 管理操作日志（机器人级，per-bot 日志库 qqbot_op_log）
+        m.put("opLog", item("管理操作日志", "qqbot_op_log 表", "safe", "bot",
+                "禁言/撤回/审批等管理操作的执行留痕；清空后历史操作记录丢失", null,
+                countInstancesLogFiltered(botKey, "SELECT COUNT(*) FROM qqbot_op_log")));
         // 消息历史（机器人级，per-bot 日志库流水，谨慎清理）
         m.put("messages", item("消息历史", "qqbot_message 表", "caution", "bot",
                 "已处理的所有消息；清空后所有历史消息不可恢复，群聊监控/聊天窗口将无数据", null,
@@ -343,6 +353,8 @@ public class DataCenterController {
                 return jdbc.update("DELETE FROM xuanji_blacklist_log");
             case "alertRecord":
                 return jdbc.update("DELETE FROM xuanji_alert_record");
+            case "opLog":
+                return deleteFromInstancesLogFiltered(botKey, "DELETE FROM qqbot_op_log");
             case "eventLog":
                 return deleteFromInstancesLogFiltered(botKey, "DELETE FROM qqbot_event");
             case "messages":

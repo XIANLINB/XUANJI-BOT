@@ -2,10 +2,11 @@
 import { ref, onMounted, h } from 'vue'
 import {
   NCard, NButton, NSpace, NIcon, NText, NTag, NDataTable, NInput, NSwitch,
-  NEmpty, NAlert, NPopconfirm, NInputNumber, useMessage, NGrid, NGi
+  NAlert, NPopconfirm, NInputNumber, useMessage, NGrid, NGi
 } from 'naive-ui'
 import { WarningOutline, RefreshOutline, NotificationsOutline, PlayOutline, SettingsOutline } from '@vicons/ionicons5'
 import PageHero from '../components/PageHero.vue'
+import EmptyState from '../components/EmptyState.vue'
 import api from '../api'
 import dayjs from 'dayjs'
 
@@ -13,7 +14,10 @@ const message = useMessage()
 const loading = ref(false)
 const configs = ref<any[]>([])
 const records = ref<any[]>([])
-const saving = ref(false)
+const recordsLimit = ref(100)
+const checking = ref(false)
+const savingKey = ref('') // 正在保存的 botKey（per-row loading）
+const dirtyCfg = ref(new Set<string>()) // 有未保存规则修改的 botKey
 const expanded = ref<Record<string, boolean>>({})
 
 // ══════ 全局设置：检查频率 + 冷却时间 ══════
@@ -96,17 +100,18 @@ function ruleOf(cfg: any, key: string): { enabled: boolean; threshold: number } 
   const r = cfg.rules?.[key]
   return { enabled: r?.enabled !== false, threshold: r?.threshold ?? 0 }
 }
-/** 前端修改规则后回写 cfg.rules */
+/** 前端修改规则后回写 cfg.rules 并标记未保存。 */
 function setRule(cfg: any, key: string, patch: Partial<{ enabled: boolean; threshold: number }>) {
   if (!cfg.rules) cfg.rules = {}
   if (!cfg.rules[key]) cfg.rules[key] = {}
   Object.assign(cfg.rules[key], patch)
+  const s = new Set(dirtyCfg.value); s.add(cfg.botKey); dirtyCfg.value = s
 }
 
 async function load() {
   loading.value = true
   try {
-    const [c, r] = await Promise.all([api.listConfigs(), api.records(100)])
+    const [c, r] = await Promise.all([api.listConfigs(), api.records(recordsLimit.value)])
     configs.value = c || []
     records.value = r?.rows ?? []
   } catch (e: any) {
@@ -116,35 +121,45 @@ async function load() {
   }
 }
 
+function loadMoreRecords() {
+  recordsLimit.value += 100
+  load()
+}
+
 async function save(cfg: any) {
   if (cfg.enabled && !String(cfg.alertUserId || '').trim()) {
     message.error('启用预警必须填写预警用户 ID')
     return
   }
-  saving.value = true
+  savingKey.value = cfg.botKey
   try {
     const r = await api.saveConfig(cfg.botKey, !!cfg.enabled, String(cfg.alertUserId || '').trim(), cfg.rules)
-    if (r.status === 'ok') message.success('预警配置已保存')
-    else message.error(r.msg || '保存失败')
+    if (r.status === 'ok') {
+      message.success('预警配置已保存')
+      const s = new Set(dirtyCfg.value); s.delete(cfg.botKey); dirtyCfg.value = s
+    } else message.error(r.msg || '保存失败')
   } catch (e: any) {
     message.error('保存失败：' + (e?.message ?? e))
   } finally {
-    saving.value = false
+    savingKey.value = ''
   }
 }
 
 async function checkNow() {
+  checking.value = true
   try {
     const r = await api.check()
     message.success(r.msg || '检查完成')
     await load()
   } catch (e: any) {
     message.error('检查失败：' + (e?.message ?? e))
+  } finally {
+    checking.value = false
   }
 }
 
 function fmtTime(t: number): string {
-  return t > 0 ? dayjs(t * 1000).format('MM-DD HH:mm:ss') : '—'
+  return t > 0 ? dayjs(t * 1000).utcOffset(8).format('MM-DD HH:mm:ss') : '—'
 }
 
 const recordCols = [
@@ -160,7 +175,7 @@ onMounted(() => { load(); loadSettings() })
 <template>
   <div>
     <PageHero title="预警中心" subtitle="框架运行指标异常检测 · 命中后单聊通知预警用户" :icon="WarningOutline">
-      <NButton type="primary" :loading="saving" @click="checkNow">
+      <NButton type="primary" :loading="checking" @click="checkNow">
         <template #icon><NIcon><PlayOutline /></NIcon></template>
         立即检查
       </NButton>
@@ -223,7 +238,8 @@ onMounted(() => { load(); loadSettings() })
             style="width: 240px"
           />
           <NSwitch :value="!!cfg.enabled" size="small" @update:value="(v: boolean) => { cfg.enabled = v; save(cfg) }" />
-          <NButton size="small" type="primary" tertiary :loading="saving" @click="save(cfg)">保存</NButton>
+          <NTag v-if="dirtyCfg.has(cfg.botKey)" size="tiny" :bordered="false" type="warning">未保存</NTag>
+          <NButton size="small" type="primary" tertiary :loading="savingKey === cfg.botKey" @click="save(cfg)">保存</NButton>
           <NButton size="small" secondary @click="expanded[cfg.botKey] = !expanded[cfg.botKey]">
             <template #icon><NIcon size="14"><SettingsOutline /></NIcon></template>
             {{ expanded[cfg.botKey] ? '收起规则' : '规则配置' }}
@@ -271,19 +287,22 @@ onMounted(() => { load(); loadSettings() })
               </NGi>
             </NGrid>
             <div style="text-align: right; margin-top: 10px">
-              <NButton size="small" type="primary" :loading="saving" @click="save(cfg)">
+              <NButton size="small" type="primary" :loading="savingKey === cfg.botKey" @click="save(cfg)">
                 保存 {{ cfg.botName || cfg.botKey }} 规则
               </NButton>
             </div>
           </div>
         </div>
       </div>
-      <NEmpty v-else description="暂无机器人" style="padding: 24px 0" />
+      <EmptyState v-else description="暂无机器人" />
     </NCard>
 
     <NCard title="告警记录" :bordered="true">
-      <NDataTable :columns="recordCols" :data="records" :bordered="false" size="small" :loading="loading" :row-key="(r: any) => r.id" />
-      <NEmpty v-if="!loading && !records.length" description="暂无告警记录（框架运行平稳）" style="padding: 30px 0" />
+      <EmptyState v-if="!loading && !records.length" description="暂无告警记录（框架运行平稳）" />
+      <NDataTable v-else :columns="recordCols" :data="records" :bordered="false" size="small" :loading="loading" :row-key="(r: any) => r.id" :pagination="{ pageSize: 20 }" />
+      <NButton v-if="records.length > 0 && records.length >= recordsLimit" size="small" secondary style="margin-top: 8px" @click="loadMoreRecords">
+        加载更多
+      </NButton>
     </NCard>
   </div>
 </template>

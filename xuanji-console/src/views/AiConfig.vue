@@ -14,6 +14,7 @@ import {
 import api from '../api'
 import type { LlmConfig, LlmProviderInfo, ProviderRow, ModelRow } from '../api/llm'
 import PageHero from '../components/PageHero.vue'
+import EmptyState from '../components/EmptyState.vue'
 
 const message = useMessage()
 
@@ -74,9 +75,7 @@ function bindingOptions(cap: string) {
 }
 
 async function loadAllModels() {
-  for (const p of providersConfig.value) {
-    await loadProviderModels(p.id)
-  }
+  await Promise.all(providersConfig.value.map(p => loadProviderModels(p.id)))
 }
 
 // ──────────── 群白名单数据源（复用控制台群列表） ────────────
@@ -97,19 +96,20 @@ const currentProvider = computed(() =>
 // ──────────── 能力矩阵：开关 + 绑定自包含 ────────────
 // 每个能力一行：能力名 + 说明，右侧 [开关] [绑定模型多选]；关掉开关后绑定置灰
 const capabilities = [
-  { key: 'chat',        label: '对话',     cap: 'CHAT',          bindKey: 'chatBindings',          enabledKey: '' as string,                 hasSwitch: false, hint: '基础对话所用模型，第一个可用即用，失败 / 限流自动切下一个。' },
-  { key: 'vision',      label: '图片理解', cap: 'VISION',        bindKey: 'visionBindings',        enabledKey: 'visionEnabled',              hasSwitch: true,  hint: '关闭后用户发图 / 表情包直接忽略，不再调用视觉模型。' },
-  { key: 'image',       label: '图像生成', cap: 'IMAGE_GEN',     bindKey: 'imageBindings',         enabledKey: 'imageGenEnabled',            hasSwitch: true,  hint: '关闭后不再调用文生图模型（cogview / SD 等）。' },
-  { key: 'tts',         label: '语音合成', cap: 'TTS',           bindKey: 'ttsBindings',           enabledKey: 'ttsEnabled',                 hasSwitch: true,  hint: '关闭后不再发语音；音色参数在「语音合成」页配置。' },
-  { key: 'videoU',      label: '视频理解', cap: 'VIDEO_UNDERSTAND', bindKey: 'videoBindings',      enabledKey: 'videoUnderstandEnabled',    hasSwitch: true,  hint: '关闭后用户发视频不被识别；模型差异大，默认关。' },
-  { key: 'videoG',      label: '视频生成', cap: 'VIDEO_GEN',     bindKey: 'videoGenBindings',      enabledKey: 'videoGenEnabled',            hasSwitch: true,  hint: '关闭后不再文生视频；慢且贵，默认关。' },
-  { key: 'voiceClone',  label: '语音克隆', cap: 'VOICE_CLONE',   bindKey: 'voiceCloneBindings',    enabledKey: 'voiceCloneEnabled',          hasSwitch: true,  hint: '合规风险高，默认关；开启前请确保已告知用户并合规授权。' }
+  { key: 'chat',        label: '对话',       cap: 'CHAT',             bindKey: 'chatBindings',       hint: '基础对话所用模型，第一个可用即用，失败 / 限流自动切下一个。' },
+  { key: 'vision',      label: '图片理解',   cap: 'IMAGE_UNDERSTAND', bindKey: 'visionBindings',     enabledKey: 'visionEnabled',            hint: '关闭后用户发图 / 表情包直接忽略，不再调用视觉模型。' },
+  { key: 'image',       label: '图像生成',   cap: 'IMAGE_GEN',        bindKey: 'imageBindings',      enabledKey: 'imageGenEnabled',          hint: '关闭后不再调用文生图模型（cogview / SD 等）。' },
+  { key: 'tts',         label: '语音合成',   cap: 'TTS',              bindKey: 'ttsBindings',        enabledKey: 'ttsEnabled',               hint: '关闭后不再发语音；音色参数在「语音合成」页配置。' },
+  { key: 'stt',         label: '语音转文字', cap: 'STT',              bindKey: 'sttBindings',        enabledKey: 'sttEnabled',               hint: '将语音消息转写为文字（语音输入场景）。' },
+  { key: 'videoU',      label: '视频理解',   cap: 'VIDEO_UNDERSTAND', bindKey: 'videoBindings',      enabledKey: 'videoUnderstandEnabled',    hint: '关闭后用户发视频不被识别；模型差异大，默认关。' },
+  { key: 'videoG',      label: '视频生成',   cap: 'VIDEO_GEN',        bindKey: 'videoGenBindings',   enabledKey: 'videoGenEnabled',          hint: '关闭后不再文生视频；慢且贵，默认关。' },
+  { key: 'voiceClone',  label: '语音克隆',   cap: 'VOICE_CLONE',      bindKey: 'voiceCloneBindings', enabledKey: 'voiceCloneEnabled',       hint: '合规风险高，默认关；开启前请确保已告知用户并合规授权。' }
 ]
 
 // ──────────── 脏检查：哪些 Tab 有改动 ────────────
 const tabFields: Record<string, string[]> = {
   basic: ['enabled', 'mentionRequired', 'cooldownSeconds', 'dailyTokenLimit', 'temperature', 'maxTokens', 'groupIds', 'c2cEnabled', 'c2cUserIds', 'c2cDailyTokenLimit', 'c2cCooldownSeconds'],
-  capabilities: ['chatBindings', 'visionBindings', 'imageBindings', 'ttsBindings', 'videoBindings', 'videoGenBindings', 'voiceCloneBindings', 'visionEnabled', 'imageGenEnabled', 'videoUnderstandEnabled', 'videoGenEnabled', 'ttsEnabled', 'voiceCloneEnabled', 'toolCallingEnabled', 'toolConfirmRequired', 'mcpEnabled'],
+  capabilities: ['chatBindings', 'visionBindings', 'imageBindings', 'ttsBindings', 'sttBindings', 'videoBindings', 'videoGenBindings', 'voiceCloneBindings', 'visionEnabled', 'imageGenEnabled', 'videoUnderstandEnabled', 'videoGenEnabled', 'ttsEnabled', 'sttEnabled', 'voiceCloneEnabled', 'toolCallingEnabled', 'toolConfirmRequired', 'mcpEnabled'],
   voice: ['ttsVoice', 'ttsAudioFormat', 'ttsStylePrompt', 'fishVoice', 'fishStylePrompt', 'fishSpeed'],
   insight: ['profileEnabled', 'profileExtractHours', 'profileExtractMsgThreshold', 'proactiveEnabled', 'proactiveDailyLimit', 'proactiveCooldownMinutes', 'proactiveIdleMinutes', 'proactiveTimeStart', 'proactiveTimeEnd'],
   advanced: ['intentRouting', 'aiAudit', 'dailyReportEnabled', 'renderEnabled', 'encryptBaseUrl']
@@ -150,6 +150,7 @@ async function load() {
       if (!config.value.videoBindings) config.value.videoBindings = []
       if (!config.value.videoGenBindings) config.value.videoGenBindings = []
       if (!config.value.voiceCloneBindings) config.value.voiceCloneBindings = []
+      if (!config.value.sttBindings) config.value.sttBindings = []
       // 单聊维度兜底
       if (!config.value.c2cUserIds) config.value.c2cUserIds = []
       if (config.value.c2cEnabled == null) config.value.c2cEnabled = false
@@ -179,6 +180,7 @@ async function load() {
       if (config.value.videoGenEnabled == null) config.value.videoGenEnabled = false
       if (config.value.ttsEnabled == null) config.value.ttsEnabled = false
       if (config.value.voiceCloneEnabled == null) config.value.voiceCloneEnabled = false
+      if (config.value.sttEnabled == null) config.value.sttEnabled = false
       if (config.value.dailyReportEnabled == null) config.value.dailyReportEnabled = true
       // 快照用于脏检查
       initialConfig.value = JSON.parse(JSON.stringify(config.value))
@@ -210,17 +212,43 @@ function discard() {
   message.info('已撤销未保存的修改')
 }
 
+/** 解析「对话」能力主选模型所在的供应商 ID；无绑定则回退旧单供应商配置。 */
+function primaryChatProviderId(): number | null {
+  if (!config.value) return null
+  const b = config.value.chatBindings?.[0]
+  if (b && b.includes(':')) {
+    const id = Number(b.split(':')[0])
+    if (id > 0) return id
+  }
+  if (config.value.providerId) return Number(config.value.providerId)
+  return null
+}
+
 async function test() {
   testing.value = true
   testResult.value = null
   try {
-    const r = await api.llmApi.test()
-    if (r.ok) {
-      testResult.value = { reply: r.reply }
-      message.success('连接成功')
+    const pid = primaryChatProviderId()
+    if (pid) {
+      // 多供应商：测「对话」能力主选模型所在供应商的连接
+      const r = await api.llmApi.testProvider(pid)
+      if (r.ok) {
+        testResult.value = { reply: `连接成功（发现 ${r.models ?? 0} 个模型）` }
+        message.success('连接成功')
+      } else {
+        testResult.value = { error: r.error || '未知错误' }
+        message.error('连接失败')
+      }
     } else {
-      testResult.value = { error: r.error || '未知错误' }
-      message.error('连接失败')
+      // 未配置任何供应商 → 全局默认测试
+      const r = await api.llmApi.test()
+      if (r.ok) {
+        testResult.value = { reply: r.reply }
+        message.success('连接成功')
+      } else {
+        testResult.value = { error: r.error || '未知错误' }
+        message.error('连接失败')
+      }
     }
   } catch (e: any) {
     testResult.value = { error: e.message || String(e) }
@@ -399,20 +427,20 @@ onMounted(load)
 
             <NCard title="能力矩阵（开关 + 绑定自包含）" :bordered="true" class="card">
               <div class="cap-list">
-                <div v-for="(c, idx) in capabilities" :key="c.key" class="cap-row" :class="{ 'is-off': c.hasSwitch && !config[c.enabledKey] }">
+                <div v-for="(c, idx) in capabilities" :key="c.key" class="cap-row" :class="{ 'is-off': c.enabledKey && !config[c.enabledKey] }">
                   <div class="cap-meta">
                     <div class="cap-name">
                       {{ c.label }}
-                      <NTag v-if="!c.hasSwitch" size="tiny" :bordered="false" type="default">随总开关</NTag>
+                      <NTag v-if="!c.enabledKey" size="tiny" :bordered="false" type="default">随总开关</NTag>
                     </div>
                     <div class="hint">{{ c.hint }}</div>
                   </div>
                   <div class="cap-ctrl">
-                    <NSwitch v-if="c.hasSwitch" v-model:value="config[c.enabledKey]" />
+                    <NSwitch v-if="c.enabledKey" v-model:value="config[c.enabledKey]" />
                     <NSelect
                       v-model:value="config[c.bindKey]"
                       multiple filterable tag
-                      :disabled="c.hasSwitch && !config[c.enabledKey]"
+                      :disabled="!!c.enabledKey && !config[c.enabledKey]"
                       :options="bindingOptions(c.cap)"
                       placeholder="多选「供应商 / 模型」，按序尝试"
                       clearable
@@ -659,7 +687,7 @@ onMounted(load)
           </NTabPane>
         </NTabs>
       </template>
-      <NEmpty v-else description="暂无配置数据" />
+      <EmptyState v-else description="暂无配置数据" />
     </NSpin>
   </div>
 </template>

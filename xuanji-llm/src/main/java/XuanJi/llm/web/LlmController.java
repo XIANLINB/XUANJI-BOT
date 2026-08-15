@@ -308,17 +308,20 @@ public class LlmController {
 
     /** 已注册的 LLM 工具清单（前端「AI 工具」页数据源）。 */
     @GetMapping("/tools")
-    public List<Map<String, Object>> tools() {
-        return toolRegistry.definitions().stream().map(d -> {
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("name", d.name());
-            m.put("description", d.description());
-            m.put("descriptionZh", d.descriptionZh());
-            m.put("confirm", d.confirm());
-            m.put("source", d.source());
-            m.put("parameters", d.parameters());
-            return m;
-        }).toList();
+    public List<Map<String, Object>> tools(@RequestParam(required = false) String source) {
+        return toolRegistry.definitions().stream()
+                .filter(d -> source == null || source.isBlank()
+                        || (d.source() != null && d.source().startsWith(source)))
+                .map(d -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("name", d.name());
+                    m.put("description", d.description());
+                    m.put("descriptionZh", d.descriptionZh());
+                    m.put("confirm", d.confirm());
+                    m.put("source", d.source());
+                    m.put("parameters", d.parameters());
+                    return m;
+                }).toList();
     }
 
     // ──────────── MCP 服务管理（P3） ────────────
@@ -510,6 +513,21 @@ public class LlmController {
         return Map.of("ok", true);
     }
 
+    /** 更新模型（名称 + 能力位）。 */
+    @PostMapping("/providers-config/models/{id}")
+    public Map<String, Object> modelUpdate(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        providerService.updateModel(id,
+                String.valueOf(body.getOrDefault("modelName", "")),
+                String.valueOf(body.getOrDefault("capabilities", "")));
+        return Map.of("ok", true);
+    }
+
+    /** 测试供应商连接（GET {baseUrl}/models）。 */
+    @PostMapping("/providers-config/{id}/test")
+    public Map<String, Object> testProvider(@PathVariable Long id) {
+        return providerService.testProvider(id);
+    }
+
     /** 从 OpenAI 兼容供应商拉取模型列表。 */
     @PostMapping("/providers-config/{id}/fetch-models")
     public Map<String, Object> fetchModels(@PathVariable Long id) {
@@ -539,6 +557,14 @@ public class LlmController {
     @DeleteMapping("/providers-config/keys/{id}")
     public Map<String, Object> keyDelete(@PathVariable Long id) {
         providerService.deleteKey(id);
+        return Map.of("ok", true);
+    }
+
+    /** 启用/停用某个 API Key。 */
+    @PostMapping("/providers-config/keys/{id}/toggle")
+    public Map<String, Object> keyToggle(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        boolean enabled = Boolean.parseBoolean(String.valueOf(body.getOrDefault("enabled", true)));
+        providerService.setKeyEnabled(id, enabled);
         return Map.of("ok", true);
     }
 

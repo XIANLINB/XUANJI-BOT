@@ -130,6 +130,13 @@ public class QqPlatformDataProvider implements PlatformDataProvider {
     }
 
     @Override
+    public Map<String, Object> queryMessagesFiltered(String instanceId, String chatType,
+                                                     String dir, String type,
+                                                     long startTime, long endTime, String q, int limit) {
+        return repo.queryMessagesFiltered(instanceId, chatType, dir, type, startTime, endTime, q, limit);
+    }
+
+    @Override
     public List<Map<String, Object>> listEvents(String instanceId, int limit) {
         return repo.listEvents(instanceId, limit);
     }
@@ -169,15 +176,15 @@ public class QqPlatformDataProvider implements PlatformDataProvider {
     }
 
     @Override
-    public Map<String, Object> stats(String instanceId, long sinceEpochSeconds) {
+    public Map<String, Object> stats(String instanceId, long sinceEpochSeconds, long untilEpochSeconds) {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("heatmap", repo.heatmap(instanceId, sinceEpochSeconds));
-        m.put("typeDist", repo.msgTypeDist(instanceId, sinceEpochSeconds));
-        m.put("activeGroups", repo.activeGroups(instanceId, sinceEpochSeconds, 10));
-        m.put("activeUsers", repo.activeUsers(instanceId, sinceEpochSeconds, 10));
-        m.put("activeBots", repo.activeBots(instanceId, sinceEpochSeconds, 10));
-        m.put("directionDist", repo.directionDist(instanceId, sinceEpochSeconds));
-        m.put("eventTypeDist", repo.eventTypeDist(instanceId, sinceEpochSeconds));
+        m.put("heatmap", repo.heatmap(instanceId, sinceEpochSeconds, untilEpochSeconds));
+        m.put("typeDist", repo.msgTypeDist(instanceId, sinceEpochSeconds, untilEpochSeconds));
+        m.put("activeGroups", repo.activeGroups(instanceId, sinceEpochSeconds, untilEpochSeconds, 10));
+        m.put("activeUsers", repo.activeUsers(instanceId, sinceEpochSeconds, untilEpochSeconds, 10));
+        m.put("activeBots", repo.activeBots(instanceId, sinceEpochSeconds, untilEpochSeconds, 10));
+        m.put("directionDist", repo.directionDist(instanceId, sinceEpochSeconds, untilEpochSeconds));
+        m.put("eventTypeDist", repo.eventTypeDist(instanceId, sinceEpochSeconds, untilEpochSeconds));
         return m;
     }
 

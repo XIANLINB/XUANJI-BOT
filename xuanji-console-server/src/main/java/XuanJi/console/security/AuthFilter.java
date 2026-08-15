@@ -6,6 +6,7 @@ import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.core.annotation.Order;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -33,7 +34,6 @@ public class AuthFilter extends OncePerRequestFilter {
     private static final String API_PREFIX = "/xuanji/api/v1";
 
     private static final Set<String> WHITELIST_PREFIXES = Set.of(
-            API_PREFIX + "/setup",
             API_PREFIX + "/auth",
             API_PREFIX + "/console/health",
             // 内置演示 MCP server（JSON-RPC，仅暴露无副作用演示工具，供 McpClient 连接验收）
@@ -41,9 +41,11 @@ public class AuthFilter extends OncePerRequestFilter {
     );
 
     private final SessionStore sessionStore;
+    private final JdbcTemplate jdbc;
 
-    public AuthFilter(SessionStore sessionStore) {
+    public AuthFilter(SessionStore sessionStore, JdbcTemplate jdbc) {
         this.sessionStore = sessionStore;
+        this.jdbc = jdbc;
     }
 
     @Override
@@ -51,7 +53,20 @@ public class AuthFilter extends OncePerRequestFilter {
                                     HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
         String uri = request.getRequestURI();
-        if (!uri.startsWith(API_PREFIX) || isWhitelisted(uri) || "OPTIONS".equals(request.getMethod())) {
+        if (!uri.startsWith(API_PREFIX) || "OPTIONS".equals(request.getMethod())) {
+            chain.doFilter(request, response);
+            return;
+        }
+        // setup 前缀：
+        //   /setup/status 是「是否已安装」的只读查询，前端路由守卫依赖它判断安装状态，必须始终可访问；
+        //   其余写操作（pin/verify/bot/complete）仅在未安装时免鉴权，安装完成后动态回收（要求登录）。
+        if (uri.startsWith(API_PREFIX + "/setup")) {
+            if (uri.startsWith(API_PREFIX + "/setup/status") || !isSetupCompleted()) {
+                chain.doFilter(request, response);
+                return;
+            }
+            // 已安装且非 status：落入下方正常鉴权
+        } else if (isWhitelisted(uri)) {
             chain.doFilter(request, response);
             return;
         }
@@ -86,6 +101,22 @@ public class AuthFilter extends OncePerRequestFilter {
             if (uri.startsWith(prefix)) return true;
         }
         return false;
+    }
+
+    /** 是否已完成安装：查 xuanji_setup.completed；表不存在/查询失败视为未安装（放行安装向导）。 */
+    private volatile Boolean setupCompleted;
+
+    private boolean isSetupCompleted() {
+        Boolean cached = setupCompleted;
+        if (cached != null && cached) return true; // 已安装 → 永久 true，不再查库
+        try {
+            Boolean done = jdbc.queryForObject("SELECT completed FROM xuanji_setup WHERE id=1", Boolean.class);
+            boolean completed = done != null && done;
+            if (completed) setupCompleted = true;
+            return completed;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private String readCookie(HttpServletRequest request) {
